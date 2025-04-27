@@ -207,16 +207,25 @@ class ResourceController {
 
     public async getCourseResources(req: CustomRequest, res: Response) {
         try {
-            const { user_id, course_id } = req.query;
+            const { user_id, course_id, search, job_type } = req.query;
             const courseRepository = AppDataSource.getRepository(Course);
-            const course = await courseRepository
+            const query = courseRepository
                 .createQueryBuilder('course')
                 .leftJoinAndSelect('course.resources', 'resources')
                 .leftJoinAndSelect('resources.resourceStatus', 'resourceStatus', 'resourceStatus.user = :user_id', { user_id })
-                .where('course.course_id = :course_id', { course_id })
-                .getOne();
+                .where('course.course_id = :course_id', { course_id });
 
+            if (search) {
+                query.andWhere(
+                    '(resources.name ILIKE :search OR resources.description ILIKE :search)',
+                    { search: `%${search}%` }
+                );
+            }
 
+            if (job_type) {
+                query.andWhere('resources.job_type = :job_type', { job_type });
+            }
+            const course = await query.getOne();
             if (!course) {
                 return res.status(404).json({
                     message: 'course not found',
