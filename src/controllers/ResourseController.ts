@@ -65,9 +65,23 @@ class ResourceController {
 
     public async getResources(req: Request, res: Response) {
         try {
+            const { search, job_type } = req.query;
             const resourceRepository = AppDataSource.getRepository(Resource);
 
-            const resources = await resourceRepository.find();
+            const query = resourceRepository.createQueryBuilder('resource');
+
+            if (search) {
+                query.andWhere(
+                    '(resource.name ILIKE :search OR resource.description ILIKE :search)',
+                    { search: `%${search}%` }
+                );
+            }
+
+            if (job_type) {
+                query.andWhere('resource.job_type = :job_type', { job_type });
+            }
+
+            const resources = await query.getMany();
 
             return res.status(200).json({
                 message: 'Resources fetched successfully',
