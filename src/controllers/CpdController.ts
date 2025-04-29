@@ -5,6 +5,7 @@ import { CustomRequest } from "../util/Interface/expressInterface";
 import { Activity } from "../entity/Activity.entity";
 import { Evaluation } from "../entity/Evaluation.entity";
 import { Reflection } from "../entity/Reflection.entity";
+import { LearnerCPD } from "../entity/LearnerCpd.entity";
 
 class CpdController {
 
@@ -476,6 +477,167 @@ class CpdController {
             });
         }
     }
-}
 
+    public async createLearnerCpd(req: CustomRequest, res: Response) {
+        try {
+            const learnerCpdRepository = AppDataSource.getRepository(LearnerCPD);
+    
+            const { what_training, date, how_you_did, what_you_learned, how_it_improved_work } = req.body;
+    
+            // Make sure the user is authenticated and we have the user_id
+            if (!req.user || !req.user.user_id) {
+                return res.status(400).json({
+                    message: "User is not authenticated",
+                    status: false,
+                });
+            }
+    
+            // optional: same objective check karo agar chaho
+            const existingLearnerCPD = await learnerCpdRepository.findOne({
+                where: {
+                    what_training, 
+                    user: { user_id: req.user.user_id },  // user_id reference
+                },
+            });
+    
+            if (existingLearnerCPD) {
+                return res.status(400).json({
+                    message: "This CPD record already exists",
+                    status: false,
+                });
+            }
+    
+            // Create a new LearnerCPD record
+            let learnerCpd: LearnerCPD = await learnerCpdRepository.create({
+                user: req.user,  // Assuming req.user contains the user object
+                what_training,
+                date,
+                how_you_did,
+                what_you_learned,
+                how_it_improved_work,
+            });
+    
+            learnerCpd = await learnerCpdRepository.save(learnerCpd);
+    
+            return res.status(200).json({
+                message: "Learner CPD added successfully",
+                status: true,
+                data: learnerCpd,
+            });
+    
+        } catch (error) {
+            return res.status(500).json({
+                message: "Internal Server Error",
+                status: false,
+                error: error.message,
+            });
+        }
+    }
+
+    public async getLearnerCpdList(req: CustomRequest, res: Response) {
+        try {
+            const learnerCpdRepository = AppDataSource.getRepository(LearnerCPD);
+    
+            // Get learner's CPD records
+            const learnerCpdList = await learnerCpdRepository.find({
+                where: { user: { user_id: req.user.user_id } }, // Filter by learner (user_id)
+            });
+    
+            if (learnerCpdList.length === 0) {
+                return res.status(404).json({
+                    message: "No CPD records found",
+                    status: false,
+                });
+            }
+    
+            return res.status(200).json({
+                message: "Learner CPD list fetched successfully",
+                status: true,
+                data: learnerCpdList,
+            });
+    
+        } catch (error) {
+            return res.status(500).json({
+                message: "Internal Server Error",
+                status: false,
+                error: error.message,
+            });
+        }
+    }
+    
+    public async updateLearnerCpd(req: CustomRequest, res: Response) {
+        try {
+            const learnerCpdRepository = AppDataSource.getRepository(LearnerCPD);
+            const { id } = req.params;
+            const { what_training, date, how_you_did, what_you_learned, how_it_improved_work } = req.body;
+    
+            // Fetch the existing CPD record
+            let learnerCpd = await learnerCpdRepository.findOne({
+                where: { id: parseInt(id), user: { user_id: req.user.user_id } }, 
+            });
+    
+            if (!learnerCpd) {
+                return res.status(404).json({
+                    message: "CPD record not found",
+                    status: false,
+                });
+            }
+    
+            // Update the CPD record
+            learnerCpd.what_training = what_training || learnerCpd.what_training;
+            learnerCpd.date = date || learnerCpd.date;
+            learnerCpd.how_you_did = how_you_did || learnerCpd.how_you_did;
+            learnerCpd.what_you_learned = what_you_learned || learnerCpd.what_you_learned;
+            learnerCpd.how_it_improved_work = how_it_improved_work || learnerCpd.how_it_improved_work;
+    
+            learnerCpd = await learnerCpdRepository.save(learnerCpd);
+    
+            return res.status(200).json({
+                message: "Learner CPD updated successfully",
+                status: true,
+                data: learnerCpd,
+            });
+    
+        } catch (error) {
+            return res.status(500).json({
+                message: "Internal Server Error",
+                status: false,
+                error: error.message,
+            });
+        }
+    }
+
+    public async getLearnerCpdDetail(req: CustomRequest, res: Response) {
+        try {
+            const learnerCpdRepository = AppDataSource.getRepository(LearnerCPD);
+            const { id } = req.params;
+    
+            // Fetch the CPD record by ID
+            const learnerCpd = await learnerCpdRepository.findOne({
+                where: { id: parseInt(id), user: { user_id: req.user.user_id } },
+            });
+    
+            if (!learnerCpd) {
+                return res.status(404).json({
+                    message: "CPD record not found",
+                    status: false,
+                });
+            }
+    
+            return res.status(200).json({
+                message: "Learner CPD record fetched successfully",
+                status: true,
+                data: learnerCpd,
+            });
+    
+        } catch (error) {
+            return res.status(500).json({
+                message: "Internal Server Error",
+                status: false,
+                error: error.message,
+            });
+        }
+    }
+      
+}
 export default CpdController;

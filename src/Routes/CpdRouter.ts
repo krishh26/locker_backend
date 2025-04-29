@@ -26,4 +26,10 @@ cpdRoutes.post("/reflection/create", authorizeRoles(), Controller.createReflecti
 cpdRoutes.patch("/reflection/update/:id", authorizeRoles(), Controller.updateReflection);
 cpdRoutes.delete("/reflection/delete/:id", authorizeRoles(), Controller.deleteReflection);
 
+//learner CPD
+cpdRoutes.post("/learner/create", authorizeRoles(), Controller.createLearnerCpd);
+cpdRoutes.get("/learner/list", authorizeRoles(), Controller.getLearnerCpdList);
+cpdRoutes.patch("/learner/update/:id", authorizeRoles(), Controller.updateLearnerCpd);
+cpdRoutes.get("/learner/:id", authorizeRoles(), Controller.getLearnerCpdDetail);
+
 export default cpdRoutes;
