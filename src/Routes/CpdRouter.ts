@@ -31,5 +31,6 @@ cpdRoutes.post("/learner/create", authorizeRoles(), Controller.createLearnerCpd)
 cpdRoutes.get("/learner/list", authorizeRoles(), Controller.getLearnerCpdList);
 cpdRoutes.patch("/learner/update/:id", authorizeRoles(), Controller.updateLearnerCpd);
 cpdRoutes.get("/learner/:id", authorizeRoles(), Controller.getLearnerCpdDetail);
+cpdRoutes.delete("/learner/delete/:id", authorizeRoles(), Controller.deleteLearnerCpd);
 
 export default cpdRoutes;
