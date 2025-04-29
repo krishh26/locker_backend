@@ -638,6 +638,40 @@ class CpdController {
             });
         }
     }
-      
+    
+    public async deleteLearnerCpd(req: CustomRequest, res: Response) {
+        try {
+            const learnerCpdRepository = AppDataSource.getRepository(LearnerCPD);
+            const { id } = req.params;
+    
+            // Fetch the CPD record to delete
+            const learnerCpd = await learnerCpdRepository.findOne({
+                where: { id: parseInt(id), user: { user_id: req.user.user_id } }, 
+            });
+    
+            if (!learnerCpd) {
+                return res.status(404).json({
+                    message: "CPD record not found",
+                    status: false,
+                });
+            }
+    
+            // Delete the CPD record
+            await learnerCpdRepository.remove(learnerCpd);
+    
+            return res.status(200).json({
+                message: "Learner CPD record deleted successfully",
+                status: true,
+            });
+    
+        } catch (error) {
+            return res.status(500).json({
+                message: "Internal Server Error",
+                status: false,
+                error: error.message,
+            });
+        }
+    }
+    
 }
 export default CpdController;
