@@ -16,7 +16,7 @@ class LearnerController {
 
     public async CreateLearner(req: CustomRequest, res: Response) {
         try {
-            const { user_name, first_name, last_name, email, password, confrimpassword, mobile, funding_body } = req.body
+            const { user_name, first_name, last_name, email, password, confrimpassword, mobile, funding_body, job_title } = req.body
             if (!user_name || !first_name || !last_name || !email || !password || !confrimpassword) {
                 return res.status(400).json({
                     message: "All Field Required",
