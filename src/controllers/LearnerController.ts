@@ -112,7 +112,8 @@ class LearnerController {
                     'user_id.avatar',
                     'user_id.deleted_at',
                     'employer.employer_id',
-                    'employer.employer_name'
+                    'employer.employer_name',
+                    'learner.job_title',
                 ])
 
             if (status.includes("Show only archived users")) {
@@ -313,7 +314,6 @@ class LearnerController {
                     fullyCompleted: fullyCompleted.size,
                 }
             })
-            console.log("Total", learner)
 
             const result = await timeLogRepository.createQueryBuilder('timelog')
                 .select('SUM((split_part(timelog.spend_time, \':\', 1)::int) * 60 + split_part(timelog.spend_time, \':\', 2)::int)', 'totalMinutes')
@@ -325,7 +325,14 @@ class LearnerController {
             return res.status(200).json({
                 message: 'Learner retrieved successfully',
                 status: true,
-                data: { ...learner, ...learner.user_id, avatar: learner.user_id?.avatar?.url, course: courses, employer_id: learner.employer_id.employer_id }
+                data: {
+                    ...learner,
+                    ...learner.user_id,
+                    avatar: learner.user_id?.avatar?.url,
+                    course: courses,
+                    employer_id: learner.employer_id.employer_id,
+                    employer_name: learner.employer_id?.employer_name,
+                }
             });
         } catch (error) {
             return res.status(500).json({
