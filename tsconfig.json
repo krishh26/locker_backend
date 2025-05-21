@@ -1,8 +1,7 @@
 {
    "compilerOptions": {
       "lib": [
-         "es5",
-         "es6",
+         "es2021",
          "dom"
       ],
       "target": "ES2021",
