@@ -36,7 +36,7 @@ export const AppDataSource = new DataSource({
     // dropSchema: true,
     logging: false,
     entities: [__dirname + '/../**/*.entity.ts'],
-    migrations: [],
+    migrations: [__dirname + '/migration/*.ts'],
     subscribers: [],
     extra: {
         ssl: {

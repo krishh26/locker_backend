@@ -1,6 +1,6 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, OneToMany, JoinTable, ManyToMany, ManyToOne } from 'typeorm';
 import { Resource } from './Resource.entity';
-import { CourseType } from '../util/constants';
+import { CourseType, CourseCoretype } from '../util/constants';
 
 @Entity('course')
 export class Course {
@@ -49,8 +49,28 @@ export class Course {
     })
     course_type: CourseType;
 
+    @Column({
+        type: 'enum',
+        enum: CourseCoretype,
+        nullable: true,
+        default: null
+    })
+    course_core_type: CourseCoretype;
+
     @Column({ type: 'json', nullable: true })
     units: Object[]
+
+    @Column({ type: 'integer', nullable: true })
+    assigned_gateway_id: number;
+
+    @Column({ type: 'varchar', nullable: true })
+    assigned_gateway_name: string;
+
+    @Column({ type: 'json', nullable: true, default: '[]' })
+    checklist: Object[];
+
+    @Column({ type: 'json', nullable: true, default: '[]' })
+    assigned_standards: Object[];
 
     @OneToMany(() => Resource, resource => resource.course_id, { cascade: true, onDelete: 'CASCADE' })
     resources: Resource[];

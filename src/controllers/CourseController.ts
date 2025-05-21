@@ -8,9 +8,27 @@ import { User } from "../entity/User.entity";
 import { Learner } from "../entity/Learner.entity";
 import { SendNotification } from "../util/socket/notification";
 import { UserCourse } from "../entity/UserCourse.entity";
-import { userActive } from "../util/helper";
-import { NotificationType, SocketDomain, UserRole } from "../util/constants";
+import { NotificationType, SocketDomain, UserRole, CourseType } from "../util/constants";
 import { convertDataToJson } from "../util/convertDataToJson";
+import { EnhancedUnit, LearningOutcome, AssessmentCriterion } from "../types/courseBuilder.types";
+
+const enhanceCourseData = (course: any) => {
+    return {
+        ...course,
+        duration_period: course.duration_period || '',
+        duration_value: course.duration_value || '',
+        professional_certification: course.professional_certification || '',
+        two_page_standard_link: course.two_page_standard_link || '',
+        assessment_plan_link: course.assessment_plan_link || '',
+        active: course.active || 'Yes',
+        included_in_off_the_job: course.included_in_off_the_job || 'No',
+        awarding_body: course.awarding_body || 'No Awarding Body',
+        assigned_gateway_id: course.assigned_gateway_id || null,
+        assigned_gateway_name: course.assigned_gateway_name || '',
+        checklist: course.checklist || [],
+        assigned_standards: course.assigned_standards || []
+    };
+};
 class CourseController {
 
     public async CreateCourse(req: CustomRequest, res: Response) {
@@ -23,15 +41,27 @@ class CourseController {
                 });
             }
 
+            // Ensure course_type is a valid enum value
+            if (!Object.values(CourseType).includes(data.course_type)) {
+                data.course_type = CourseType.CORE; // Default to CORE if not valid
+            }
+
+            // For Gateway courses, ensure level is set
+            if (data.course_core_type === 'Gateway' && !data.level) {
+                data.level = 'N/A';
+            }
+
             const courseRepository = AppDataSource.getRepository(Course);
 
             const course = courseRepository.create(data);
             const savedCourse: any = await courseRepository.save(course);
 
+            const enhancedCourse = enhanceCourseData(savedCourse);
+
             res.status(200).json({
                 message: "Course created successfully",
                 status: true,
-                data: savedCourse,
+                data: enhancedCourse,
             });
 
         } catch (error) {
@@ -66,27 +96,45 @@ class CourseController {
 
                         try {
                             const parsedData = JSON.parse(data);
-                            const ans = [];
+                            const processedUnits = [];
                             let total_credits = 0;
                             let level = 0;
                             let guided_learning_hours = 0;
-                            parsedData.table.forEach((item, index) => {
-                                if (index) {
-                                    ans.push(convertDataToJson(item))
-                                }
-                            })
 
-                            ans.forEach((item, index) => {
+                            parsedData.table.forEach((item: any, index: number) => {
+                                if (index) {
+                                    processedUnits.push(convertDataToJson(item));
+                                }
+                            });
+
+                            processedUnits.forEach((item: any) => {
                                 level = Math.max(Number(item.course_details['Level'] || 0), level);
-                                total_credits += Number(item.course_details['Credit value'] || item.course_details['Credit'] || 0)
-                                guided_learning_hours += Number(item.course_details['Guided learning hours'] || 0)
-                            })
+                                total_credits += Number(item.course_details['Credit value'] || item.course_details['Credit'] || 0);
+                                guided_learning_hours += Number(item.course_details['Guided learning hours'] || 0);
+                            });
+
+                            // Transform the units to include learning outcomes
+                            const enhancedUnits = processedUnits.map((unit: any) => {
+                                const { course_details, unit_details, learning_outcomes } = unit;
+
+                                return {
+                                    course_details,
+                                    unit_details,
+                                    learning_outcomes: learning_outcomes || []
+                                };
+                            });
 
                             fs.unlinkSync(pdfPath);
                             fs.unlinkSync(jsonPath);
-                            res.json({ level, total_credits, guided_learning_hours, units: ans })
+
+                            res.json({
+                                level,
+                                total_credits,
+                                guided_learning_hours,
+                                units: enhancedUnits
+                            });
                         } catch (parseError) {
-                            console.log(parseError)
+                            console.log(parseError);
                             res.status(500).json({ error: 'Failed to parse JSON data' });
                         }
                     });
@@ -144,6 +192,7 @@ class CourseController {
     public async updateCourse(req: Request, res: Response): Promise<Response> {
         try {
             const courseId: number = parseInt(req.params.id);
+            const data = req.body;
 
             const courseRepository = AppDataSource.getRepository(Course);
             const existingCourse = await courseRepository.findOne({ where: { course_id: courseId } });
@@ -155,13 +204,24 @@ class CourseController {
                 });
             }
 
-            courseRepository.merge(existingCourse, req.body);
+            if (!Object.values(CourseType).includes(data.course_type)) {
+                data.course_type = CourseType.CORE;
+            }
+
+            if (data.course_core_type === 'Gateway' && !data.level) {
+                data.level = 'N/A';
+            }
+
+            courseRepository.merge(existingCourse, data);
             const updatedCourse = await courseRepository.save(existingCourse);
+
+            // Enhance the updated course data
+            const enhancedCourse = enhanceCourseData(updatedCourse);
 
             return res.status(200).json({
                 message: 'Course updated successfully',
                 status: true,
-                data: updatedCourse,
+                data: enhancedCourse,
             });
         } catch (error) {
             return res.status(500).json({
@@ -209,13 +269,27 @@ class CourseController {
             delete course.created_at, course.updated_at
             const courseData = {
                 ...course,
-                units: course.units.map(unit => {
-                    return {
-                        ...unit,
-                        completed: false
+                units: course.units.map((unit: any) => {
+                    if (unit.learning_outcomes) {
+                        return {
+                            ...unit,
+                            completed: false,
+                            learning_outcomes: unit.learning_outcomes.map((lo: LearningOutcome) => ({
+                                ...lo,
+                                completed: false,
+                                assessment_criteria: lo.assessment_criteria.map((ac: AssessmentCriterion) => ({
+                                    ...ac,
+                                    completed: false
+                                }))
+                            }))
+                        };
+                    } else {
+                        return {
+                            ...unit,
+                            completed: false
+                        };
                     }
                 })
-
             }
             await userCourseRepository.save(userCourseRepository.create({ learner_id, trainer_id, IQA_id, LIQA_id, EQA_id, employer_id, course: courseData, start_date, end_date }))
 
@@ -268,9 +342,11 @@ class CourseController {
                 return res.status(404).json({ message: 'Course not found', status: false });
             }
 
+            const enhancedCourse = enhanceCourseData(course);
+
             return res.status(200).json({
                 message: "Course get successfully",
-                data: course,
+                data: enhancedCourse,
                 status: true
             });
         } catch (error) {
@@ -291,16 +367,23 @@ class CourseController {
             if (req.query.keyword) {
                 qb.andWhere("(course.course_name ILIKE :keyword)", { keyword: `%${req.query.keyword}%` });
             }
-            const [course, count] = await qb
+
+            if (req.query.core_type) {
+                qb.andWhere("course.course_core_type = :core_type", { core_type: req.query.core_type });
+            }
+
+            const [courses, count] = await qb
                 .skip(Number(req.pagination.skip))
                 .take(Number(req.pagination.limit))
                 .orderBy("course.course_id", "ASC")
                 .getManyAndCount();
 
+            const enhancedCourses = courses.map(course => enhanceCourseData(course));
+
             return res.status(200).json({
                 message: "Course fetched successfully",
                 status: true,
-                data: course,
+                data: enhancedCourses,
                 ...(req.query.meta === "true" && {
                     meta_data: {
                         page: req.pagination.page,
