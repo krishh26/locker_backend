@@ -86,6 +86,12 @@ export enum CourseStatus {
     Transferred = "Transferred",
 }
 
+export enum CourseCoretype {
+    Qualification = 'Qualification',
+    Standard = 'Standard',
+    Gateway = 'Gateway'
+}
+
 export enum CourseType {
     A2Level = 'A2 Level',
     ASLevel = 'AS Level',
@@ -102,7 +108,6 @@ export enum CourseType {
     FunctionalSkillsICT = 'Functional Skills - ICT',
     FunctionalSkillsMaths = 'Functional Skills - Maths',
     FunctionalSkillsEnglish = 'Functional Skills English',
-    Gateway = 'Gateway',
     GCSE = 'GCSE',
     KeySkillsCommunication = 'Key Skills - Communication',
     KeySkillsICT = 'Key Skills - ICT',
