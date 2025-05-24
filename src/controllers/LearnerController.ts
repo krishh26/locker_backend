@@ -330,8 +330,8 @@ class LearnerController {
                     ...learner.user_id,
                     avatar: learner.user_id?.avatar?.url,
                     course: courses,
-                    employer_id: learner.employer_id.employer_id,
-                    employer_name: learner.employer_id?.employer_name,
+                    employer_id: learner?.employer_id?.employer_id,
+                    employer_name: learner?.employer_id?.employer_name,
                 }
             });
         } catch (error) {
