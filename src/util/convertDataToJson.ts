@@ -8,7 +8,7 @@ export function convertDataToJson(data: any[]): any {
     const obj: any = {};
     let i = 0;
 
-    for (i = 0; i < 4; i++) {
+    for (i = 0; i < 5; i++) {
         let cleanedStr = data[i].replace(/\n/g, ',');
         cleanedStr = cleanedStr.replace(/,{2,}/g, ',').replace(/(^,)|(,$)/g, '');
         const value = cleanedStr.split(":");
