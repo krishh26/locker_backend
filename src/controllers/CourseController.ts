@@ -39,11 +39,6 @@ class CourseController {
                 });
             }
 
-            // Ensure course_type is a valid enum value
-            if (!Object.values(CourseType).includes(data.course_type)) {
-                data.course_type = CourseType.CORE; // Default to CORE if not valid
-            }
-
             // For Gateway courses, ensure level is set
             if (data.course_core_type === 'Gateway' && !data.level) {
                 data.level = 'N/A';
