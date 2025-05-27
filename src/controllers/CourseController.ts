@@ -17,12 +17,10 @@ const enhanceCourseData = (course: any) => {
         ...course,
         duration_period: course.duration_period || '',
         duration_value: course.duration_value || '',
-        professional_certification: course.professional_certification || '',
         two_page_standard_link: course.two_page_standard_link || '',
         assessment_plan_link: course.assessment_plan_link || '',
         active: course.active || 'Yes',
         included_in_off_the_job: course.included_in_off_the_job || 'No',
-        awarding_body: course.awarding_body || 'No Awarding Body',
         assigned_gateway_id: course.assigned_gateway_id || null,
         assigned_gateway_name: course.assigned_gateway_name || '',
         checklist: course.checklist || [],
@@ -39,11 +37,6 @@ class CourseController {
                     message: "please provide a data object",
                     status: false,
                 });
-            }
-
-            // Ensure course_type is a valid enum value
-            if (!Object.values(CourseType).includes(data.course_type)) {
-                data.course_type = CourseType.CORE; // Default to CORE if not valid
             }
 
             // For Gateway courses, ensure level is set

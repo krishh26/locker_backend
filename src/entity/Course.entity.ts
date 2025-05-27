@@ -34,7 +34,10 @@ export class Course {
     @Column({ type: 'varchar' })
     guided_learning_hours: string;
 
-    @Column({ type: 'text' })
+    @Column({
+        type: 'text',
+        nullable: true
+    })
     brand_guidelines: string;
 
     @Column({ type: 'varchar', nullable: true })
@@ -46,6 +49,8 @@ export class Course {
     @Column({
         type: 'enum',
         enum: CourseType,
+        nullable: true,
+        default: null,
     })
     course_type: CourseType;
 
