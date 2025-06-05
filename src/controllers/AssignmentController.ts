@@ -22,6 +22,7 @@ class AssignmentController {
             const assignment = assignmentRepository.create({
                 file: {
                     name: req.file.originalname,
+                    size: req.file.size,
                     ...fileUpload
                 },
                 user: req.user.user_id,
@@ -29,10 +30,16 @@ class AssignmentController {
             })
 
             const savedAssignment = await assignmentRepository.save(assignment);
+
+            const assignmentWithUserDetails = await assignmentRepository.findOne({
+                where: { assignment_id: savedAssignment.assignment_id },
+                relations: ['user']
+            });
+
             res.status(200).json({
                 message: "Assignment created successfully",
                 status: true,
-                data: savedAssignment,
+                data: assignmentWithUserDetails,
             });
 
         } catch (error) {
@@ -171,6 +178,61 @@ class AssignmentController {
             });
         }
     }
+
+    public async reuploadAssignmentFile(req: CustomRequest, res: Response) {
+        try {
+            const assignmentId = parseInt(req.params.id);
+            if (!req.file) {
+                return res.status(400).json({
+                    message: 'File is required',
+                    status: false,
+                });
+            }
+
+            const assignmentRepository = AppDataSource.getRepository(Assignment);
+            const assignment = await assignmentRepository.findOne({
+                where: { assignment_id: assignmentId },
+            });
+
+            if (!assignment) {
+                return res.status(404).json({
+                    message: 'Assignment not found',
+                    status: false,
+                });
+            }
+            const fileKey = assignment.file;
+
+            const fileUpload = await uploadToS3(req.file, 'Assignment');
+
+            assignment.file = {
+                name: req.file.originalname,
+                size: req.file.size,
+                ...fileUpload,
+            };
+
+            const updated = await assignmentRepository.save(assignment);
+            console.log(updated)
+            if (fileKey) {
+                let d = await deleteFromS3(fileKey);
+                console.log(d)
+            }
+
+
+            return res.status(200).json({
+                message: 'File reuploaded successfully',
+                status: true,
+                data: updated,
+            });
+
+        } catch (error) {
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                error: error.message,
+                status: false,
+            });
+        }
+    }
+
 }
 
 export default AssignmentController;
