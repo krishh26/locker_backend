@@ -3,8 +3,51 @@ import { AppDataSource } from "../data-source";
 import { CustomRequest } from "../util/Interface/expressInterface";
 import { Assignment } from "../entity/Assignment.entity";
 import { deleteFromS3, uploadToS3 } from "../util/aws";
+import { UserCourse } from "../entity/UserCourse.entity";
+import { UserRole } from "../util/constants";
 
 class AssignmentController {
+
+    /**
+     * Check if user is authorized to access an assignment
+     * Users can access assignments if:
+     * 1. They own the assignment (created it)
+     * 2. They are Admin
+     * 3. They are involved in the course (trainer, IQA, LIQA, EQA, employer) for that assignment
+     */
+    private static async isUserAuthorizedForAssignment(userId: number, userRoles: string[], assignment: Assignment): Promise<boolean> {
+        try {
+            // Admin can access all assignments
+            if (userRoles.includes(UserRole.Admin)) {
+                return true;
+            }
+
+            if (assignment.user.user_id === userId) {
+                return true;
+            }
+
+            const userCourseRepository = AppDataSource.getRepository(UserCourse);
+
+            const courseId = assignment.course_id.course_id;
+
+            const userCourseInvolvement = await userCourseRepository.createQueryBuilder('user_course')
+                .leftJoin('user_course.learner_id', 'learner')
+                .leftJoin('learner.user_id', 'learner_user')
+                .leftJoin('user_course.trainer_id', 'trainer')
+                .leftJoin('user_course.IQA_id', 'IQA')
+                .leftJoin('user_course.LIQA_id', 'LIQA')
+                .leftJoin('user_course.EQA_id', 'EQA')
+                .leftJoin('user_course.employer_id', 'employer')
+                .where('user_course.course->>\'course_id\' = :courseId', { courseId })
+                .andWhere('(trainer.user_id = :userId OR IQA.user_id = :userId OR LIQA.user_id = :userId OR EQA.user_id = :userId OR employer.user_id = :userId)', { userId })
+                .getOne();
+
+            return !!userCourseInvolvement;
+        } catch (error) {
+            console.error('Error checking user authorization:', error);
+            return false;
+        }
+    }
 
     public async CreateAssignment(req: CustomRequest, res: Response) {
         try {
@@ -64,12 +107,30 @@ class AssignmentController {
 
             const assignmentRepository = AppDataSource.getRepository(Assignment);
 
-            const assignment = await assignmentRepository.findOne({ where: { assignment_id: AssignmentId } });
+            const assignment = await assignmentRepository.findOne({
+                where: { assignment_id: AssignmentId },
+                relations: ['course_id', 'user']
+            });
 
             if (!assignment) {
                 return res.status(404).json({
                     message: 'assignment not found',
                     status: false,
+                });
+            }
+
+            // Check authorization
+            const userRoles = req.user.roles || [req.user.role];
+            const isAuthorized = await AssignmentController.isUserAuthorizedForAssignment(
+                req.user.user_id,
+                userRoles,
+                assignment
+            );
+
+            if (!isAuthorized) {
+                return res.status(403).json({
+                    message: "You are not authorized to update this assignment",
+                    status: false
                 });
             }
 
@@ -106,6 +167,34 @@ class AssignmentController {
         try {
             const { user_id, course_id } = req.query as any;
             const assignmentRepository = AppDataSource.getRepository(Assignment);
+            const userCourseRepository = AppDataSource.getRepository(UserCourse);
+
+            // Check if the requesting user is authorized to view assignments for this course
+            const requestingUserId = req.user.user_id;
+            const requestingUserRoles = req.user.roles || [req.user.role];
+
+            // Admin can view all assignments
+            if (!requestingUserRoles.includes(UserRole.Admin)) {
+                // Check if the requesting user is involved in this course
+                const userCourseInvolvement = await userCourseRepository.createQueryBuilder('user_course')
+                    .leftJoin('user_course.learner_id', 'learner')
+                    .leftJoin('learner.user_id', 'learner_user')
+                    .leftJoin('user_course.trainer_id', 'trainer')
+                    .leftJoin('user_course.IQA_id', 'IQA')
+                    .leftJoin('user_course.LIQA_id', 'LIQA')
+                    .leftJoin('user_course.EQA_id', 'EQA')
+                    .leftJoin('user_course.employer_id', 'employer')
+                    .where('user_course.course->>\'course_id\' = :course_id', { course_id })
+                    .andWhere('(learner_user.user_id = :requestingUserId OR trainer.user_id = :requestingUserId OR IQA.user_id = :requestingUserId OR LIQA.user_id = :requestingUserId OR EQA.user_id = :requestingUserId OR employer.user_id = :requestingUserId)', { requestingUserId })
+                    .getOne();
+
+                if (!userCourseInvolvement) {
+                    return res.status(403).json({
+                        message: "You are not authorized to view assignments for this course",
+                        status: false
+                    });
+                }
+            }
 
             const assignments = await assignmentRepository.find({ where: { course_id, user: { user_id } } })
 
@@ -128,12 +217,30 @@ class AssignmentController {
             const assignmentId = parseInt(req.params.id);
             const assignmentRepository = AppDataSource.getRepository(Assignment);
 
-            const assignment = await assignmentRepository.findOne({ where: { assignment_id: assignmentId } });
+            const assignment = await assignmentRepository.findOne({
+                where: { assignment_id: assignmentId },
+                relations: ['course_id', 'user']
+            });
 
             if (!assignment) {
                 return res.status(404).json({
-                    message: 'Assingment not found',
+                    message: 'Assignment not found',
                     status: false,
+                });
+            }
+
+            // Check authorization
+            const userRoles = req.user.roles || [req.user.role];
+            const isAuthorized = await AssignmentController.isUserAuthorizedForAssignment(
+                req.user.user_id,
+                userRoles,
+                assignment
+            );
+
+            if (!isAuthorized) {
+                return res.status(403).json({
+                    message: "You are not authorized to delete this assignment",
+                    status: false
                 });
             }
 
@@ -141,7 +248,7 @@ class AssignmentController {
             await assignmentRepository.remove(assignment);
 
             return res.status(200).json({
-                message: 'Assingment deleted successfully',
+                message: 'Assignment deleted successfully',
                 status: true,
             });
         } catch (error) {
@@ -158,13 +265,33 @@ class AssignmentController {
             const { id } = req.params as any;
             const assignmentRepository = AppDataSource.getRepository(Assignment);
 
-            const assignment = await assignmentRepository.findOne({ where: { assignment_id: id }, relations: ['course_id', 'user'] })
+            const assignment = await assignmentRepository.findOne({
+                where: { assignment_id: id },
+                relations: ['course_id', 'user']
+            });
+
             if (!assignment) {
                 return res.status(404).json({
                     message: "Assignment not Found",
                     status: false
                 });
             }
+
+            // Check authorization
+            const userRoles = req.user.roles || [req.user.role];
+            const isAuthorized = await AssignmentController.isUserAuthorizedForAssignment(
+                req.user.user_id,
+                userRoles,
+                assignment
+            );
+
+            if (!isAuthorized) {
+                return res.status(403).json({
+                    message: "You are not authorized to view this assignment",
+                    status: false
+                });
+            }
+
             return res.status(200).json({
                 message: 'Assignment retrieved successfully',
                 status: true,
@@ -192,6 +319,7 @@ class AssignmentController {
             const assignmentRepository = AppDataSource.getRepository(Assignment);
             const assignment = await assignmentRepository.findOne({
                 where: { assignment_id: assignmentId },
+                relations: ['course_id', 'user']
             });
 
             if (!assignment) {
@@ -200,6 +328,22 @@ class AssignmentController {
                     status: false,
                 });
             }
+
+            // Check authorization
+            const userRoles = req.user.roles || [req.user.role];
+            const isAuthorized = await AssignmentController.isUserAuthorizedForAssignment(
+                req.user.user_id,
+                userRoles,
+                assignment
+            );
+
+            if (!isAuthorized) {
+                return res.status(403).json({
+                    message: "You are not authorized to reupload files for this assignment",
+                    status: false
+                });
+            }
+
             const fileKey = assignment.file;
 
             const fileUpload = await uploadToS3(req.file, 'Assignment');
@@ -216,7 +360,6 @@ class AssignmentController {
                 let d = await deleteFromS3(fileKey);
                 console.log(d)
             }
-
 
             return res.status(200).json({
                 message: 'File reuploaded successfully',
