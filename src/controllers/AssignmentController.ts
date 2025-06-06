@@ -173,28 +173,26 @@ class AssignmentController {
             const requestingUserId = req.user.user_id;
             const requestingUserRoles = req.user.roles || [req.user.role];
 
-            // Admin can view all assignments
-            if (!requestingUserRoles.includes(UserRole.Admin)) {
-                // Check if the requesting user is involved in this course
-                const userCourseInvolvement = await userCourseRepository.createQueryBuilder('user_course')
-                    .leftJoin('user_course.learner_id', 'learner')
-                    .leftJoin('learner.user_id', 'learner_user')
-                    .leftJoin('user_course.trainer_id', 'trainer')
-                    .leftJoin('user_course.IQA_id', 'IQA')
-                    .leftJoin('user_course.LIQA_id', 'LIQA')
-                    .leftJoin('user_course.EQA_id', 'EQA')
-                    .leftJoin('user_course.employer_id', 'employer')
-                    .where('user_course.course->>\'course_id\' = :course_id', { course_id })
-                    .andWhere('(learner_user.user_id = :requestingUserId OR trainer.user_id = :requestingUserId OR IQA.user_id = :requestingUserId OR LIQA.user_id = :requestingUserId OR EQA.user_id = :requestingUserId OR employer.user_id = :requestingUserId)', { requestingUserId })
-                    .getOne();
+            if (course_id && !requestingUserRoles.includes(UserRole.Admin)) {
+            const userCourseInvolvement = await userCourseRepository.createQueryBuilder('user_course')
+                .leftJoin('user_course.learner_id', 'learner')
+                .leftJoin('learner.user_id', 'learner_user')
+                .leftJoin('user_course.trainer_id', 'trainer')
+                .leftJoin('user_course.IQA_id', 'IQA')
+                .leftJoin('user_course.LIQA_id', 'LIQA')
+                .leftJoin('user_course.EQA_id', 'EQA')
+                .leftJoin('user_course.employer_id', 'employer')
+                .where('user_course.course->>\'course_id\' = :course_id', { course_id })
+                .andWhere('(learner_user.user_id = :requestingUserId OR trainer.user_id = :requestingUserId OR IQA.user_id = :requestingUserId OR LIQA.user_id = :requestingUserId OR EQA.user_id = :requestingUserId OR employer.user_id = :requestingUserId)', { requestingUserId })
+                .getOne();
 
-                if (!userCourseInvolvement) {
-                    return res.status(403).json({
-                        message: "You are not authorized to view assignments for this course",
-                        status: false
-                    });
-                }
+            if (!userCourseInvolvement) {
+                return res.status(403).json({
+                    message: "You are not authorized to view assignments for this course",
+                    status: false
+                });
             }
+        }
 
             const assignments = await assignmentRepository.find({ where: { course_id, user: { user_id } } })
 
