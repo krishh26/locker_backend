@@ -1,4 +1,4 @@
-import { Response } from "express";
+import { Request, Response } from "express";
 import { AppDataSource } from "../data-source";
 import { CPD } from "../entity/Cpd.entity";
 import { CustomRequest } from "../util/Interface/expressInterface";
@@ -6,9 +6,6 @@ import { Activity } from "../entity/Activity.entity";
 import { Evaluation } from "../entity/Evaluation.entity";
 import { Reflection } from "../entity/Reflection.entity";
 import { LearnerCPD } from "../entity/LearnerCpd.entity";
-import { Learner } from "../entity/Learner.entity";
-import XLSX from 'xlsx';
-import PDFDocument from 'pdfkit';
 
 class CpdController {
 
@@ -484,9 +481,9 @@ class CpdController {
     public async createLearnerCpd(req: CustomRequest, res: Response) {
         try {
             const learnerCpdRepository = AppDataSource.getRepository(LearnerCPD);
-
+    
             const { what_training, date, how_you_did, what_you_learned, how_it_improved_work } = req.body;
-
+    
             // Make sure the user is authenticated and we have the user_id
             if (!req.user || !req.user.user_id) {
                 return res.status(400).json({
@@ -494,22 +491,22 @@ class CpdController {
                     status: false,
                 });
             }
-
+    
             // optional: same objective check karo agar chaho
             const existingLearnerCPD = await learnerCpdRepository.findOne({
                 where: {
-                    what_training,
+                    what_training, 
                     user: { user_id: req.user.user_id },  // user_id reference
                 },
             });
-
+    
             if (existingLearnerCPD) {
                 return res.status(400).json({
                     message: "This CPD record already exists",
                     status: false,
                 });
             }
-
+    
             // Create a new LearnerCPD record
             let learnerCpd: LearnerCPD = await learnerCpdRepository.create({
                 user: req.user,  // Assuming req.user contains the user object
@@ -519,15 +516,15 @@ class CpdController {
                 what_you_learned,
                 how_it_improved_work,
             });
-
+    
             learnerCpd = await learnerCpdRepository.save(learnerCpd);
-
+    
             return res.status(200).json({
                 message: "Learner CPD added successfully",
                 status: true,
                 data: learnerCpd,
             });
-
+    
         } catch (error) {
             return res.status(500).json({
                 message: "Internal Server Error",
@@ -540,25 +537,25 @@ class CpdController {
     public async getLearnerCpdList(req: CustomRequest, res: Response) {
         try {
             const learnerCpdRepository = AppDataSource.getRepository(LearnerCPD);
-
+    
             // Get learner's CPD records
             const learnerCpdList = await learnerCpdRepository.find({
                 where: { user: { user_id: req.user.user_id } }, // Filter by learner (user_id)
             });
-
+    
             if (learnerCpdList.length === 0) {
                 return res.status(404).json({
                     message: "No CPD records found",
                     status: false,
                 });
             }
-
+    
             return res.status(200).json({
                 message: "Learner CPD list fetched successfully",
                 status: true,
                 data: learnerCpdList,
             });
-
+    
         } catch (error) {
             return res.status(500).json({
                 message: "Internal Server Error",
@@ -567,40 +564,40 @@ class CpdController {
             });
         }
     }
-
+    
     public async updateLearnerCpd(req: CustomRequest, res: Response) {
         try {
             const learnerCpdRepository = AppDataSource.getRepository(LearnerCPD);
             const { id } = req.params;
             const { what_training, date, how_you_did, what_you_learned, how_it_improved_work } = req.body;
-
+    
             // Fetch the existing CPD record
             let learnerCpd = await learnerCpdRepository.findOne({
-                where: { id: parseInt(id), user: { user_id: req.user.user_id } },
+                where: { id: parseInt(id), user: { user_id: req.user.user_id } }, 
             });
-
+    
             if (!learnerCpd) {
                 return res.status(404).json({
                     message: "CPD record not found",
                     status: false,
                 });
             }
-
+    
             // Update the CPD record
             learnerCpd.what_training = what_training || learnerCpd.what_training;
             learnerCpd.date = date || learnerCpd.date;
             learnerCpd.how_you_did = how_you_did || learnerCpd.how_you_did;
             learnerCpd.what_you_learned = what_you_learned || learnerCpd.what_you_learned;
             learnerCpd.how_it_improved_work = how_it_improved_work || learnerCpd.how_it_improved_work;
-
+    
             learnerCpd = await learnerCpdRepository.save(learnerCpd);
-
+    
             return res.status(200).json({
                 message: "Learner CPD updated successfully",
                 status: true,
                 data: learnerCpd,
             });
-
+    
         } catch (error) {
             return res.status(500).json({
                 message: "Internal Server Error",
@@ -614,25 +611,25 @@ class CpdController {
         try {
             const learnerCpdRepository = AppDataSource.getRepository(LearnerCPD);
             const { id } = req.params;
-
+    
             // Fetch the CPD record by ID
             const learnerCpd = await learnerCpdRepository.findOne({
                 where: { id: parseInt(id), user: { user_id: req.user.user_id } },
             });
-
+    
             if (!learnerCpd) {
                 return res.status(404).json({
                     message: "CPD record not found",
                     status: false,
                 });
             }
-
+    
             return res.status(200).json({
                 message: "Learner CPD record fetched successfully",
                 status: true,
                 data: learnerCpd,
             });
-
+    
         } catch (error) {
             return res.status(500).json({
                 message: "Internal Server Error",
@@ -641,32 +638,32 @@ class CpdController {
             });
         }
     }
-
+    
     public async deleteLearnerCpd(req: CustomRequest, res: Response) {
         try {
             const learnerCpdRepository = AppDataSource.getRepository(LearnerCPD);
             const { id } = req.params;
-
+    
             // Fetch the CPD record to delete
             const learnerCpd = await learnerCpdRepository.findOne({
-                where: { id: parseInt(id), user: { user_id: req.user.user_id } },
+                where: { id: parseInt(id), user: { user_id: req.user.user_id } }, 
             });
-
+    
             if (!learnerCpd) {
                 return res.status(404).json({
                     message: "CPD record not found",
                     status: false,
                 });
             }
-
+    
             // Delete the CPD record
             await learnerCpdRepository.remove(learnerCpd);
-
+    
             return res.status(200).json({
                 message: "Learner CPD record deleted successfully",
                 status: true,
             });
-
+    
         } catch (error) {
             return res.status(500).json({
                 message: "Internal Server Error",
@@ -675,233 +672,6 @@ class CpdController {
             });
         }
     }
-
-    public async exportLearnerCpdCsv(req: CustomRequest, res: Response) {
-        try {
-            const learnerCpdRepository = AppDataSource.getRepository(LearnerCPD);
-            const learnerRepository = AppDataSource.getRepository(Learner);
-
-            const learnerCpdList = await learnerCpdRepository.find({
-                where: { user: { user_id: req.user.user_id } },
-                relations: ['user'],
-            });
-            console.log(learnerCpdList.length)
-            if (learnerCpdList.length === 0) {
-                return res.status(404).json({
-                    message: "No CPD records found to export",
-                    status: false,
-                });
-            }
-            
-            // Get learner information for header
-            const learner = await learnerRepository.findOne({
-                where: { user_id: req.user.user_id },
-                relations: ['user_id', 'employer_id'],
-            });
-            
-            // Create workbook
-            const workbook = XLSX.utils.book_new();
-
-            // Prepare header information
-            const headerInfo = [
-                ['Username', learner?.user_id?.user_name || req.user.user_name || ''],
-                ['Job Title', learner?.job_title || ''],
-                ['Employer', learner?.employer_id?.employer_name || ''],
-                [''],  // Empty row for spacing
-            ];
-
-            // Prepare data rows
-            const dataRows = learnerCpdList.map(cpd => [
-                cpd.what_training,
-                cpd.date instanceof Date ? cpd.date.toLocaleDateString() : new Date(cpd.date).toLocaleDateString(),
-                cpd.how_you_did,
-                cpd.what_you_learned,
-                cpd.how_it_improved_work,
-                cpd.created_at instanceof Date ? cpd.created_at.toLocaleDateString() : new Date(cpd.created_at).toLocaleDateString(),
-            ]);
-
-            // Add column headers
-            const columnHeaders = [
-                'Training Activity',
-                'Date',
-                'How You Did',
-                'What You Learned',
-                'How It Improved Work',
-                'Created Date'
-            ];
-
-            // Combine all rows
-            const worksheetData = [
-                ...headerInfo,
-                columnHeaders,
-                ...dataRows
-            ];
-
-            // Create worksheet
-            const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
-
-            // Set column widths
-            const columnWidths = [
-                { wch: 30 },  // Training Activity
-                { wch: 15 },  // Date
-                { wch: 30 },  // How You Did
-                { wch: 30 },  // What You Learned
-                { wch: 30 },  // How It Improved Work
-                { wch: 15 },  // Created Date
-            ];
-
-            worksheet['!cols'] = columnWidths;
-
-            // Add worksheet to workbook
-            XLSX.utils.book_append_sheet(workbook, worksheet, 'Learner CPD');
-
-            // Generate buffer
-            const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' });
-
-            // Set headers and send response
-            res.setHeader('Content-Disposition', 'attachment; filename="learner_cpd.xlsx"');
-            res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-            res.send(buffer);
-
-        } catch (error) {
-            return res.status(500).json({
-                message: "Internal Server Error",
-                status: false,
-                error: error.message,
-            });
-        }
-    }
-
-    public async exportLearnerCpdPdf(req: CustomRequest, res: Response) {
-        try {
-            const learnerCpdRepository = AppDataSource.getRepository(LearnerCPD);
-            const learnerRepository = AppDataSource.getRepository(Learner);
-
-            const learnerCpdList = await learnerCpdRepository.find({
-                where: { user: { user_id: req.user.user_id } },
-                relations: ['user'],
-            });
-
-            if (learnerCpdList.length === 0) {
-                return res.status(404).json({
-                    message: "No CPD records found to export",
-                    status: false,
-                });
-            }
-
-            const learner = await learnerRepository.findOne({
-                where: { user_id: req.user.user_id },
-                relations: ['user_id', 'employer_id'],
-            });
-
-            const doc = new PDFDocument({ margin: 50 });
-
-            // Set response headers
-            res.setHeader('Content-Type', 'application/pdf');
-            res.setHeader('Content-Disposition', 'attachment; filename="learner_cpd.pdf"');
-
-            // Pipe PDF to response
-            doc.pipe(res);
-
-            // Add header information
-            doc.fontSize(18).text('CPD Report', { align: 'center' });
-            doc.moveDown();
-
-            doc.fontSize(12).text(`Username: ${learner?.user_id?.user_name || req.user.user_name || ''}`);
-            doc.text(`Job Title: ${learner?.job_title || ''}`);
-            doc.text(`Employer: ${learner?.employer_id?.employer_name || ''}`);
-            doc.moveDown(2);
-
-            const tableTop = doc.y;
-            const tableHeaders = ['Training Activity', 'Date', 'How You Did', 'What You Learned', 'How It Improved Work'];
-
-            // Adjust column widths - make Date column smaller and add more space between columns
-            const columnWidths = [110, 70, 110, 110, 110]; // Custom width for each column
-            const columnPositions = [
-                50,                                      // First column position
-                50 + columnWidths[0] + 5,                // Second column with 5px spacing
-                50 + columnWidths[0] + columnWidths[1] + 10, // Third column with 10px spacing
-                50 + columnWidths[0] + columnWidths[1] + columnWidths[2] + 15, // Fourth column with 15px spacing
-                50 + columnWidths[0] + columnWidths[1] + columnWidths[2] + columnWidths[3] + 20  // Fifth column with 20px spacing
-            ];
-
-            // Draw table headers
-            doc.fontSize(12).font('Helvetica-Bold');
-            tableHeaders.forEach((header, i) => {
-                doc.text(header, columnPositions[i], tableTop, { width: columnWidths[i], align: 'left' });
-            });
-
-            // Add a line after column headers
-            const headerLineY = tableTop + 25; // Increased spacing for more space
-            // Calculate the end position of the last column for the line
-            const lineEndX = columnPositions[4] + columnWidths[4];
-            doc.moveTo(50, headerLineY).lineTo(lineEndX, headerLineY).stroke();
-
-            // Draw table rows
-            doc.font('Helvetica');
-            let rowTop = tableTop + 30; // Increased from 25 to 30 for more space after the line
-
-            learnerCpdList.forEach((cpd) => {
-                // Check if we need a new page
-                if (rowTop > 700) {
-                    doc.addPage();
-                    rowTop = 50;
-
-                    // Redraw headers on new page
-                    doc.fontSize(12).font('Helvetica-Bold');
-                    tableHeaders.forEach((header, i) => {
-                        doc.text(header, columnPositions[i], rowTop, { width: columnWidths[i], align: 'left' });
-                    });
-
-                    // Add a line after column headers on new page
-                    const newPageHeaderLineY = rowTop + 25; // Increased spacing for more space
-                    // Calculate the end position of the last column for the line
-                    const newPageLineEndX = columnPositions[4] + columnWidths[4];
-                    doc.moveTo(50, newPageHeaderLineY).lineTo(newPageLineEndX, newPageHeaderLineY).stroke();
-
-                    doc.font('Helvetica');
-                    rowTop += 30; // Increased from 25 to 30 for more space after the line
-                }
-
-                // Format date
-                const formattedDate = cpd.date instanceof Date
-                    ? cpd.date.toLocaleDateString()
-                    : new Date(cpd.date).toLocaleDateString();
-
-                // Draw row
-                doc.text(cpd.what_training, columnPositions[0], rowTop, { width: columnWidths[0], align: 'left' });
-                doc.text(formattedDate, columnPositions[1], rowTop, { width: columnWidths[1], align: 'left' });
-                doc.text(cpd.how_you_did, columnPositions[2], rowTop, { width: columnWidths[2], align: 'left' });
-
-                // Check if we need to move to next line for longer text
-                const textHeight = Math.max(
-                    doc.heightOfString(cpd.what_training, { width: columnWidths[0] }),
-                    doc.heightOfString(formattedDate, { width: columnWidths[1] }),
-                    doc.heightOfString(cpd.how_you_did, { width: columnWidths[2] }),
-                    doc.heightOfString(cpd.what_you_learned, { width: columnWidths[3] }),
-                    doc.heightOfString(cpd.how_it_improved_work, { width: columnWidths[4] })
-                );
-
-                doc.text(cpd.what_you_learned, columnPositions[3], rowTop, { width: columnWidths[3], align: 'left' });
-                doc.text(cpd.how_it_improved_work, columnPositions[4], rowTop, { width: columnWidths[4], align: 'left' });
-
-                // Draw line after each row
-                rowTop += textHeight + 10;
-                // Use the same width as the header line
-                doc.moveTo(50, rowTop - 5).lineTo(lineEndX, rowTop - 5).stroke();
-            });
-
-            // Finalize PDF
-            doc.end();
-
-        } catch (error) {
-            return res.status(500).json({
-                message: "Internal Server Error",
-                status: false,
-                error: error.message,
-            });
-        }
-    }
-
+    
 }
 export default CpdController;

@@ -33,8 +33,4 @@ cpdRoutes.patch("/learner/update/:id", authorizeRoles(), Controller.updateLearne
 cpdRoutes.get("/learner/:id", authorizeRoles(), Controller.getLearnerCpdDetail);
 cpdRoutes.delete("/learner/delete/:id", authorizeRoles(), Controller.deleteLearnerCpd);
 
-//learner CPD export
-cpdRoutes.get("/learner/export/csv", authorizeRoles(), Controller.exportLearnerCpdCsv);
-cpdRoutes.get("/learner/export/pdf", authorizeRoles(), Controller.exportLearnerCpdPdf);
-
 export default cpdRoutes;
