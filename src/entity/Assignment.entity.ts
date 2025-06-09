@@ -31,6 +31,9 @@ export class Assignment {
     @Column({ type: 'varchar', nullable: true })
     trainer_feedback: string;
 
+    @Column({ type: 'json', nullable: true })
+    external_feedback: object;
+
     @Column({ type: 'varchar', nullable: true })
     learner_comments: string;
 
@@ -56,6 +59,9 @@ export class Assignment {
 
     @Column({ type: 'enum', enum: AssessmentStatus, default: AssessmentStatus.NotStarted })
     status: AssessmentStatus;
+
+    @Column({ type: 'boolean', nullable: true, default: false })
+    evidence_time_log: boolean;
 
     @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
     created_at: Date;
