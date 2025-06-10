@@ -15,4 +15,8 @@ AssignmentRoutes.delete("/delete/:id", authorizeRoles(), Controller.deleteAssign
 AssignmentRoutes.get("/get/:id", authorizeRoles(), Controller.getAssignment);
 AssignmentRoutes.patch('/:id/reupload', singleFileUpload('file'), Controller.reuploadAssignmentFile);
 
+// Audio feedback routes
+AssignmentRoutes.post('/:id/external-feedback', authorizeRoles(), singleFileUpload("audio"), Controller.uploadAudioFeedback);
+AssignmentRoutes.delete('/:id/external-feedback', authorizeRoles(), Controller.deleteAudioFeedback);
+
 export default AssignmentRoutes;

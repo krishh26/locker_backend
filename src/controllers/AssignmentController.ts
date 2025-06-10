@@ -51,7 +51,7 @@ class AssignmentController {
 
     public async CreateAssignment(req: CustomRequest, res: Response) {
         try {
-            const { course_id } = req.body;
+            const { course_id, evidence_time_log } = req.body;
             if (!req.file && !course_id) {
                 return res.status(400).json({
                     message: "All field is required",
@@ -69,7 +69,8 @@ class AssignmentController {
                     ...fileUpload
                 },
                 user: req.user.user_id,
-                course_id
+                course_id,
+                evidence_time_log: evidence_time_log || false
             })
 
             const savedAssignment = await assignmentRepository.save(assignment);
@@ -97,8 +98,8 @@ class AssignmentController {
     public async updateAssignment(req: CustomRequest, res: Response) {
         try {
             const AssignmentId = parseInt(req.params.id);
-            const { file, declaration, description, trainer_feedback, learner_comments, points_for_improvement, assessment_method, session, grade, title, units, status } = req.body;
-            if (!file && !declaration && !description && !trainer_feedback && !learner_comments && !points_for_improvement && !assessment_method && !session && !grade && !title && !units && !status) {
+            const { file, declaration, description, trainer_feedback, external_feedback, learner_comments, points_for_improvement, assessment_method, session, grade, title, units, status, evidence_time_log } = req.body;
+            if (!file && !declaration && !description && !trainer_feedback && !external_feedback && !learner_comments && !points_for_improvement && !assessment_method && !session && !grade && !title && !units && !status && evidence_time_log === undefined) {
                 return res.status(400).json({
                     message: 'At least one field required',
                     status: false,
@@ -138,6 +139,7 @@ class AssignmentController {
             assignment.declaration = declaration || assignment.declaration;
             assignment.description = description || assignment.description;
             assignment.trainer_feedback = trainer_feedback || assignment.trainer_feedback;
+            assignment.external_feedback = external_feedback || assignment.external_feedback;
             assignment.learner_comments = learner_comments || assignment.learner_comments;
             assignment.points_for_improvement = points_for_improvement || assignment.points_for_improvement;
             assignment.assessment_method = assessment_method || assignment.assessment_method;
@@ -146,6 +148,7 @@ class AssignmentController {
             assignment.title = title || assignment.title;
             assignment.units = units || assignment.units;
             assignment.status = status || assignment.status;
+            assignment.evidence_time_log = evidence_time_log !== undefined ? evidence_time_log : assignment.evidence_time_log;
 
             const updatedAssignment = await assignmentRepository.save(assignment);
 
@@ -363,6 +366,122 @@ class AssignmentController {
                 message: 'File reuploaded successfully',
                 status: true,
                 data: updated,
+            });
+
+        } catch (error) {
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                error: error.message,
+                status: false,
+            });
+        }
+    }
+
+    public async uploadAudioFeedback(req: CustomRequest, res: Response) {
+        try {
+            const assignmentId = parseInt(req.params.id);
+
+            if (!req.file) {
+                return res.status(400).json({
+                    message: 'file is required',
+                    status: false,
+                });
+            }
+
+            const assignmentRepository = AppDataSource.getRepository(Assignment);
+            const assignment = await assignmentRepository.findOne({
+                where: { assignment_id: assignmentId },
+                relations: ['course_id', 'user']
+            });
+
+            if (!assignment) {
+                return res.status(404).json({
+                    message: 'Assignment not found',
+                    status: false,
+                });
+            }
+
+            let audioFeedbackData = null;
+
+            // Handle audio file upload
+            if (req.file) {
+                const audioUpload = await uploadToS3(req.file, 'AudioFeedback');
+                audioFeedbackData = {
+                    name: req.file.originalname,
+                    size: req.file.size,
+                    type: req.file.mimetype,
+                    ...audioUpload,
+                    uploaded_at: new Date(),
+                    uploaded_by: req.user.user_id
+                };
+            }
+
+            // Update assignment with feedback
+            if (audioFeedbackData) {
+                assignment.external_feedback = audioFeedbackData;
+            }
+
+            const updatedAssignment = await assignmentRepository.save(assignment);
+
+            return res.status(200).json({
+                message: 'Feedback uploaded successfully',
+                status: true,
+                data: {
+                    assignment_id: updatedAssignment.assignment_id,
+                    trainer_feedback: updatedAssignment.trainer_feedback,
+                    external_feedback: updatedAssignment.external_feedback,
+                    updated_at: updatedAssignment.updated_at
+                },
+            });
+
+        } catch (error) {
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                error: error.message,
+                status: false,
+            });
+        }
+    }
+
+    public async deleteAudioFeedback(req: CustomRequest, res: Response) {
+        try {
+            const assignmentId = parseInt(req.params.id);
+
+            const assignmentRepository = AppDataSource.getRepository(Assignment);
+            const assignment = await assignmentRepository.findOne({
+                where: { assignment_id: assignmentId },
+                relations: ['course_id', 'user']
+            });
+
+            if (!assignment) {
+                return res.status(404).json({
+                    message: 'Assignment not found',
+                    status: false,
+                });
+            }
+
+            if (!assignment.external_feedback) {
+                return res.status(404).json({
+                    message: 'No audio feedback found to delete',
+                    status: false,
+                });
+            }
+
+            // Delete audio file from S3
+            await deleteFromS3(assignment.external_feedback);
+
+            // Remove audio feedback from assignment
+            assignment.external_feedback = null;
+            const updatedAssignment = await assignmentRepository.save(assignment);
+
+            return res.status(200).json({
+                message: 'Audio feedback deleted successfully',
+                status: true,
+                data: {
+                    assignment_id: updatedAssignment.assignment_id,
+                    external_feedback: updatedAssignment.external_feedback,
+                    updated_at: updatedAssignment.updated_at
+                },
             });
 
         } catch (error) {
