@@ -60,7 +60,7 @@ export class Assignment {
     @Column({ type: 'enum', enum: AssessmentStatus, default: AssessmentStatus.NotStarted })
     status: AssessmentStatus;
 
-    @Column({ type: 'boolean', nullable: true, default: false })
+    @Column({ type: 'boolean', default: false })
     evidence_time_log: boolean;
 
     @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })

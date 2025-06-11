@@ -10,6 +10,7 @@ import { Assignment } from "../entity/Assignment.entity";
 import XLSX from 'xlsx';
 import { Employer } from "../entity/Employer.entity";
 import { TimeLog } from "../entity/TimeLog.entity";
+import { Session } from "../entity/Session.entity";
 
 
 class LearnerController {
@@ -250,7 +251,7 @@ class LearnerController {
                 .createQueryBuilder('learner')
                 .leftJoin('learner.user_id', 'user')
                 .leftJoinAndSelect('learner.employer_id', 'employer')
-                .addSelect(['user.user_id', 'user.user_name', 'user.avatar'])
+                .addSelect(['user.user_id', 'user.user_name', 'user.avatar', 'user.email'])
                 .where('learner.learner_id = :learner_id', { learner_id })
                 .getOne();
 
@@ -322,6 +323,18 @@ class LearnerController {
             learner.otjTimeSpend = Number(result?.totalMinutes) || 0;
             learner.otjTimeSpendRequired = 100;
 
+            // Get next visit date
+            const sessionRepository = AppDataSource.getRepository(Session);
+            const nextSession = await sessionRepository.createQueryBuilder('session')
+                .leftJoin('session.learners', 'learner')
+                .where('learner.learner_id = :learner_id', { learner_id })
+                .andWhere('session.startDate > :currentDate', { currentDate: new Date() })
+                .orderBy('session.startDate', 'ASC')
+                .select(['session.startDate'])
+                .getOne();
+
+            const nextVisitDate = nextSession ? nextSession.startDate : null;
+
             return res.status(200).json({
                 message: 'Learner retrieved successfully',
                 status: true,
@@ -332,6 +345,7 @@ class LearnerController {
                     course: courses,
                     employer_id: learner?.employer_id?.employer_id,
                     employer_name: learner?.employer_id?.employer_name,
+                    nextvisitdate: nextVisitDate,
                 }
             });
         } catch (error) {
