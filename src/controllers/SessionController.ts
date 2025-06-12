@@ -131,7 +131,7 @@ class SessionController {
         try {
             const sessionRepository = AppDataSource.getRepository(Session)
 
-            const { trainer_id, learners, type, Attended } = req.query as any;
+            const { trainer_id, learners, type, Attended, sortBy } = req.query as any;
 
             const qb = sessionRepository.createQueryBuilder('session')
                 .leftJoinAndSelect('session.trainer_id', 'trainer')
@@ -178,9 +178,12 @@ class SessionController {
                 }
             }
 
+            // Add sorting for startDate
+            const sortOrder = sortBy === 'asc' ? 'ASC' : 'DESC'; // Default to DESC if not specified
+
             qb.skip(req.pagination.skip)
                 .take(Number(req.pagination.limit))
-                .orderBy('session.startDate', 'DESC');
+                .orderBy('session.startDate', sortOrder);
 
             const [sessions, count] = await qb.getManyAndCount();
 
