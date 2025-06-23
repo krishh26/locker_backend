@@ -15,6 +15,7 @@ import { multipleFileUpload, singleFileUpload } from '../util/multer';
 import { authorizeRoles } from '../middleware/verifyToken';
 import supportRoutes from './SupportRouter';
 import sessionRoutes from './SessionRouter';
+import learnerPlanRoutes from './LearnerPlanRouter';
 import InnovationRoutes from './InnovationRouter';
 import FormRoutes from './FormRouter';
 import forumRoutes from './ForumRouter';
@@ -38,6 +39,7 @@ Routes.use("/employer", EmployerRoutes)
 Routes.use("/cpd", cpdRoutes)
 Routes.use("/support", supportRoutes)
 Routes.use("/session", sessionRoutes)
+Routes.use("/learner-plan", learnerPlanRoutes)
 Routes.use("/innovation", InnovationRoutes)
 Routes.use("/form", FormRoutes)
 Routes.use("/forum", forumRoutes)
