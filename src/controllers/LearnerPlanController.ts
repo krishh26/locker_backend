@@ -479,6 +479,67 @@ class LearnerPlanController {
         }
     }
 
+    public async getCourseListByAssessorAndLearner(req: CustomRequest, res: Response): Promise<Response> {
+        try {
+            const { trainer_id, learner_id } = req.query;
+
+            if (!trainer_id) {
+                return res.status(400).json({
+                    message: "trainer_id is required",
+                    status: false
+                });
+            }
+
+            if (!learner_id) {
+                return res.status(400).json({
+                    message: "learner_id is required",
+                    status: false
+                });
+            }
+
+            const userCourseRepository = AppDataSource.getRepository(UserCourse);
+
+            // Simple query to get courses where trainer and learner are connected
+            const courses = await userCourseRepository.createQueryBuilder('uc')
+                .where('uc.trainer_id = :trainer_id', { trainer_id: parseInt(trainer_id as string) })
+                .andWhere('uc.learner_id = :learner_id', { learner_id: parseInt(learner_id as string) })
+                .getMany();
+
+            // Extract simple course list with id and name
+            const courseList = courses.map(uc => {
+                const courseData = uc.course as any;
+                return {
+                    course_id: courseData?.course_id || null,
+                    course_name: courseData?.course_name || null,
+                    course_code: courseData?.course_code || null
+                };
+            }).filter(course => course.course_id !== null);
+
+            // Remove duplicates based on course_id
+            const uniqueCourses = courseList.filter((course, index, self) =>
+                index === self.findIndex(c => c.course_id === course.course_id)
+            );
+
+            return res.status(200).json({
+                message: "Course list retrieved successfully",
+                status: true,
+                data: {
+                    trainer_id: parseInt(trainer_id as string),
+                    learner_id: parseInt(learner_id as string),
+                    total_courses: uniqueCourses.length,
+                    courses: uniqueCourses
+                }
+            });
+
+        } catch (error) {
+            console.error('❌ Error in getCourseListByAssessorAndLearner:', error);
+            return res.status(500).json({
+                message: "Internal Server Error",
+                status: false,
+                error: error.message
+            });
+        }
+    }
 }
 
 export default LearnerPlanController;

@@ -76,7 +76,7 @@ class LearnerController {
 
     public async getLearnerList(req: Request, res: Response): Promise<Response> {
         try {
-            let { user_id, role, course_id, employer_id, status } = req.query as any;
+            let { user_id, role, course_id, employer_id, status, trainer_id } = req.query as any;
             status = status?.split(", ") || [];
             const learnerRepository = AppDataSource.getRepository(Learner);
             const userCourseRepository = AppDataSource.getRepository(UserCourse);
@@ -125,7 +125,13 @@ class LearnerController {
                 qbUserCourse.andWhere("user_course.course_status IN (:...status)", { status });
             }
 
-            if (user_id && role) {
+            if (trainer_id) {
+                // Filter learners by trainer_id
+                usercourses = await qbUserCourse
+                    .andWhere('user_course.trainer_id = :trainer_id', { trainer_id: parseInt(trainer_id) })
+                    .getMany();
+                learnerIdsArray = usercourses.map(userCourse => userCourse.learner_id.learner_id);
+            } else if (user_id && role) {
                 const obj: any = {
                     EQA: "EQA_id",
                     IQA: "IQA_id",
@@ -191,10 +197,10 @@ class LearnerController {
             if (employer_id) {
                 qb.andWhere("learner.employer_id = :employer_id", { employer_id });
             }
-            if ((role && user_id && learnerIdsArray.length) || (course_id && learnerIdsArray.length) || (!status.includes("Show only archived users") && status.length && learnerIdsArray.length)) {
+            if ((trainer_id && learnerIdsArray.length) || (role && user_id && learnerIdsArray.length) || (course_id && learnerIdsArray.length) || (!status.includes("Show only archived users") && status.length && learnerIdsArray.length)) {
                 qb.andWhere('learner.learner_id IN (:...learnerIdsArray)', { learnerIdsArray })
             }
-            else if (role && user_id) {
+            else if ((role && user_id) || trainer_id) {
                 qb.andWhere('0 = 1')
             }
             const [learner, count] = await qb
