@@ -13,5 +13,6 @@ learnerPlanRoutes.delete("/delete/:id", authorizeRoles(), Controller.deleteLearn
 learnerPlanRoutes.get("/list", authorizeRoles(), paginationMiddleware, Controller.getLearnerPlans);
 learnerPlanRoutes.get("/get/:id", authorizeRoles(), Controller.getLearnerPlan);
 learnerPlanRoutes.get("/list/month", authorizeRoles(), Controller.getLearnerPlansByMonth);
+learnerPlanRoutes.get("/courses", authorizeRoles(), Controller.getCourseListByAssessorAndLearner);
 
 export default learnerPlanRoutes;
