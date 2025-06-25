@@ -1,6 +1,7 @@
 import * as express from 'express';
 import { authorizeRoles } from '../middleware/verifyToken';
 import { paginationMiddleware } from '../middleware/pagination';
+import { singleFileUpload } from '../util/multer';
 import LearnerPlanController from '../controllers/LearnerPlanController';
 
 const learnerPlanRoutes = express.Router();
@@ -14,5 +15,10 @@ learnerPlanRoutes.get("/list", authorizeRoles(), paginationMiddleware, Controlle
 learnerPlanRoutes.get("/get/:id", authorizeRoles(), Controller.getLearnerPlan);
 learnerPlanRoutes.get("/list/month", authorizeRoles(), Controller.getLearnerPlansByMonth);
 learnerPlanRoutes.get("/courses", authorizeRoles(), Controller.getCourseListByAssessorAndLearner);
+
+// Repeat Session Routes
+learnerPlanRoutes.post("/repeat/upload-files", authorizeRoles(), singleFileUpload("file"), Controller.uploadLearnerPlanFiles);
+learnerPlanRoutes.get("/repeat/options", authorizeRoles(), Controller.getRepeatSessionOptions);
+learnerPlanRoutes.patch("/repeat/cancel/:id", authorizeRoles(), Controller.cancelRepeatLearnerPlan);
 
 export default learnerPlanRoutes;

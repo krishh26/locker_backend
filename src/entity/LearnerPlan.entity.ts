@@ -30,6 +30,24 @@ export enum LearnerPlanAttendedStatus {
     LearnernotAttended = 'Learner not Attended',
 }
 
+export enum RepeatFrequency {
+    Daily = 'Daily',
+    Weekly = 'Weekly',
+    Monthly = 'Monthly'
+}
+
+export enum FileType {
+    ILP = 'ILP',
+    Review = 'Review',
+    Assessment = 'Assessment',
+    General = 'General'
+}
+
+export enum SessionFileType {
+    FirstSession = 'First Session',
+    AllSession = 'All Sessions'
+}
+
 @Entity('learner_plan')
 export class LearnerPlan {
     @PrimaryGeneratedColumn()
@@ -98,6 +116,43 @@ export class LearnerPlan {
 
     @Column({ type: 'boolean', default: false })
     repeatSession: boolean;
+
+    // Repeat Session Configuration Fields
+    @Column({
+        type: 'enum',
+        enum: RepeatFrequency,
+        nullable: true
+    })
+    repeat_frequency: RepeatFrequency;
+
+    @Column({ type: 'integer', nullable: true })
+    repeat_every: number;
+
+    @Column({ type: 'boolean', default: false })
+    include_holidays: boolean;
+
+    @Column({ type: 'boolean', default: false })
+    include_weekends: boolean;
+
+    @Column({ type: 'timestamp', nullable: true })
+    repeat_end_date: Date;
+
+    @Column({ type: 'boolean', default: false })
+    upload_session_files: boolean;
+
+    @Column({ type: 'json', nullable: true })
+    file_attachments: {
+        file_type: FileType;
+        session_type: SessionFileType;
+        session_scope: 'first_session' | 'all_sessions';
+        file_name: string;
+        file_size: number;
+        file_url: string;
+        s3_key: string;
+        uploaded_at: Date;
+    }[];
+
+
 
     @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
     created_at: Date;
