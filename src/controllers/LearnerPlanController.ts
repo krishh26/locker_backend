@@ -1,11 +1,12 @@
 import { Response } from 'express';
 import { CustomRequest } from '../util/Interface/expressInterface';
 import { AppDataSource } from '../data-source';
-import { LearnerPlan } from '../entity/LearnerPlan.entity';
+import { LearnerPlan, RepeatFrequency, FileType, SessionFileType } from '../entity/LearnerPlan.entity';
 import { Course } from '../entity/Course.entity';
 import { UserCourse } from '../entity/UserCourse.entity';
 import { SendNotification } from '../util/socket/notification';
 import { NotificationType, SocketDomain } from '../util/constants';
+import { uploadToS3 } from '../util/aws';
 
 class LearnerPlanController {
 
@@ -13,7 +14,26 @@ class LearnerPlanController {
         try {
             const learnerPlanRepository = AppDataSource.getRepository(LearnerPlan);
 
-            const { assessor_id, learners, courses, title, description, location, startDate, Duration, type, Attended, repeatSession } = req.body;
+            const {
+                assessor_id,
+                learners,
+                courses,
+                title,
+                description,
+                location,
+                startDate,
+                Duration,
+                type,
+                Attended,
+                repeatSession,
+                repeat_frequency,
+                repeat_every,
+                include_holidays,
+                include_weekends,
+                repeat_end_date,
+                upload_session_files,
+                file_attachments
+            } = req.body;
 
             // Validate required fields
             if (!assessor_id || !learners || !Array.isArray(learners) || learners.length === 0) {
@@ -35,7 +55,15 @@ class LearnerPlanController {
                 Duration,
                 type,
                 Attended,
-                repeatSession: repeatSession || false
+                repeatSession: repeatSession || false,
+                // Repeat session fields
+                repeat_frequency: repeatSession ? repeat_frequency : null,
+                repeat_every: repeatSession ? repeat_every : null,
+                include_holidays: repeatSession ? include_holidays || false : false,
+                include_weekends: repeatSession ? include_weekends || false : false,
+                repeat_end_date: repeatSession && repeat_end_date ? new Date(repeat_end_date) : null,
+                upload_session_files: repeatSession ? upload_session_files || false : false,
+                file_attachments: repeatSession ? file_attachments || [] : []
             });
 
             const savedLearnerPlan = await learnerPlanRepository.save(learnerPlan);
@@ -216,6 +244,15 @@ class LearnerPlanController {
                     'learnerPlan.Attended',
                     'learnerPlan.description',
                     'learnerPlan.repeatSession',
+                    'learnerPlan.repeat_frequency',
+                    'learnerPlan.repeat_every',
+                    'learnerPlan.include_holidays',
+                    'learnerPlan.include_weekends',
+                    'learnerPlan.repeat_end_date',
+                    'learnerPlan.upload_session_files',
+                    'learnerPlan.file_attachments',
+                    'learnerPlan.created_at',
+                    'learnerPlan.updated_at',
                     'assessor.user_id',
                     'assessor.user_name',
                     'assessor.email',
@@ -304,6 +341,15 @@ class LearnerPlanController {
                     'learnerPlan.type',
                     'learnerPlan.Attended',
                     'learnerPlan.repeatSession',
+                    'learnerPlan.repeat_frequency',
+                    'learnerPlan.repeat_every',
+                    'learnerPlan.include_holidays',
+                    'learnerPlan.include_weekends',
+                    'learnerPlan.repeat_end_date',
+                    'learnerPlan.upload_session_files',
+                    'learnerPlan.file_attachments',
+                    'learnerPlan.created_at',
+                    'learnerPlan.updated_at',
                     'assessor.user_id',
                     'assessor.user_name',
                     'assessor.email',
@@ -533,6 +579,127 @@ class LearnerPlanController {
 
         } catch (error) {
             console.error('❌ Error in getCourseListByAssessorAndLearner:', error);
+            return res.status(500).json({
+                message: "Internal Server Error",
+                status: false,
+                error: error.message
+            });
+        }
+    }
+
+    public async uploadLearnerPlanFiles(req: CustomRequest, res: Response) {
+        try {
+            const { assessor_id, file_type, session_type, session_scope } = req.body;
+
+            if (!req.file) {
+                return res.status(400).json({
+                    message: "No file uploaded",
+                    status: false
+                });
+            }
+
+            if (!assessor_id) {
+                return res.status(400).json({
+                    message: "Assessor ID is required",
+                    status: false
+                });
+            }
+
+            // Upload file to S3
+            const s3Upload = await uploadToS3(req.file, "LearnerPlan");
+
+            // Create file attachment object for pre-upload with S3 data
+            const fileAttachment = {
+                assessor_id: parseInt(assessor_id),
+                file_type: file_type as FileType,
+                session_type: session_type as SessionFileType,
+                session_scope: session_scope || 'first_session',
+                file_name: req.file.originalname,
+                file_size: req.file.size,
+                file_url: s3Upload.url,
+                s3_key: s3Upload.key,
+                uploaded_at: new Date(),
+                temp_upload_id: `temp_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
+            };
+
+            return res.status(200).json({
+                message: "File pre-uploaded successfully to S3",
+                status: true,
+                data: {
+                    uploaded_file: fileAttachment,
+                    temp_upload_id: fileAttachment.temp_upload_id,
+                    s3_url: s3Upload.url,
+                    s3_key: s3Upload.key
+                }
+            });
+
+        } catch (error) {
+            return res.status(500).json({
+                message: "Internal Server Error",
+                status: false,
+                error: error.message
+            });
+        }
+    }
+
+    public async getRepeatSessionOptions(_req: CustomRequest, res: Response) {
+        try {
+            const options = {
+                frequencies: Object.values(RepeatFrequency),
+                file_types: Object.values(FileType),
+                session_types: Object.values(SessionFileType),
+                session_scopes: [
+                    { value: 'first_session', label: 'First Session' },
+                    { value: 'all_sessions', label: 'All Sessions' }
+                ]
+            };
+
+            return res.status(200).json({
+                message: "Repeat session options fetched successfully",
+                status: true,
+                data: options
+            });
+
+        } catch (error) {
+            return res.status(500).json({
+                message: "Internal Server Error",
+                status: false,
+                error: error.message
+            });
+        }
+    }
+
+    public async cancelRepeatLearnerPlan(req: CustomRequest, res: Response) {
+        try {
+            const learnerPlanRepository = AppDataSource.getRepository(LearnerPlan);
+            const { id } = req.params;
+
+            const learnerPlan = await learnerPlanRepository.findOne({
+                where: { learner_plan_id: parseInt(id) }
+            });
+
+            if (!learnerPlan) {
+                return res.status(404).json({
+                    message: "Learner plan not found",
+                    status: false
+                });
+            }
+
+            // Simply disable repeat session
+            learnerPlan.repeatSession = false;
+            learnerPlan.repeat_frequency = null;
+            learnerPlan.repeat_every = null;
+            learnerPlan.repeat_end_date = null;
+
+            await learnerPlanRepository.save(learnerPlan);
+
+            return res.status(200).json({
+                message: "Repeat learner plan cancelled successfully",
+                status: true,
+                data: learnerPlan
+            });
+
+        } catch (error) {
             return res.status(500).json({
                 message: "Internal Server Error",
                 status: false,
