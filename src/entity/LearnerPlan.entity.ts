@@ -48,6 +48,12 @@ export enum SessionFileType {
     AllSession = 'All Sessions'
 }
 
+export enum LearnerPlanFeedback {
+    Good = 'Good',
+    Neutral = 'Neutral',
+    Bad = 'Bad'
+}
+
 @Entity('learner_plan')
 export class LearnerPlan {
     @PrimaryGeneratedColumn()
@@ -139,6 +145,13 @@ export class LearnerPlan {
 
     @Column({ type: 'boolean', default: false })
     upload_session_files: boolean;
+
+    @Column({
+        type: 'enum',
+        enum: LearnerPlanFeedback,
+        nullable: true
+    })
+    feedback: LearnerPlanFeedback;
 
     @Column({ type: 'json', nullable: true })
     file_attachments: {

@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import { CustomRequest } from '../util/Interface/expressInterface';
 import { AppDataSource } from '../data-source';
-import { LearnerPlan, RepeatFrequency, FileType, SessionFileType } from '../entity/LearnerPlan.entity';
+import { LearnerPlan, RepeatFrequency, FileType, SessionFileType, LearnerPlanFeedback } from '../entity/LearnerPlan.entity';
 import { Course } from '../entity/Course.entity';
 import { UserCourse } from '../entity/UserCourse.entity';
 import { SendNotification } from '../util/socket/notification';
@@ -32,7 +32,8 @@ class LearnerPlanController {
                 include_weekends,
                 repeat_end_date,
                 upload_session_files,
-                file_attachments
+                file_attachments,
+                feedback
             } = req.body;
 
             // Validate required fields
@@ -56,6 +57,7 @@ class LearnerPlanController {
                 type,
                 Attended,
                 repeatSession: repeatSession || false,
+                feedback: feedback || null,
                 // Repeat session fields
                 repeat_frequency: repeatSession ? repeat_frequency : null,
                 repeat_every: repeatSession ? repeat_every : null,
@@ -161,7 +163,7 @@ class LearnerPlanController {
             const learnerPlanRepository = AppDataSource.getRepository(LearnerPlan);
 
             const id = parseInt(req.params.id);
-            const { title, description, location, startDate, Duration, type, Attended, repeatSession } = req.body;
+            const { title, description, location, startDate, Duration, type, Attended, repeatSession, feedback } = req.body;
 
             let learnerPlan = await learnerPlanRepository.findOne({ where: { learner_plan_id: id } });
             if (!learnerPlan) {
@@ -179,6 +181,7 @@ class LearnerPlanController {
             learnerPlan.type = type || learnerPlan.type;
             learnerPlan.Attended = Attended || learnerPlan.Attended;
             learnerPlan.repeatSession = repeatSession !== undefined ? repeatSession : learnerPlan.repeatSession;
+            learnerPlan.feedback = feedback !== undefined ? feedback : learnerPlan.feedback;
 
             learnerPlan = await learnerPlanRepository.save(learnerPlan);
 
@@ -244,6 +247,7 @@ class LearnerPlanController {
                     'learnerPlan.Attended',
                     'learnerPlan.description',
                     'learnerPlan.repeatSession',
+                    'learnerPlan.feedback',
                     'learnerPlan.repeat_frequency',
                     'learnerPlan.repeat_every',
                     'learnerPlan.include_holidays',
@@ -341,6 +345,7 @@ class LearnerPlanController {
                     'learnerPlan.type',
                     'learnerPlan.Attended',
                     'learnerPlan.repeatSession',
+                    'learnerPlan.feedback',
                     'learnerPlan.repeat_frequency',
                     'learnerPlan.repeat_every',
                     'learnerPlan.include_holidays',
@@ -651,7 +656,8 @@ class LearnerPlanController {
                 session_scopes: [
                     { value: 'first_session', label: 'First Session' },
                     { value: 'all_sessions', label: 'All Sessions' }
-                ]
+                ],
+                feedback_options: Object.values(LearnerPlanFeedback)
             };
 
             return res.status(200).json({
