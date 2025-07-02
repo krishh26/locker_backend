@@ -22,11 +22,8 @@ export enum LearnerPlanAttendedStatus {
     NotSet = 'Not Set',
     Attended = 'Attended',
     Cancelled = 'Cancelled',
-    CancelledbyAssessor = 'Cancelled by Assessor',
-    CancelledbyLearner = 'Cancelled by Learner',
+    CancelledbyAssessor = 'Cancelled by Trainer',
     CancelledbyEmployer = 'Cancelled by Employer',
-    LearnerLate = 'Learner Late',
-    AssessorLate = 'Assessor Late',
     LearnernotAttended = 'Learner not Attended',
 }
 
@@ -120,6 +117,9 @@ export class LearnerPlan {
     })
     Attended: LearnerPlanAttendedStatus;
 
+    @Column({ type: 'integer', default: 0 })
+    numberOfParticipants: number;
+
     @Column({ type: 'boolean', default: false })
     repeatSession: boolean;
 
@@ -165,7 +165,8 @@ export class LearnerPlan {
         uploaded_at: Date;
     }[];
 
-
+    @Column({ type: 'boolean', default: false })
+    status: boolean;
 
     @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
     created_at: Date;
