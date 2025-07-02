@@ -33,7 +33,8 @@ class LearnerPlanController {
                 repeat_end_date,
                 upload_session_files,
                 file_attachments,
-                feedback
+                feedback,
+                numberOfParticipants
             } = req.body;
 
             // Validate required fields
@@ -65,7 +66,8 @@ class LearnerPlanController {
                 include_weekends: repeatSession ? include_weekends || false : false,
                 repeat_end_date: repeatSession && repeat_end_date ? new Date(repeat_end_date) : null,
                 upload_session_files: repeatSession ? upload_session_files || false : false,
-                file_attachments: repeatSession ? file_attachments || [] : []
+                file_attachments: repeatSession ? file_attachments || [] : [],
+                numberOfParticipants: numberOfParticipants || 0
             });
 
             const savedLearnerPlan = await learnerPlanRepository.save(learnerPlan);
@@ -163,7 +165,7 @@ class LearnerPlanController {
             const learnerPlanRepository = AppDataSource.getRepository(LearnerPlan);
 
             const id = parseInt(req.params.id);
-            const { title, description, location, startDate, Duration, type, Attended, repeatSession, feedback } = req.body;
+            const { title, description, location, startDate, Duration, type, Attended, repeatSession, feedback, numberOfParticipants, status } = req.body;
 
             let learnerPlan = await learnerPlanRepository.findOne({ where: { learner_plan_id: id } });
             if (!learnerPlan) {
@@ -182,6 +184,8 @@ class LearnerPlanController {
             learnerPlan.Attended = Attended || learnerPlan.Attended;
             learnerPlan.repeatSession = repeatSession !== undefined ? repeatSession : learnerPlan.repeatSession;
             learnerPlan.feedback = feedback !== undefined ? feedback : learnerPlan.feedback;
+            learnerPlan.numberOfParticipants = numberOfParticipants || learnerPlan.numberOfParticipants;
+            learnerPlan.status = status !== undefined ? status : learnerPlan.status;
 
             learnerPlan = await learnerPlanRepository.save(learnerPlan);
 
@@ -248,6 +252,7 @@ class LearnerPlanController {
                     'learnerPlan.description',
                     'learnerPlan.repeatSession',
                     'learnerPlan.feedback',
+                    'learnerPlan.numberOfParticipants',
                     'learnerPlan.repeat_frequency',
                     'learnerPlan.repeat_every',
                     'learnerPlan.include_holidays',
@@ -346,6 +351,7 @@ class LearnerPlanController {
                     'learnerPlan.Attended',
                     'learnerPlan.repeatSession',
                     'learnerPlan.feedback',
+                    'learnerPlan.numberOfParticipants',
                     'learnerPlan.repeat_frequency',
                     'learnerPlan.repeat_every',
                     'learnerPlan.include_holidays',

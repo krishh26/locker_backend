@@ -23,6 +23,7 @@ import TimeLogRoutes from './TimeLogRouter';
 import FormTemplateRoutes from './FormTemplateRouter';
 import broadcastRoutes from './BroadcastRouter';
 import ContractWorkRoutes from './ContractWorkRouter';
+import sessionLearnerActionRoutes from './SessionLearnerActionRouter';
 
 const fileController = new FileController;
 const Routes = express.Router();
@@ -47,6 +48,7 @@ Routes.use("/time-log", TimeLogRoutes)
 Routes.use("/form-template", FormTemplateRoutes)
 Routes.use("/broadcast", broadcastRoutes)
 Routes.use("/contractwork", ContractWorkRoutes)
+Routes.use("/learner-action", sessionLearnerActionRoutes)
 
 // API routes
 Routes.get("/file", fileController.getFile)
