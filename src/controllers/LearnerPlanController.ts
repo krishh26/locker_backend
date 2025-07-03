@@ -2,7 +2,9 @@ import { Response } from 'express';
 import { CustomRequest } from '../util/Interface/expressInterface';
 import { AppDataSource } from '../data-source';
 import { LearnerPlan, RepeatFrequency, FileType, SessionFileType, LearnerPlanFeedback } from '../entity/LearnerPlan.entity';
+import { SessionLearnerAction } from '../entity/SessionLearnerAction.entity';
 import { Course } from '../entity/Course.entity';
+import { Learner } from '../entity/Learner.entity';
 import { UserCourse } from '../entity/UserCourse.entity';
 import { SendNotification } from '../util/socket/notification';
 import { NotificationType, SocketDomain } from '../util/constants';
@@ -16,8 +18,8 @@ class LearnerPlanController {
 
             const {
                 assessor_id,
-                learners,
-                courses,
+                number_of_participants,
+                participants,
                 title,
                 description,
                 location,
@@ -37,19 +39,67 @@ class LearnerPlanController {
                 numberOfParticipants
             } = req.body;
 
-            // Validate required fields
-            if (!assessor_id || !learners || !Array.isArray(learners) || learners.length === 0) {
+            if (!assessor_id || !participants || !Array.isArray(participants) || participants.length === 0) {
                 return res.status(400).json({
-                    message: "Assessor ID and learners are required",
+                    message: "Assessor ID and participants are required",
                     status: false
                 });
             }
 
+            // Validate participants structure
+            for (const participant of participants) {
+                if (!participant.learner_id || !participant.courses || !Array.isArray(participant.courses)) {
+                    return res.status(400).json({
+                        message: "Each participant must have learner_id and courses array",
+                        status: false
+                    });
+                }
+            }
+
+            // Get repositories for validation
+            const learnerRepository = AppDataSource.getRepository(Learner);
+            const courseRepository = AppDataSource.getRepository(Course);
+
+            // Validate all learners exist
+            const allLearnerIds = participants.map((p: any) => p.learner_id);
+            const existingLearners = await learnerRepository.find({
+                where: allLearnerIds.map(id => ({ learner_id: id }))
+            });
+            if (existingLearners.length !== allLearnerIds.length) {
+                return res.status(400).json({
+                    message: "One or more learners not found",
+                    status: false
+                });
+            }
+
+            // Validate all courses exist
+            const allCourseIds = [...new Set(participants.flatMap((p: any) => p.courses))];
+            const existingCourses = await courseRepository.find({
+                where: allCourseIds.map(id => ({ course_id: id }))
+            });
+            if (existingCourses.length !== allCourseIds.length) {
+                return res.status(400).json({
+                    message: "One or more courses not found",
+                    status: false
+                });
+            }
+
+            // Create a single learner plan with all participants and their courses
+            // We'll store the participant-course mapping in a custom field
+            const allLearners = existingLearners;
+            const allCourses = existingCourses;
+
+            // Store participant details for reference
+            const participantDetails = participants.map((p: any) => ({
+                learner_id: p.learner_id,
+                courses: p.courses
+            }));
+
             // Create learner plan
             const learnerPlan = learnerPlanRepository.create({
                 assessor_id,
-                learners: learners.map((id: number) => ({ learner_id: id })),
-                courses: courses ? courses.map((id: number) => ({ course_id: id })) : [],
+                learners: allLearners,
+                courses: allCourses,
                 title,
                 description,
                 location,
@@ -59,6 +109,9 @@ class LearnerPlanController {
                 Attended,
                 repeatSession: repeatSession || false,
                 feedback: feedback || null,
+                numberOfParticipants: number_of_participants || participants.length,
+                // Store participant-course mapping in file_attachments or create new field
+                participant_course_mapping: participantDetails,
                 // Repeat session fields
                 repeat_frequency: repeatSession ? repeat_frequency : null,
                 repeat_every: repeatSession ? repeat_every : null,
@@ -66,8 +119,7 @@ class LearnerPlanController {
                 include_weekends: repeatSession ? include_weekends || false : false,
                 repeat_end_date: repeatSession && repeat_end_date ? new Date(repeat_end_date) : null,
                 upload_session_files: repeatSession ? upload_session_files || false : false,
-                file_attachments: repeatSession ? file_attachments || [] : [],
-                numberOfParticipants: numberOfParticipants || 0
+                file_attachments: repeatSession ? file_attachments || [] : []
             });
 
             const savedLearnerPlan = await learnerPlanRepository.save(learnerPlan);
@@ -123,11 +175,13 @@ class LearnerPlanController {
         }
     }
 
-    public async getFilteredCourses(assessorId: number, learnerIds: number[]) {
+    public async getFilteredCourses(assessorId: number, participants: { learner_id: number, courses: number[] }[]) {
         try {
+            const learnerIds = participants.map(p => p.learner_id);
+
             console.log(`🔍 Filtering courses for assessor ${assessorId} and learners [${learnerIds.join(', ')}]`);
 
-            if (!assessorId || !learnerIds || learnerIds.length === 0) {
+            if (!assessorId || learnerIds.length === 0) {
                 console.log('⚠️ Invalid parameters for course filtering');
                 return [];
             }
@@ -144,7 +198,7 @@ class LearnerPlanController {
                 )
                 .select([
                     'uc.user_course_id',
-                    'uc.course', // ✅ direct JSON field
+                    'uc.course',
                     'learner.learner_id',
                     'learner.first_name',
                     'learner.last_name'
@@ -270,7 +324,8 @@ class LearnerPlanController {
                     'learner.email',
                     'course.course_id',
                     'course.course_name',
-                    'course.course_code'
+                    'course.course_code',
+                    'course.units'
                 ]);
 
             if (assessor_id) {
@@ -307,10 +362,54 @@ class LearnerPlanController {
 
             const [learnerPlans, count] = await qb.getManyAndCount();
 
+            const sessionLearnerActionRepository = AppDataSource.getRepository(SessionLearnerAction);
+
+            const enhancedLearnerPlans = await Promise.all(learnerPlans.map(async (plan: any) => {
+                if (plan.courses && plan.courses.length > 0) {
+                    plan.courses = plan.courses.map((course: any) => ({
+                        ...course,
+                        units: course.units ? course.units.map((unit: any) => ({
+                            unit_id: unit.id || unit.unit_id,
+                            unit_name: unit.title || unit.name || unit.unit_name,
+                            unit_ref: unit.unit_ref || unit.component_ref || unit.section_ref
+                        })) : []
+                    }));
+                }
+
+                // Get session learner actions for this learner plan
+                const sessionLearnerActionDetails = await sessionLearnerActionRepository.createQueryBuilder('action')
+                    .leftJoinAndSelect('action.added_by', 'added_by')
+                    .where('action.learner_plan_id = :learner_plan_id', { learner_plan_id: plan.learner_plan_id })
+                    .select([
+                        'action.action_id',
+                        'action.action_name',
+                        'action.action_description',
+                        'action.target_date',
+                        'action.job_type',
+                        'action.unit',
+                        'action.file_attachment',
+                        'action.trainer_feedback',
+                        'action.learner_feedback',
+                        'action.time_spent',
+                        'action.status',
+                        'action.created_at',
+                        'added_by.user_id',
+                        'added_by.user_name',
+                        'added_by.first_name',
+                        'added_by.last_name'
+                    ])
+                    .getMany();
+
+                return {
+                    ...plan,
+                    sessionLearnerActionDetails
+                };
+            }));
+
             return res.status(200).json({
                 message: "Learner plans fetched successfully",
                 status: true,
-                data: learnerPlans,
+                data: enhancedLearnerPlans,
                 ...(req.query.meta === "true" && {
                     meta_data: {
                         page: req.pagination.page,

@@ -29,7 +29,8 @@ export class SessionLearnerAction {
     @Column({
         type: 'enum',
         enum: JobType,
-        default: JobType.OnTheJob
+        default: JobType.OnTheJob,
+        nullable: true
     })
     job_type: JobType;
 
