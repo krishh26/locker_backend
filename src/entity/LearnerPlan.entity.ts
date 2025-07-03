@@ -165,6 +165,12 @@ export class LearnerPlan {
         uploaded_at: Date;
     }[];
 
+    @Column({ type: 'json', nullable: true })
+    participant_course_mapping: {
+        learner_id: number;
+        courses: number[];
+    }[];
+
     @Column({ type: 'boolean', default: false })
     status: boolean;
 
