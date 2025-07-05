@@ -8,6 +8,19 @@ export enum JobType {
     OffTheJob = 'Off-the-job'
 }
 
+export enum ActionStatus {
+    NotStarted = 'not started',
+    InProgress = 'in progress',
+    Completed = 'completed'
+}
+
+export enum ActionWho {
+    Learner = 'learner',
+    Assessor = 'assessor',
+    Employer = 'employer',
+    SessionLearner = 'sessionLearner'
+}
+
 @Entity('session_learner_action')
 export class SessionLearnerAction {
     @PrimaryGeneratedColumn()
@@ -65,6 +78,29 @@ export class SessionLearnerAction {
 
     @Column({ type: 'boolean', default: false })
     status: boolean;
+
+    @Column({
+        type: 'enum',
+        enum: ActionStatus,
+        default: ActionStatus.NotStarted,
+        nullable: true
+    })
+    learner_status: ActionStatus;
+
+    @Column({
+        type: 'enum',
+        enum: ActionStatus,
+        default: ActionStatus.NotStarted,
+        nullable: true
+    })
+    trainer_status: ActionStatus;
+
+    @Column({
+        type: 'enum',
+        enum: ActionWho,
+        nullable: true
+    })
+    who: ActionWho;
 
     @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
     created_at: Date;

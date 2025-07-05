@@ -35,8 +35,7 @@ class LearnerPlanController {
                 repeat_end_date,
                 upload_session_files,
                 file_attachments,
-                feedback,
-                numberOfParticipants
+                feedback
             } = req.body;
 
             if (!assessor_id || !participants || !Array.isArray(participants) || participants.length === 0) {
@@ -122,7 +121,7 @@ class LearnerPlanController {
                 file_attachments: repeatSession ? file_attachments || [] : []
             });
 
-            const savedLearnerPlan = await learnerPlanRepository.save(learnerPlan);
+            const savedLearnerPlan = await learnerPlanRepository.save(learnerPlan) as unknown as LearnerPlan;
 
             // Fetch learner plan with relations for response and notifications
             const learnerPlanWithRelations: any = await learnerPlanRepository.findOne({
@@ -307,6 +306,7 @@ class LearnerPlanController {
                     'learnerPlan.repeatSession',
                     'learnerPlan.feedback',
                     'learnerPlan.numberOfParticipants',
+                    'learnerPlan.participant_course_mapping',
                     'learnerPlan.repeat_frequency',
                     'learnerPlan.repeat_every',
                     'learnerPlan.include_holidays',
@@ -392,6 +392,9 @@ class LearnerPlanController {
                         'action.learner_feedback',
                         'action.time_spent',
                         'action.status',
+                        'action.trainer_status',
+                        'action.learner_status',
+                        'action.who',
                         'action.created_at',
                         'added_by.user_id',
                         'added_by.user_name',
