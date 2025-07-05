@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import { CustomRequest } from '../util/Interface/expressInterface';
 import { AppDataSource } from '../data-source';
-import { SessionLearnerAction, JobType } from '../entity/SessionLearnerAction.entity';
+import { SessionLearnerAction, JobType, ActionStatus, ActionWho } from '../entity/SessionLearnerAction.entity';
 import { LearnerPlan } from '../entity/LearnerPlan.entity';
 import { Learner } from '../entity/Learner.entity';
 import { User } from '../entity/User.entity';
@@ -9,6 +9,68 @@ import { Course } from '../entity/Course.entity';
 import { uploadToS3 } from '../util/aws';
 
 export class SessionLearnerActionController {
+
+    public async uploadFile(req: CustomRequest, res: Response) {
+        try {
+            const actionRepository = AppDataSource.getRepository(SessionLearnerAction);
+            const { action_id } = req.params;
+
+            if (!req.file) {
+                return res.status(400).json({
+                    message: "File is required",
+                    status: false
+                });
+            }
+
+            if (!action_id) {
+                return res.status(400).json({
+                    message: "Action ID is required",
+                    status: false
+                });
+            }
+
+            // Find the action
+            const action = await actionRepository.findOne({
+                where: { action_id: parseInt(action_id) },
+                relations: ['learner_plan', 'added_by']
+            });
+
+            if (!action) {
+                return res.status(404).json({
+                    message: "Session learner action not found",
+                    status: false
+                });
+            }
+
+            // Upload file to S3
+            const s3Upload = await uploadToS3(req.file, "SessionLearnerAction");
+
+            // Update action with file attachment
+            const fileAttachment = {
+                file_name: req.file.originalname,
+                file_size: req.file.size,
+                file_url: s3Upload.url,
+                s3_key: s3Upload.key,
+                uploaded_at: new Date()
+            };
+
+            action.file_attachment = fileAttachment;
+            const updatedAction = await actionRepository.save(action);
+
+            return res.status(200).json({
+                message: "File uploaded successfully",
+                status: true,
+                data: updatedAction
+            });
+
+        } catch (error) {
+            return res.status(500).json({
+                message: "Internal Server Error",
+                status: false,
+                error: error.message
+            });
+        }
+    }
 
     public async createAction(req: CustomRequest, res: Response) {
         try {
@@ -27,7 +89,10 @@ export class SessionLearnerActionController {
                 status,
                 trainer_feedback,
                 learner_feedback,
-                time_spent
+                time_spent,
+                learner_status,
+                trainer_status,
+                who
             } = req.body;
 
             // Validate required fields
@@ -83,7 +148,10 @@ export class SessionLearnerActionController {
                 status: status || false,
                 trainer_feedback,
                 learner_feedback,
-                time_spent
+                time_spent,
+                learner_status: learner_status || ActionStatus.NotStarted,
+                trainer_status: trainer_status || ActionStatus.NotStarted,
+                who: who || null
             });
 
             const savedAction = await actionRepository.save(action);
@@ -182,7 +250,10 @@ export class SessionLearnerActionController {
                 status,
                 trainer_feedback,
                 learner_feedback,
-                time_spent
+                time_spent,
+                learner_status,
+                trainer_status,
+                who
             } = req.body;
 
             const action = await actionRepository.findOne({ where: { action_id: parseInt(id) } });
@@ -220,10 +291,13 @@ export class SessionLearnerActionController {
             action.job_type = job_type || action.job_type;
             action.unit = unit !== undefined ? unit : action.unit;
             action.file_attachment = fileAttachment;
-            action.status = status || action.status;
+            action.status = status !== undefined ? status : action.status;
             action.trainer_feedback = trainer_feedback || action.trainer_feedback;
             action.learner_feedback = learner_feedback || action.learner_feedback;
             action.time_spent = time_spent || action.time_spent;
+            action.learner_status = learner_status || action.learner_status;
+            action.trainer_status = trainer_status || action.trainer_status;
+            action.who = who || action.who;
 
             const updatedAction = await actionRepository.save(action);
 
@@ -303,6 +377,8 @@ export class SessionLearnerActionController {
 
             const options = {
                 job_types: Object.values(JobType),
+                action_statuses: Object.values(ActionStatus),
+                who_options: Object.values(ActionWho),
                 units: allUnits
             };
 
