@@ -5,6 +5,8 @@ import { Form } from "../entity/Form.entity";
 import { UserRole } from "../util/constants";
 import { User } from "../entity/User.entity";
 import { UserForm } from "../entity/UserForm.entity";
+import { SendEmailTemplet } from "../util/nodemailer";
+import { uploadToS3 } from "../util/aws";
 
 class FormController {
 
@@ -62,7 +64,7 @@ class FormController {
 
             form.form_name = form_name || form.form_name;
             form.form_data = form_data || form.form_data;
-            form.description = description || form.description;
+            form.description = description ?? form.description;
             form.type = type || form.type;
 
             const updatedForm = await formRepository.save(form);
@@ -376,6 +378,150 @@ class FormController {
                     }
                 })
             });
+        } catch (error) {
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                status: false,
+                error: error.message,
+            });
+        }
+    }
+
+    public async sendFormAssignmentEmail(req: CustomRequest, res: Response) {
+        try {
+            const { form_id, user_ids, assign } = req.body;
+
+            if (!form_id) {
+                return res.status(400).json({
+                    message: 'Form ID is required',
+                    status: false,
+                });
+            }
+
+            const formRepository = AppDataSource.getRepository(Form);
+            const userRepository = AppDataSource.getRepository(User);
+
+            // Get form details
+            const form = await formRepository.findOne({
+                where: { id: form_id },
+                relations: ['users']
+            });
+
+            if (!form) {
+                return res.status(404).json({
+                    message: 'Form not found',
+                    status: false
+                });
+            }
+
+            // Handle PDF upload if provided
+            let pdfAttachment = null;
+            if (req.file) {
+                const uploadedFile = await uploadToS3(req.file, "FormPDF");
+                pdfAttachment = {
+                    filename: req.file.originalname,
+                    path: uploadedFile.url,
+                    contentType: 'application/pdf'
+                };
+            }
+
+            // which users to send emails to
+            let targetUsers: User[] = [];
+
+            if (user_ids && Array.isArray(user_ids)) {
+                // Send to specific users
+                targetUsers = await userRepository
+                    .createQueryBuilder("user")
+                    .where("user.user_id IN (:...user_ids)", { user_ids })
+                    .getMany();
+            } else if (assign) {
+                // Send to users by role
+                const roleMap = {
+                    "All": null,
+                    "All Learner": UserRole.Learner,
+                    "All Trainer": UserRole.Trainer,
+                    "All Employer": UserRole.Employer,
+                    "All IQA": UserRole.IQA,
+                    "All LIQA": UserRole.LIQA,
+                    "All EQA": UserRole.EQA
+                };
+
+                if (assign in roleMap) {
+                    if (assign === "All") {
+                        targetUsers = await userRepository
+                            .createQueryBuilder("user")
+                            .where("NOT :role = ANY(user.roles)", { role: UserRole.Admin })
+                            .getMany();
+                    } else {
+                        targetUsers = await userRepository
+                            .createQueryBuilder("user")
+                            .where(":role = ANY(user.roles)", { role: roleMap[assign] })
+                            .getMany();
+                    }
+                }
+            } else {
+                console.log("nothing")
+                //targetUsers = form.users;
+            }
+
+            if (!targetUsers.length) {
+                return res.status(400).json({
+                    message: 'No users found to send emails to',
+                    status: false
+                });
+            }
+
+            // Prepare email content
+            const subject = `New Form Assignment: ${form.form_name}`;
+            const defaultMessage = `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <h2 style="color: #333;">Form Assignment Notification</h2>
+                    <p>You have been assigned a new form to complete:</p>
+                    <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                        <h3 style="margin: 0; color: #2c3e50;">${form.form_name}</h3>
+                        ${form.description ? `<p style="margin: 10px 0 0 0; color: #666;">${form.description}</p>` : ''}
+                    </div>
+                    <p>Please log in to the system to access and complete the form.</p>
+                    <p style="margin-top: 30px;">
+                        <a href="${process.env.FRONTEND}" style="background-color: #3498db; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Access Form</a>
+                    </p>
+                    <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
+                    <p style="font-size: 12px; color: #666;">
+                        This is an automated message from the Locker system. Please do not reply to this email.
+                    </p>
+                </div>
+            `;
+
+            // Send emails to all target users
+            const emailPromises = targetUsers.map(async (user) => {
+                try {
+                    const attachments = pdfAttachment ? [pdfAttachment] : undefined;
+                    await SendEmailTemplet(user.email, subject, null, defaultMessage, attachments);
+                    return { user_id: user.user_id, email: user.email, status: 'sent' };
+                } catch (error) {
+                    console.error(`Failed to send email to ${user.email}:`, error);
+                    return { user_id: user.user_id, email: user.email, status: 'failed', error: error.message };
+                }
+            });
+
+            const emailResults = await Promise.all(emailPromises);
+            const successCount = emailResults.filter(result => result.status === 'sent').length;
+            const failureCount = emailResults.filter(result => result.status === 'failed').length;
+
+            return res.status(200).json({
+                message: `Form assignment emails processed. ${successCount} sent successfully, ${failureCount} failed.`,
+                status: true,
+                data: {
+                    form_id,
+                    form_name: form.form_name,
+                    total_recipients: targetUsers.length,
+                    successful_sends: successCount,
+                    failed_sends: failureCount,
+                    email_results: emailResults,
+                    pdf_attached: !!pdfAttachment
+                }
+            });
+
         } catch (error) {
             return res.status(500).json({
                 message: 'Internal Server Error',
