@@ -5,7 +5,8 @@ import { User } from './User.entity';
 
 export enum JobType {
     OnTheJob = 'On-the-job',
-    OffTheJob = 'Off-the-job'
+    OffTheJob = 'Off-the-job',
+    NotApplicable = 'Not-applicable'
 }
 
 export enum ActionStatus {

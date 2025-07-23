@@ -3,6 +3,7 @@ import { authorizeRoles } from '../middleware/verifyToken';
 import FormController from '../controllers/FormController';
 import { paginationMiddleware } from '../middleware/pagination';
 import { UserRole } from '../util/constants';
+import { singleFileUpload } from '../util/multer';
 
 const FormRoutes = express.Router();
 
@@ -14,6 +15,9 @@ FormRoutes.get("/list", authorizeRoles(), paginationMiddleware, Controller.getFo
 FormRoutes.patch("/update/:id", authorizeRoles(UserRole.Admin), Controller.updateForm);
 FormRoutes.patch("/add-user/:id", authorizeRoles(UserRole.Admin), Controller.addUsersToForm);
 FormRoutes.delete("/delete/:id", authorizeRoles(UserRole.Admin), Controller.deleteForm);
+
+// Email functionality for form assignment
+FormRoutes.post("/send-assignment-email", authorizeRoles(UserRole.Admin, UserRole.Trainer), singleFileUpload("pdf"), Controller.sendFormAssignmentEmail);
 
 // UserForm routes
 FormRoutes.post('/user/create', authorizeRoles(), Controller.createUserFormData);
