@@ -24,6 +24,7 @@ import FormTemplateRoutes from './FormTemplateRouter';
 import broadcastRoutes from './BroadcastRouter';
 import ContractWorkRoutes from './ContractWorkRouter';
 import sessionLearnerActionRoutes from './SessionLearnerActionRouter';
+import learnerPlanDocumentRoutes from './LearnerPlanDocumentRouter';
 
 const fileController = new FileController;
 const Routes = express.Router();
@@ -49,6 +50,7 @@ Routes.use("/form-template", FormTemplateRoutes)
 Routes.use("/broadcast", broadcastRoutes)
 Routes.use("/contractwork", ContractWorkRoutes)
 Routes.use("/learner-action", sessionLearnerActionRoutes)
+Routes.use("/learner-document", learnerPlanDocumentRoutes)
 
 // API routes
 Routes.get("/file", fileController.getFile)
