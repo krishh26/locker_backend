@@ -17,7 +17,7 @@ FormRoutes.patch("/add-user/:id", authorizeRoles(UserRole.Admin), Controller.add
 FormRoutes.delete("/delete/:id", authorizeRoles(UserRole.Admin), Controller.deleteForm);
 
 // Email functionality for form assignment
-FormRoutes.post("/send-assignment-email", authorizeRoles(UserRole.Admin, UserRole.Trainer), singleFileUpload("pdf"), Controller.sendFormAssignmentEmail);
+FormRoutes.post("/send-assignment-email", authorizeRoles(), singleFileUpload("pdf"), Controller.sendFormAssignmentEmail);
 
 // UserForm routes
 FormRoutes.post('/user/create', authorizeRoles(), Controller.createUserFormData);
