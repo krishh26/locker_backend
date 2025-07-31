@@ -19,6 +19,18 @@ export class UserForm {
     @Column({ type: 'json', nullable: false })
     form_data: object;
 
+    @Column({ type: 'json', nullable: true })
+    form_files: {
+        field_name: string;
+        files: {
+            file_name: string;
+            file_size: number;
+            file_url: string;
+            s3_key: string;
+            uploaded_at: Date;
+        }[];
+    }[];
+
     @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
     created_at: Date;
 

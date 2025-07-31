@@ -6,7 +6,7 @@ import { UserRole } from "../util/constants";
 import { User } from "../entity/User.entity";
 import { UserForm } from "../entity/UserForm.entity";
 import { SendEmailTemplet } from "../util/nodemailer";
-import { uploadToS3 } from "../util/aws";
+import { uploadToS3, uploadMultipleFilesToS3 } from "../util/aws";
 
 class FormController {
 
@@ -279,22 +279,133 @@ class FormController {
             const userFormRepository = AppDataSource.getRepository(UserForm);
             const { form_id, form_data, user_id } = req.body;
 
-            let form = await userFormRepository.findOne({ where: { user: { user_id }, form: { id: form_id } } });
-
-            if (form) {
-                form.form_data = form_data;
-            } else {
-                form = userFormRepository.create({
-                    user: user_id,
-                    form: form_id,
-                    form_data
-                })
+            if (!form_id || !form_data) {
+                return res.status(400).json({
+                    message: 'Form ID and form data are required',
+                    status: false,
+                });
             }
-            await userFormRepository.save(form);
+
+            let parsedFormData: any;
+            try {
+                parsedFormData = typeof form_data === 'string' ? JSON.parse(form_data) : form_data;
+            } catch (error) {
+                return res.status(400).json({
+                    message: 'Invalid form data format',
+                    status: false,
+                });
+            }
+
+            // Handle file uploads dynamically
+            let formFiles: any[] = [];
+            if (req.files) {
+                // Handle both array and object formats from multer
+                if (Array.isArray(req.files)) {
+                    // Single field with multiple files
+                    if (req.files.length > 0) {
+                        try {
+                            const uploadedFiles = await uploadMultipleFilesToS3(req.files, "UserFormFiles");
+
+                            const filesData = uploadedFiles.map((file, index) => ({
+                                file_name: req.files[index].originalname,
+                                file_size: req.files[index].size,
+                                file_url: file.url,
+                                s3_key: file.key,
+                                uploaded_at: new Date()
+                            }));
+
+                            formFiles.push({
+                                field_name: 'files', // default field name
+                                files: filesData
+                            });
+                        } catch (uploadError) {
+                            console.error('Error uploading files:', uploadError);
+                            return res.status(500).json({
+                                message: 'Failed to upload files',
+                                status: false,
+                                error: uploadError.message
+                            });
+                        }
+                    }
+                } else if (typeof req.files === 'object') {
+                    // Multiple fields with files
+                    const filesObject = req.files as { [fieldname: string]: any[] };
+
+                    for (const [fieldName, fileArray] of Object.entries(filesObject)) {
+                        if (fileArray && fileArray.length > 0) {
+                            try {
+                                const uploadedFiles = await uploadMultipleFilesToS3(fileArray, "UserFormFiles");
+
+                                const filesData = uploadedFiles.map((file, index) => ({
+                                    file_name: fileArray[index].originalname,
+                                    file_size: fileArray[index].size,
+                                    file_url: file.url,
+                                    s3_key: file.key,
+                                    uploaded_at: new Date()
+                                }));
+
+                                formFiles.push({
+                                    field_name: fieldName,
+                                    files: filesData
+                                });
+                            } catch (uploadError) {
+                                console.error(`Error uploading files for field ${fieldName}:`, uploadError);
+                                return res.status(500).json({
+                                    message: `Failed to upload files for field ${fieldName}`,
+                                    status: false,
+                                    error: uploadError.message
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Find existing form or create new one
+            let userForm = await userFormRepository.findOne({
+                where: {
+                    user: { user_id: user_id || req.user.user_id },
+                    form: { id: form_id }
+                }
+            });
+
+            if (userForm) {
+                // Update existing form
+                userForm.form_data = parsedFormData;
+                userForm.form_files = formFiles.length > 0 ? formFiles : userForm.form_files;
+            } else {
+                // Create new form
+                userForm = userFormRepository.create({
+                    user: { user_id: user_id || req.user.user_id },
+                    form: { id: form_id },
+                    form_data: parsedFormData,
+                    form_files: formFiles.length > 0 ? formFiles : null
+                });
+            }
+
+            const savedForm = await userFormRepository.save(userForm);
+
+            // Fetch complete form with relations for response
+            const completeForm = await userFormRepository.findOne({
+                where: { id: savedForm.id },
+                relations: ['user', 'form']
+            });
 
             return res.status(200).json({
                 message: "User's form saved successfully",
-                status: true
+                status: true,
+                data: {
+                    id: completeForm.id,
+                    form_data: completeForm.form_data,
+                    form_files: completeForm.form_files,
+                    total_files: formFiles.reduce((total, field) => total + field.files.length, 0),
+                    file_fields: formFiles.map(field => ({
+                        field_name: field.field_name,
+                        file_count: field.files.length
+                    })),
+                    created_at: completeForm.created_at,
+                    updated_at: completeForm.updated_at
+                }
             });
         } catch (error) {
             return res.status(500).json({
@@ -353,6 +464,7 @@ class FormController {
                     'form.type',
                     'form.created_at',
                     'form.updated_at',
+                    'user_form.form_files'
                 ]);
 
             if (req.query.keyword) {
