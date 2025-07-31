@@ -9,3 +9,7 @@ export const singleFileUpload = (fieldName) => {
 export const multipleFileUpload = (fieldName, maxCount) => {
     return upload.array(fieldName, maxCount);
 };
+
+export const dynamicFileUpload = () => {
+    return upload.any(); // Accepts any files from any fields
+};

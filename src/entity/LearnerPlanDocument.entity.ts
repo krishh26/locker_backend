@@ -24,7 +24,8 @@ export enum SignatureRole {
     PrimaryAssessor = 'Primary Assessor',
     SecondaryAssessor = 'Secondary Assessor',
     Learner = 'Learner',
-    Employer = 'Employer'
+    Employer = 'Employer',
+    IQA = 'IQA'
 }
 
 export enum SignatureStatus {
