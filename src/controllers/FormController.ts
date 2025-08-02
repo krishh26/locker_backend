@@ -472,6 +472,7 @@ class FormController {
                     'user_form.updated_at',
                     'user.user_name',
                     'user.email',
+                    'user.user_id',
                     'form.id',
                     'form.form_name',
                     'form.description',
@@ -479,7 +480,8 @@ class FormController {
                     'form.type',
                     'form.created_at',
                     'form.updated_at',
-                    'user_form.form_files'
+                    'user_form.form_files',
+                    'user_form.user_id'
                 ]);
 
             if (req.query.keyword) {
