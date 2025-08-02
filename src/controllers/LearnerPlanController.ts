@@ -3,6 +3,7 @@ import { CustomRequest } from '../util/Interface/expressInterface';
 import { AppDataSource } from '../data-source';
 import { LearnerPlan, RepeatFrequency, FileType, SessionFileType, LearnerPlanFeedback } from '../entity/LearnerPlan.entity';
 import { SessionLearnerAction } from '../entity/SessionLearnerAction.entity';
+import { LearnerPlanDocument } from '../entity/LearnerPlanDocument.entity';
 import { Course } from '../entity/Course.entity';
 import { Learner } from '../entity/Learner.entity';
 import { UserCourse } from '../entity/UserCourse.entity';
@@ -363,6 +364,7 @@ class LearnerPlanController {
             const [learnerPlans, count] = await qb.getManyAndCount();
 
             const sessionLearnerActionRepository = AppDataSource.getRepository(SessionLearnerAction);
+            const learnerPlanDocumentRepository = AppDataSource.getRepository(LearnerPlanDocument);
 
             const enhancedLearnerPlans = await Promise.all(learnerPlans.map(async (plan: any) => {
                 if (plan.courses && plan.courses.length > 0) {
@@ -403,9 +405,55 @@ class LearnerPlanController {
                     ])
                     .getMany();
 
+                // Get learner plan documents for this learner plan
+                const learnerPlanDocuments = await learnerPlanDocumentRepository.createQueryBuilder('document')
+                    .leftJoinAndSelect('document.selected_form', 'form')
+                    .leftJoinAndSelect('document.created_by', 'created_by')
+                    .leftJoinAndSelect('document.signatures', 'signatures')
+                    .leftJoinAndSelect('signatures.signed_by', 'signed_by')
+                    .leftJoinAndSelect('signatures.requested_by', 'requested_by')
+                    .where('document.learner_plan_id = :learner_plan_id', { learner_plan_id: plan.learner_plan_id })
+                    .select([
+                        'document.document_id',
+                        'document.name',
+                        'document.description',
+                        'document.who',
+                        'document.file_type',
+                        'document.upload_type',
+                        'document.uploaded_files',
+                        'document.created_at',
+                        'document.updated_at',
+                        'form.id',
+                        'form.form_name',
+                        'form.description',
+                        'form.type',
+                        'created_by.user_id',
+                        'created_by.user_name',
+                        'created_by.first_name',
+                        'created_by.last_name',
+                        'signatures.signature_id',
+                        'signatures.role',
+                        'signatures.is_required',
+                        'signatures.is_signed',
+                        'signatures.is_requested',
+                        'signatures.signed_date',
+                        'signatures.requested_date',
+                        'signed_by.user_id',
+                        'signed_by.user_name',
+                        'signed_by.first_name',
+                        'signed_by.last_name',
+                        'requested_by.user_id',
+                        'requested_by.user_name',
+                        'requested_by.first_name',
+                        'requested_by.last_name'
+                    ])
+                    .orderBy('document.created_at', 'DESC')
+                    .getMany();
+
                 return {
                     ...plan,
-                    sessionLearnerActionDetails
+                    sessionLearnerActionDetails,
+                    learnerPlanDocuments
                 };
             }));
 
