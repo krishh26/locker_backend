@@ -305,8 +305,8 @@ class FormController {
                     if (req.files.length > 0) {
                         try {
                             const uploadedFiles = await uploadMultipleFilesToS3(req.files, "UserFormFiles");
-
                             const filesData = uploadedFiles.map((file, index) => ({
+                                file_key: req.files[index].fieldname,
                                 file_name: req.files[index].originalname,
                                 file_size: req.files[index].size,
                                 file_url: file.url,
@@ -337,6 +337,7 @@ class FormController {
                                 const uploadedFiles = await uploadMultipleFilesToS3(fileArray, "UserFormFiles");
 
                                 const filesData = uploadedFiles.map((file, index) => ({
+                                    file_key: fileArray[index].fieldname,
                                     file_name: fileArray[index].originalname,
                                     file_size: fileArray[index].size,
                                     file_url: file.url,
@@ -430,6 +431,20 @@ class FormController {
                 });
             }
 
+            if (userForm) {
+                let form_data = typeof userForm.form_data === 'string'
+                    ? JSON.parse(userForm.form_data)
+                    : userForm.form_data;
+
+                let form_files = userForm.form_files || [];
+                for (const group of form_files) {
+                    if (group.files && group.files.length > 0) {
+                        for (const file of group.files) {
+                            form_data[file.file_key] = file.file_url
+                        }
+                    }
+                }
+            }
             return res.status(200).json({
                 message: 'User form fetch successfully',
                 status: true,
@@ -457,6 +472,7 @@ class FormController {
                     'user_form.updated_at',
                     'user.user_name',
                     'user.email',
+                    'user.user_id',
                     'form.id',
                     'form.form_name',
                     'form.description',
@@ -464,7 +480,8 @@ class FormController {
                     'form.type',
                     'form.created_at',
                     'form.updated_at',
-                    'user_form.form_files'
+                    'user_form.form_files',
+                    'user_form.user_id'
                 ]);
 
             if (req.query.keyword) {
