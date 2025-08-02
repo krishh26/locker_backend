@@ -23,6 +23,7 @@ export class UserForm {
     form_files: {
         field_name: string;
         files: {
+            file_key: string;
             file_name: string;
             file_size: number;
             file_url: string;
