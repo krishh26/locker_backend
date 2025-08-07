@@ -24,4 +24,7 @@ FormRoutes.post('/user/create', authorizeRoles(), dynamicFileUpload(), Controlle
 FormRoutes.get("/user/:id", authorizeRoles(), Controller.getUserFormData);
 FormRoutes.get("/list/user", authorizeRoles(UserRole.Admin), paginationMiddleware, Controller.getUserForms);
 
+// Form options route
+FormRoutes.get("/options", authorizeRoles(), Controller.getFormOptions);
+
 export default FormRoutes;
