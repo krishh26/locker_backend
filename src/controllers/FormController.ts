@@ -1,7 +1,7 @@
 import { Response } from "express";
 import { AppDataSource } from "../data-source";
 import { CustomRequest } from "../util/Interface/expressInterface";
-import { Form } from "../entity/Form.entity";
+import { Form, FormAccessRole, FormType } from "../entity/Form.entity";
 import { UserRole } from "../util/constants";
 import { User } from "../entity/User.entity";
 import { UserForm } from "../entity/UserForm.entity";
@@ -12,14 +12,31 @@ class FormController {
 
     public async CreateForm(req: CustomRequest, res: Response) {
         try {
-            const { form_name, description, form_data, type } = req.body;
+            const {
+                form_name,
+                description,
+                form_data,
+                type,
+                access_rights,
+                enable_complete_function,
+                completion_roles,
+                set_request_signature,
+                email_roles,
+                other_emails
+            } = req.body;
 
             const formRepository = AppDataSource.getRepository(Form);
             let data = {
                 form_name,
                 description,
                 form_data,
-                type
+                type,
+                access_rights: access_rights || [],
+                enable_complete_function: enable_complete_function || false,
+                completion_roles: completion_roles || [],
+                set_request_signature: set_request_signature || false,
+                email_roles: email_roles || [],
+                other_emails: other_emails || null
             }
 
             const form = formRepository.create(data)
@@ -43,13 +60,18 @@ class FormController {
     public async updateForm(req: CustomRequest, res: Response) {
         try {
             const id = parseInt(req.params.id);
-            const { form_name, description, form_data, type } = req.body;
-            if (!form_name && !description && !form_data && !type) {
-                return res.status(400).json({
-                    message: 'At least one field required',
-                    status: false,
-                });
-            }
+            const {
+                form_name,
+                description,
+                form_data,
+                type,
+                access_rights,
+                enable_complete_function,
+                completion_roles,
+                set_request_signature,
+                email_roles,
+                other_emails
+            } = req.body;
 
             const formRepository = AppDataSource.getRepository(Form);
 
@@ -66,6 +88,12 @@ class FormController {
             form.form_data = form_data || form.form_data;
             form.description = description ?? form.description;
             form.type = type || form.type;
+            form.access_rights = access_rights !== undefined ? access_rights : form.access_rights;
+            form.enable_complete_function = enable_complete_function !== undefined ? enable_complete_function : form.enable_complete_function;
+            form.completion_roles = completion_roles !== undefined ? completion_roles : form.completion_roles;
+            form.set_request_signature = set_request_signature !== undefined ? set_request_signature : form.set_request_signature;
+            form.email_roles = email_roles !== undefined ? email_roles : form.email_roles;
+            form.other_emails = other_emails !== undefined ? other_emails : form.other_emails;
 
             const updatedForm = await formRepository.save(form);
 
@@ -588,6 +616,39 @@ class FormController {
                             .getMany();
                     }
                 }
+            } else if (form.email_roles && form.email_roles.length > 0) {
+                // Send to users based on form's email roles configuration
+                const roleMapping = {
+                    [FormAccessRole.MasterAdmin]: [UserRole.Admin],
+                    [FormAccessRole.BasicAdmin]: [UserRole.Admin],
+                    [FormAccessRole.Assessor]: [UserRole.Trainer],
+                    [FormAccessRole.IQA]: [UserRole.IQA],
+                    [FormAccessRole.EQA]: [UserRole.EQA],
+                    [FormAccessRole.CurriculumManager]: [UserRole.Admin],
+                    [FormAccessRole.EmployerOverview]: [UserRole.Employer],
+                    [FormAccessRole.EmployerManager]: [UserRole.Employer],
+                    [FormAccessRole.Partner]: [UserRole.Admin],
+                    [FormAccessRole.CustomManager]: [UserRole.Admin],
+                    [FormAccessRole.Learner]: [UserRole.Learner]
+                };
+
+                for (const role of form.email_roles) {
+                    const mappedRoles = roleMapping[role] || [];
+                    for (const mappedRole of mappedRoles) {
+                        const users = await userRepository
+                            .createQueryBuilder("user")
+                            .where(":role = ANY(user.roles)", { role: mappedRole })
+                            .select(['user.user_id', 'user.email', 'user.user_name', 'user.first_name', 'user.last_name'])
+                            .getMany();
+
+                        targetUsers = [...targetUsers, ...users];
+                    }
+                }
+
+                // Remove duplicates
+                targetUsers = targetUsers.filter((user, index, self) =>
+                    index === self.findIndex(u => u.email === user.email)
+                );
             } else {
                 console.log("nothing")
                 //targetUsers = form.users;
@@ -633,20 +694,50 @@ class FormController {
                 }
             });
 
-            const emailResults = await Promise.all(emailPromises);
+            // Handle direct emails from other_emails field if form has email roles configured
+            let directEmailPromises: Promise<any>[] = [];
+            if (form.email_roles && form.email_roles.length > 0 || form.other_emails) {
+                const directEmails = form.other_emails.split(',').map(email => email.trim()).filter(email => email);
+                directEmailPromises = directEmails.map(async (email) => {
+                    try {
+                        await SendEmailTemplet(email, subject, null, defaultMessage);
+                        return { email, status: 'sent' };
+                    } catch (error) {
+                        console.error(`Failed to send email to ${email}:`, error);
+                        return { email, status: 'failed', error: error.message };
+                    }
+                });
+            }
+
+            // Execute all email promises
+            const allEmailPromises = [...emailPromises, ...directEmailPromises];
+            const allEmailResults = await Promise.all(allEmailPromises);
+
+            const emailResults = allEmailResults.slice(0, emailPromises.length);
+            const directEmailResults = allEmailResults.slice(emailPromises.length);
+
             const successCount = emailResults.filter(result => result.status === 'sent').length;
             const failureCount = emailResults.filter(result => result.status === 'failed').length;
+            const directSuccessCount = directEmailResults.filter(result => result.status === 'sent').length;
+            const directFailureCount = directEmailResults.filter(result => result.status === 'failed').length;
+
+            const totalSuccess = successCount + directSuccessCount;
+            const totalFailure = failureCount + directFailureCount;
+            const totalRecipients = targetUsers.length + directEmailResults.length;
 
             return res.status(200).json({
-                message: `Form assignment emails processed. ${successCount} sent successfully, ${failureCount} failed.`,
+                message: `Form assignment emails processed. ${totalSuccess} sent successfully, ${totalFailure} failed.`,
                 status: true,
                 data: {
                     form_id,
                     form_name: form.form_name,
-                    total_recipients: targetUsers.length,
-                    successful_sends: successCount,
-                    failed_sends: failureCount,
+                    total_recipients: totalRecipients,
+                    successful_sends: totalSuccess,
+                    failed_sends: totalFailure,
+                    role_based_recipients: targetUsers.length,
+                    direct_email_recipients: directEmailResults.length,
                     email_results: emailResults,
+                    direct_email_results: directEmailResults,
                     pdf_attached: !!pdfAttachment
                 }
             });
@@ -659,6 +750,32 @@ class FormController {
             });
         }
     }
+
+
+
+    public async getFormOptions(req: CustomRequest, res: Response) {
+        try {
+            const options = {
+                access_roles: Object.values(FormAccessRole),
+                form_types: Object.values(FormType)
+            };
+
+            return res.status(200).json({
+                message: 'Form options fetched successfully',
+                status: true,
+                data: options
+            });
+
+        } catch (error) {
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                status: false,
+                error: error.message,
+            });
+        }
+    }
+
+
 
 }
 
