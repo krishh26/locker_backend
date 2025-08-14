@@ -1,6 +1,7 @@
 import * as express from 'express';
 import { singleFileUpload } from '../util/multer';
 import CourseController from '../controllers/CourseController';
+import FundingBandController from '../controllers/FundingBandController';
 import { authorizeRoles } from '../middleware/verifyToken';
 import { paginationMiddleware } from '../middleware/pagination';
 
@@ -19,5 +20,8 @@ CourseRoutes.get('/list', authorizeRoles(), paginationMiddleware, Controller.get
 //user Course routes
 CourseRoutes.get('/user/get', authorizeRoles(), Controller.getUserCourse);
 CourseRoutes.patch('/user/update/:id', authorizeRoles(), Controller.updateUserCourse);
+
+// Funding band routes for specific course
+CourseRoutes.get('/:course_id/funding-band', authorizeRoles(), FundingBandController.getFundingBandsByCourse);
 
 export default CourseRoutes;
