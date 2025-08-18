@@ -11,14 +11,15 @@ import XLSX from 'xlsx';
 import { Employer } from "../entity/Employer.entity";
 import { TimeLog } from "../entity/TimeLog.entity";
 import { Session } from "../entity/Session.entity";
+import { FundingBand } from "../entity/FundingBand.entity";
 
 
 class LearnerController {
 
     public async CreateLearner(req: CustomRequest, res: Response) {
         try {
-            const { user_name, first_name, last_name, email, password, confrimpassword, mobile, funding_body, job_title } = req.body
-            if (!user_name || !first_name || !last_name || !email || !password || !confrimpassword) {
+            const { user_name, first_name, last_name, email, password, confirmPassword, mobile, funding_body, funding_band_id, job_title } = req.body
+            if (!user_name || !first_name || !last_name || !email || !password || !confirmPassword) {
                 return res.status(400).json({
                     message: "All Field Required",
                     status: false
@@ -36,7 +37,7 @@ class LearnerController {
                 })
             }
 
-            if (password !== confrimpassword) {
+            if (password !== confirmPassword ) {
                 return res.status(400).json({
                     message: "Password and confrim password not match",
                     status: false
@@ -96,6 +97,8 @@ class LearnerController {
                 // .leftJoinAndSelect('learner.user_id', "user_id")
                 .leftJoinAndSelect('learner.user_id', "user_id", 'user_id.deleted_at IS NOT NULL OR user_id.deleted_at IS NULL')
                 .leftJoinAndSelect('learner.employer_id', "employer")
+                .leftJoinAndSelect('learner.funding_band', "funding_band")
+                .leftJoinAndSelect('funding_band.course', "funding_course")
                 .select([
                     'learner.learner_id',
                     'learner.first_name',
@@ -109,12 +112,43 @@ class LearnerController {
                     'learner.deleted_at',
                     'learner.created_at',
                     'learner.updated_at',
+                    'learner.job_title',
+                    'learner.awarding_body',
+                    'learner.county',
+                    'learner.course_expected_end_date',
+                    'learner.course_actual_end_date',
+                    'learner.fs_english_green_progress',
+                    'learner.fs_english_orange_progress',
+                    'learner.fs_maths_green_progress',
+                    'learner.fs_maths_orange_progress',
+                    'learner.lara_code',
+                    'learner.learning_difficulties',
+                    'learner.main_aim_green_progress',
+                    'learner.main_aim_orange_progress',
+                    'learner.main_aim_guided_learning_hours_achieved',
+                    'learner.off_the_job_training',
+                    'learner.planned_review_date',
+                    'learner.registration_number',
+                    'learner.registration_date',
+                    'learner.review_date',
+                    'learner.uln',
+                    'learner.guided_learning_hours_achieved',
+                    'learner.iqas_name',
+                    'learner.custom_funding_data',
                     'user_id.user_id',
                     'user_id.avatar',
                     'user_id.deleted_at',
                     'employer.employer_id',
                     'employer.employer_name',
-                    'learner.job_title',
+                    'funding_band.id',
+                    'funding_band.band_name',
+                    'funding_band.amount',
+                    'funding_band.effective_from',
+                    'funding_band.effective_to',
+                    'funding_band.is_active',
+                    'funding_course.course_id',
+                    'funding_course.course_name',
+                    'funding_course.course_code',
                 ])
 
             if (status.includes("Show only archived users")) {
@@ -210,16 +244,28 @@ class LearnerController {
                 .getManyAndCount();
 
             let formattedLearners
-            formattedLearners = learner.map((learner: any) => ({
-                ...learner,
-                user_id: learner.user_id.user_id,
-                avatar: learner.user_id?.avatar?.url,
-                course: usercourses.filter(usercourse => {
-                    if (usercourse?.learner_id?.learner_id === learner?.learner_id) {
-                        return true;
-                    }
-                })
-            }))
+            formattedLearners = learner.map((learner: any) => {
+                // Calculate weeks since last review
+                const calculateWeeksSinceLastReview = (reviewDate: Date | null): number | null => {
+                    if (!reviewDate) return null;
+                    const now = new Date();
+                    const diffTime = Math.abs(now.getTime() - new Date(reviewDate).getTime());
+                    const diffWeeks = Math.floor(diffTime / (1000 * 60 * 60 * 24 * 7));
+                    return diffWeeks;
+                };
+
+                return {
+                    ...learner,
+                    user_id: learner.user_id.user_id,
+                    avatar: learner.user_id?.avatar?.url,
+                    weeks_since_last_review: calculateWeeksSinceLastReview(learner.review_date),
+                    course: usercourses.filter(usercourse => {
+                        if (usercourse?.learner_id?.learner_id === learner?.learner_id) {
+                            return true;
+                        }
+                    })
+                };
+            })
             for (let index in formattedLearners) {
                 formattedLearners[index].course = await getCourseData(formattedLearners[index]?.course, formattedLearners[index].user_id);
             }
@@ -257,6 +303,8 @@ class LearnerController {
                 .createQueryBuilder('learner')
                 .leftJoin('learner.user_id', 'user')
                 .leftJoinAndSelect('learner.employer_id', 'employer')
+                .leftJoinAndSelect('learner.funding_band', 'funding_band')
+                .leftJoinAndSelect('funding_band.course', 'funding_course')
                 .addSelect(['user.user_id', 'user.user_name', 'user.avatar', 'user.email'])
                 .where('learner.learner_id = :learner_id', { learner_id })
                 .getOne();
@@ -341,6 +389,40 @@ class LearnerController {
 
             const nextVisitDate = nextSession ? nextSession.startDate : null;
 
+            // Automatically fetch funding bands based on learner's assigned courses
+            let fundingBandData = null;
+            if (course_ids.length > 0) {
+                const fundingBandRepository = AppDataSource.getRepository(FundingBand);
+
+                // Get funding bands for all assigned courses
+                const fundingBands = await fundingBandRepository.find({
+                    where: course_ids.map(courseId => ({
+                        course: { course_id: courseId },
+                        is_active: true
+                    })),
+                    relations: ['course'],
+                    order: { course: { course_name: 'ASC' }, band_name: 'ASC' }
+                });
+
+                // Format funding bands data
+                fundingBandData = fundingBands.map(band => ({
+                    id: band.id,
+                    band_name: band.band_name,
+                    amount: band.amount,
+                    cost: Number(band.amount),
+                    effective_from: band.effective_from,
+                    effective_to: band.effective_to,
+                    is_active: band.is_active,
+                    course: band.course ? {
+                        course_id: band.course.course_id,
+                        course_name: band.course.course_name,
+                        course_code: band.course.course_code
+                    } : null
+                }));
+            }
+
+
+
             return res.status(200).json({
                 message: 'Learner retrieved successfully',
                 status: true,
@@ -352,6 +434,7 @@ class LearnerController {
                     employer_id: learner?.employer_id?.employer_id,
                     employer_name: learner?.employer_id?.employer_name,
                     nextvisitdate: nextVisitDate,
+                    available_funding_bands: fundingBandData,
                 }
             });
         } catch (error) {
@@ -494,7 +577,12 @@ class LearnerController {
             const id = req.user.user_id;
 
             const learnerRepository = AppDataSource.getRepository(Learner);
-            const learner = await learnerRepository.findOne({ where: { user_id: id } })
+            const userCourseRepository = AppDataSource.getRepository(UserCourse);
+
+            const learner = await learnerRepository.findOne({
+                where: { user_id: id },
+                relations: ['funding_band', 'funding_band.course', 'custom_funding_data']
+            })
 
             if (!learner) {
                 return res.status(404).json({
@@ -503,11 +591,288 @@ class LearnerController {
                 });
             }
 
+            // Get learner's assigned courses
+            const courses = await userCourseRepository
+                .createQueryBuilder('user_course')
+                .where('user_course.learner_id = :learner_id', { learner_id: learner.learner_id })
+                .getMany();
+            const course_ids = courses.map((course: any) => course.course.course_id);
+
+            // Automatically fetch funding bands based on learner's assigned courses
+            let fundingBandData = null;
+            if (course_ids.length > 0) {
+                const fundingBandRepository = AppDataSource.getRepository(FundingBand);
+
+                // Get funding bands for all assigned courses
+                const fundingBands = await fundingBandRepository.find({
+                    where: course_ids.map(courseId => ({
+                        course: { course_id: courseId },
+                        is_active: true
+                    })),
+                    relations: ['course'],
+                    order: { course: { course_name: 'ASC' }, band_name: 'ASC' }
+                });
+
+                // Format funding bands data with custom amounts
+                fundingBandData = fundingBands.map(band => {
+                    const courseId = band.course.course_id.toString();
+                    const customFunding = learner.custom_funding_data?.courses?.[courseId];
+
+                    return {
+                        id: band.id,
+                        band_name: band.band_name,
+                        original_amount: Number(band.amount),
+                        custom_amount: customFunding?.custom_amount || null,
+                        amount: customFunding?.custom_amount || band.amount,
+                        cost: Number(customFunding?.custom_amount || band.amount),
+                        is_custom: !!customFunding?.custom_amount,
+                        effective_from: band.effective_from,
+                        effective_to: band.effective_to,
+                        is_active: band.is_active,
+                        custom_funding_updated_at: customFunding?.updated_at || null,
+                        course: {
+                            course_id: band.course.course_id,
+                            course_name: band.course.course_name,
+                            course_code: band.course.course_code
+                        }
+                    };
+                });
+            }
+
+
+
             return res.status(200).json({
                 message: 'Learner retrieved successfully',
                 status: true,
-                data: learner,
+                data: {
+                    ...learner,
+                    available_funding_bands: fundingBandData,
+                },
             });
+        } catch (error) {
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                error: error.message,
+                status: false,
+            });
+        }
+    }
+
+    // PUT /api/v1/learner/update-funding-band → Update learner's personal funding amount for specific course
+    public async updateLearnerFundingBand(req: CustomRequest, res: Response): Promise<Response> {
+        try {
+            const { custom_funding_amount, course_id } = req.body;
+            const learner_id = req.params.id;
+            console.log(learner_id);
+            if (!custom_funding_amount || custom_funding_amount <= 0) {
+                return res.status(400).json({
+                    message: 'Valid custom funding amount is required',
+                    status: false,
+                });
+            }
+
+            if (!course_id) {
+                return res.status(400).json({
+                    message: 'Course ID is required',
+                    status: false,
+                });
+            }
+
+            const learnerRepository = AppDataSource.getRepository(Learner);
+            const userCourseRepository = AppDataSource.getRepository(UserCourse);
+            const fundingBandRepository = AppDataSource.getRepository(FundingBand);
+
+            // Find the learner by user_id (from token)
+            const learner = await learnerRepository.findOne({
+                where: { learner_id: parseInt(learner_id) },
+                relations: ['user_id']
+            });
+
+            if (!learner) {
+                return res.status(404).json({
+                    message: 'Learner not found',
+                    status: false,
+                });
+            }
+
+            // Validate that the course is assigned to the learner
+            const userCourse = await userCourseRepository
+                .createQueryBuilder('user_course')
+                .leftJoinAndSelect('user_course.course', 'course')
+                .where('user_course.learner_id = :learner_id', { learner_id: learner.learner_id })
+                .andWhere('course.course_id = :course_id', { course_id })
+                .getOne();
+
+            if (!userCourse) {
+                return res.status(400).json({
+                    message: 'Course is not assigned to this learner',
+                    status: false,
+                });
+            }
+
+            // Get the funding band for this specific course
+            const fundingBand = await fundingBandRepository.findOne({
+                where: {
+                    course: { course_id: course_id },
+                    is_active: true
+                },
+                relations: ['course']
+            });
+
+            if (!fundingBand) {
+                return res.status(400).json({
+                    message: 'No active funding band found for this course',
+                    status: false,
+                });
+            }
+
+            // Validate that custom amount doesn't exceed the original funding band amount
+            const originalAmount = Number(fundingBand.amount);
+            if (custom_funding_amount > originalAmount) {
+                return res.status(400).json({
+                    message: `Custom funding amount cannot exceed the original funding band amount of £${originalAmount} for course ${fundingBand.course.course_name}`,
+                    status: false,
+                });
+            }
+
+            // Initialize custom funding data if it doesn't exist
+            if (!learner.custom_funding_data) {
+                learner.custom_funding_data = {};
+            }
+
+            // Store custom funding amount for this specific course
+            if (!learner.custom_funding_data.courses) {
+                learner.custom_funding_data.courses = {};
+            }
+
+            learner.custom_funding_data.courses[course_id] = {
+                original_amount: originalAmount,
+                custom_amount: custom_funding_amount,
+                funding_band_id: fundingBand.id,
+                updated_by_learner: true,
+                updated_at: new Date()
+            };
+
+            // Update learner with custom funding data
+            await learnerRepository.save(learner);
+
+            // Prepare response with updated funding data
+            const fundingBandData = {
+                id: fundingBand.id,
+                band_name: fundingBand.band_name,
+                original_amount: originalAmount,
+                custom_amount: custom_funding_amount,
+                amount: custom_funding_amount, // Use custom amount as the active amount
+                cost: Number(custom_funding_amount),
+                effective_from: fundingBand.effective_from,
+                effective_to: fundingBand.effective_to,
+                is_active: fundingBand.is_active,
+                is_custom: true,
+                course: {
+                    course_id: fundingBand.course.course_id,
+                    course_name: fundingBand.course.course_name,
+                    course_code: fundingBand.course.course_code
+                }
+            };
+
+            return res.status(200).json({
+                message: 'Personal funding amount updated successfully',
+                status: true,
+                data: {
+                    learner_id: learner.learner_id,
+                    first_name: learner.first_name,
+                    last_name: learner.last_name,
+                    email: learner.email,
+                    selected_funding_band: fundingBandData,
+                    updated_at: new Date()
+                }
+            });
+
+        } catch (error) {
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                error: error.message,
+                status: false,
+            });
+        }
+    }
+
+    // GET /api/v1/learner/:id/funding-bands → Get funding bands for learner's assigned courses
+    public async getLearnerFundingBands(req: CustomRequest, res: Response): Promise<Response> {
+        try {
+            const learner_id = req.params.id;
+
+            const learnerRepository = AppDataSource.getRepository(Learner);
+            const userCourseRepository = AppDataSource.getRepository(UserCourse);
+
+            // Find the learner
+            const learner = await learnerRepository.findOne({
+                where: { learner_id: parseInt(learner_id) },
+                relations: ['user_id']
+            });
+
+            if (!learner) {
+                return res.status(404).json({
+                    message: 'Learner not found',
+                    status: false,
+                });
+            }
+
+            // Get learner's assigned courses
+            const courses = await userCourseRepository
+                .createQueryBuilder('user_course')
+                .where('user_course.learner_id = :learner_id', { learner_id: learner.learner_id })
+                .getMany();
+            const course_ids = courses.map((course: any) => course.course.course_id);
+
+            if (course_ids.length === 0) {
+                return res.status(200).json({
+                    message: 'No courses assigned to learner',
+                    status: true,
+                    data: [],
+                    meta_data: {
+                        total_funding_bands: 0,
+                        assigned_courses: 0
+                    }
+                });
+            }
+
+            // Get funding bands for assigned courses
+            const fundingBandRepository = AppDataSource.getRepository(FundingBand);
+            const fundingBands = await fundingBandRepository.find({
+                where: course_ids.map(courseId => ({
+                    course: { course_id: courseId },
+                    is_active: true
+                })),
+                relations: ['course'],
+                order: { course: { course_name: 'ASC' }, band_name: 'ASC' }
+            });
+
+            const formattedFundingBands = fundingBands.map(band => ({
+                id: band.id,
+                band_name: band.band_name,
+                amount: band.amount,
+                cost: Number(band.amount),
+                effective_from: band.effective_from,
+                effective_to: band.effective_to,
+                course: band.course ? {
+                    course_id: band.course.course_id,
+                    course_name: band.course.course_name,
+                    course_code: band.course.course_code
+                } : null
+            }));
+
+            return res.status(200).json({
+                message: 'Funding bands for assigned courses retrieved successfully',
+                status: true,
+                data: formattedFundingBands,
+                meta_data: {
+                    total_funding_bands: formattedFundingBands.length,
+                    assigned_courses: course_ids.length,
+                    course_ids: course_ids
+                }
+            });
+
         } catch (error) {
             return res.status(500).json({
                 message: 'Internal Server Error',

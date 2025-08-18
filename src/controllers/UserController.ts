@@ -15,8 +15,8 @@ class UserController {
 
     public async CreateUser(req: CustomRequest, res: Response) {
         try {
-            const { user_name, first_name, last_name, email, password, confrimpassword, roles } = req.body
-            if (!user_name || !first_name || !last_name || !email || !password || !roles || !confrimpassword) {
+            const { user_name, first_name, last_name, email, password, confirmPassword, roles, line_manager_id } = req.body
+            if (!user_name || !first_name || !last_name || !email || !password || !roles || !confirmPassword) {
                 return res.status(400).json({
                     message: "All Field Required",
                     status: false
@@ -33,7 +33,7 @@ class UserController {
                 })
             }
 
-            if (password !== confrimpassword) {
+            if (password !== confirmPassword) {
                 return res.status(400).json({
                     message: "Password and confrim password not match",
                     status: false
@@ -43,8 +43,30 @@ class UserController {
                 req.body.password_changed = true
             }
 
+            // Validate line manager if provided
+            if (line_manager_id) {
+                const lineManager = await userRepository.findOne({
+                    where: { user_id: line_manager_id }
+                });
+                if (!lineManager) {
+                    return res.status(400).json({
+                        message: "Line manager not found",
+                        status: false
+                    });
+                }
+                if (!lineManager.roles.includes(UserRole.LineManager)) {
+                    return res.status(400).json({
+                        message: "Selected user is not a line manager",
+                        status: false
+                    });
+                }
+            }
+
             req.body.password = await bcryptpassword(req.body.password)
-            const user = await userRepository.create(req.body);
+            const user = await userRepository.create({
+                ...req.body,
+                line_manager: line_manager_id ? { user_id: line_manager_id } : null
+            });
 
             const users: any = await userRepository.save(user)
             res.status(200).json({
@@ -53,7 +75,7 @@ class UserController {
                 data: users
             })
 
-            sendPasswordByEmail(users.email, req.body.confrimpassword)
+            sendPasswordByEmail(users.email, req.body.confirmPassword)
 
         } catch (error) {
             return res.status(500).json({
@@ -421,7 +443,8 @@ class UserController {
     public async GetUserList(req: any, res: Response) {
         try {
             const userRepository = AppDataSource.getRepository(User)
-            const qb = userRepository.createQueryBuilder("user");
+            const qb = userRepository.createQueryBuilder("user")
+                .leftJoinAndSelect('user.line_manager', 'line_manager');
 
             if (req.query.role) {
                 qb.andWhere(":role = ANY(user.roles)", { role: req.query.role });
@@ -448,10 +471,40 @@ class UserController {
                 .orderBy("user.user_id", "ASC")
                 .getManyAndCount();
 
+            // Add calculated fields for trainers
+            const userCourseRepository = AppDataSource.getRepository(UserCourse);
+            const learnerRepository = AppDataSource.getRepository(Learner);
+
+            const enhancedUsers = await Promise.all(users.map(async (user) => {
+                let additionalFields = {};
+
+                // Check if user is a trainer and add trainer-specific fields
+                if (user.roles && user.roles.includes(UserRole.Trainer)) {
+                    // Get number of active learners for this trainer
+                    const activeLearnerCount = await userCourseRepository
+                        .createQueryBuilder('uc')
+                        .leftJoin('uc.learner_id', 'learner')
+                        .where('uc.trainer_id = :trainerId', { trainerId: user.user_id })
+                        .andWhere('learner.deleted_at IS NULL')
+                        .getCount();
+
+                    additionalFields = {
+                        //date_last_logged_in: user.last_login,
+                        number_of_active_learners: activeLearnerCount
+                    };
+                }
+
+                return {
+                    ...user,
+                    line_manager: user.line_manager?.user_name,
+                    ...additionalFields
+                };
+            }));
+
             return res.status(200).json({
                 message: "Users fetched successfully",
-                status: false,
-                data: users,
+                status: true,
+                data: enhancedUsers,
                 ...(req.query.meta === "true" && {
                     meta_data: {
                         page: req.pagination.page,
@@ -694,6 +747,116 @@ class UserController {
             })
         }
     }
+
+    public async getLineManagerCaseload(req: CustomRequest, res: Response) {
+        try {
+            const { line_manager_id, include_learners } = req.query;
+
+            const userRepository = AppDataSource.getRepository(User);
+            const learnerRepository = AppDataSource.getRepository(Learner);
+
+            let queryBuilder = userRepository.createQueryBuilder('line_manager')
+                .where(':role = ANY(line_manager.roles)', { role: UserRole.LineManager })
+                .andWhere('line_manager.deleted_at IS NULL')
+                .orderBy('line_manager.first_name', 'ASC');
+
+            // Filter by specific line manager if provided
+            if (line_manager_id) {
+                queryBuilder.andWhere('line_manager.user_id = :line_manager_id', { line_manager_id });
+            }
+
+            const lineManagers = await queryBuilder.getMany();
+
+            if (lineManagers.length === 0) {
+                return res.status(404).json({
+                    message: 'No line managers found',
+                    status: false,
+                });
+            }
+
+            // Get linked users and learners for each line manager
+            const caseloadData = await Promise.all(lineManagers.map(async (lineManager) => {
+                // Get users managed by this line manager
+                const managedUsers = await userRepository.find({
+                    where: { 
+                        line_manager: { user_id: lineManager.user_id },
+                        deleted_at: null 
+                    },
+                    select: [
+                        'user_id', 'user_name', 'first_name', 'last_name', 
+                        'email', 'mobile', 'roles', 'status', 'created_at'
+                    ]
+                });
+
+                let managedLearners = [];
+                // if (include_learners === 'true') {
+                //     // Get learners where the line manager is assigned
+                //     managedLearners = await learnerRepository.find({
+                //         where: { 
+                //             line_manager_name: `${lineManager.first_name} ${lineManager.last_name}`,
+                //             deleted_at: null 
+                //         },
+                //         relations: ['user_id', 'employer_id', 'funding_band'],
+                //         select: [
+                //             'learner_id', 'first_name', 'last_name', 'email', 
+                //             'mobile', 'job_title', 'created_at'
+                //         ]
+                //     });
+                // }
+
+                // Calculate statistics
+                const totalManagedUsers = managedUsers.length;
+                const totalManagedLearners = managedLearners.length;
+                const activeUsers = managedUsers.filter(user => user.status === 'Active').length;
+                const usersByRole = managedUsers.reduce((acc, user) => {
+                    user.roles.forEach(role => {
+                        acc[role] = (acc[role] || 0) + 1;
+                    });
+                    return acc;
+                }, {} as Record<string, number>);
+
+                return {
+                    line_manager: {
+                        user_id: lineManager.user_id,
+                        user_name: lineManager.user_name,
+                        first_name: lineManager.first_name,
+                        last_name: lineManager.last_name,
+                        full_name: `${lineManager.first_name} ${lineManager.last_name}`,
+                        email: lineManager.email,
+                        mobile: lineManager.mobile,
+                        status: lineManager.status,
+                        created_at: lineManager.created_at
+                    },
+                    statistics: {
+                        total_managed_users: totalManagedUsers,
+                        total_managed_learners: totalManagedLearners,
+                        active_users: activeUsers,
+                        users_by_role: usersByRole
+                    },
+                    managed_users: managedUsers,
+                    ...(include_learners === 'true' && { managed_learners: managedLearners })
+                };
+            }));
+
+            return res.status(200).json({
+                message: 'Line manager caseload fetched successfully',
+                status: true,
+                data: line_manager_id ? caseloadData[0] : caseloadData,
+                meta_data: {
+                    total_line_managers: lineManagers.length,
+                    include_learners: include_learners === 'true'
+                }
+            });
+
+        } catch (error) {
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                status: false,
+                error: error.message,
+            });
+        }
+    }
 }
+
 
 export default UserController;

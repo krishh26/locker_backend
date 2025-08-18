@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, OneToOne, JoinColumn, DeleteDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, OneToOne, JoinColumn, DeleteDateColumn, ManyToOne } from 'typeorm';
 import { UserRole, UserStatus } from '../util/constants';
 import { Employer } from './Employer.entity';
 
@@ -55,6 +55,10 @@ export class User {
 
   @Column({ type: 'enum', enum: UserStatus, default: UserStatus.Active })
   status: UserStatus;
+
+  @ManyToOne(() => User, { nullable: true })
+  @JoinColumn({ name: 'line_manager_id', referencedColumnName: 'user_id' })
+  line_manager: User;
 
   @DeleteDateColumn({ type: 'timestamp', nullable: true })
   deleted_at: Date;
