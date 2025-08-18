@@ -5,6 +5,7 @@ export enum UserRole {
     LIQA = 'LIQA',
     Employer = 'Employer',
     Trainer = 'Trainer',
+    LineManager = 'Line Manager',
     Admin = 'Admin',
 }
 
@@ -137,6 +138,7 @@ export const SocketDomain = {
 export const rolePriority = [
     UserRole.Admin,
     UserRole.Trainer,
+    UserRole.LineManager,
     UserRole.Employer,
     UserRole.LIQA,
     UserRole.IQA,

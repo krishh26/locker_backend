@@ -19,4 +19,8 @@ learnerRoutes.delete("/delete/:id", authorizeRoles(UserRole.Admin), Controller.d
 learnerRoutes.post("/restore/:id", authorizeRoles(UserRole.Admin), Controller.restoreLearner);
 learnerRoutes.get("/dashboard", authorizeRoles(UserRole.Admin), Controller.getAdminDashboard);
 
+// Funding band routes - automatic based on assigned courses
+learnerRoutes.put("/update-funding-band/:id", authorizeRoles(UserRole.Learner), Controller.updateLearnerFundingBand);
+learnerRoutes.get("/:id/funding-bands", authorizeRoles(), Controller.getLearnerFundingBands);
+
 export default learnerRoutes;
