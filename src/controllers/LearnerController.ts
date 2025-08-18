@@ -616,7 +616,7 @@ class LearnerController {
                 // Format funding bands data with custom amounts
                 fundingBandData = fundingBands.map(band => {
                     const courseId = band.course.course_id.toString();
-                    const customFunding = learner.custom_funding_data?.courses?.[courseId];
+                    const customFunding = learner.custom_funding_data;
 
                     return {
                         id: band.id,
@@ -662,8 +662,8 @@ class LearnerController {
     public async updateLearnerFundingBand(req: CustomRequest, res: Response): Promise<Response> {
         try {
             const { custom_funding_amount, course_id } = req.body;
-            const learner_id = req.params.id;
-            console.log(learner_id);
+            const user_id = req.user?.user_id;
+            console.log(typeof user_id);
             if (!custom_funding_amount || custom_funding_amount <= 0) {
                 return res.status(400).json({
                     message: 'Valid custom funding amount is required',
@@ -682,9 +682,9 @@ class LearnerController {
             const userCourseRepository = AppDataSource.getRepository(UserCourse);
             const fundingBandRepository = AppDataSource.getRepository(FundingBand);
 
-            // Find the learner by user_id (from token)
+            // Find the learner by user_id (from params)
             const learner = await learnerRepository.findOne({
-                where: { learner_id: parseInt(learner_id) },
+                where: { user_id: user_id },
                 relations: ['user_id']
             });
 
@@ -694,16 +694,20 @@ class LearnerController {
                     status: false,
                 });
             }
-
+            console.log(learner.learner_id, course_id)
             // Validate that the course is assigned to the learner
-            const userCourse = await userCourseRepository
+            const userCourses = await userCourseRepository
                 .createQueryBuilder('user_course')
-                .leftJoinAndSelect('user_course.course', 'course')
                 .where('user_course.learner_id = :learner_id', { learner_id: learner.learner_id })
-                .andWhere('course.course_id = :course_id', { course_id })
-                .getOne();
+                .getMany();
 
-            if (!userCourse) {
+            // Check if the course is assigned to this learner
+            const assignedCourse = userCourses.find(uc => {
+                const courseData = uc.course as any;
+                return courseData.course_id === parseInt(course_id);
+            });
+
+            if (!assignedCourse) {
                 return res.status(400).json({
                     message: 'Course is not assigned to this learner',
                     status: false,
@@ -711,13 +715,12 @@ class LearnerController {
             }
 
             // Get the funding band for this specific course
-            const fundingBand = await fundingBandRepository.findOne({
-                where: {
-                    course: { course_id: course_id },
-                    is_active: true
-                },
-                relations: ['course']
-            });
+            const fundingBand = await fundingBandRepository
+                .createQueryBuilder('funding_band')
+                .leftJoinAndSelect('funding_band.course', 'course')
+                .where('course.course_id = :course_id', { course_id })
+                .andWhere('funding_band.is_active = :is_active', { is_active: true })
+                .getOne();
 
             if (!fundingBand) {
                 return res.status(400).json({
@@ -727,25 +730,20 @@ class LearnerController {
             }
 
             // Validate that custom amount doesn't exceed the original funding band amount
-            const originalAmount = Number(fundingBand.amount);
-            if (custom_funding_amount > originalAmount) {
-                return res.status(400).json({
-                    message: `Custom funding amount cannot exceed the original funding band amount of £${originalAmount} for course ${fundingBand.course.course_name}`,
-                    status: false,
-                });
-            }
+             const originalAmount = Number(fundingBand.amount);
+            // if (custom_funding_amount > originalAmount) {
+            //     return res.status(400).json({
+            //         message: `Custom funding amount cannot exceed the original funding band amount of £${originalAmount} for course ${fundingBand.course.course_name}`,
+            //         status: false,
+            //     });
+            // }
 
             // Initialize custom funding data if it doesn't exist
             if (!learner.custom_funding_data) {
-                learner.custom_funding_data = {};
+                learner.custom_funding_data = null; // Initialize as an empty object
             }
 
-            // Store custom funding amount for this specific course
-            if (!learner.custom_funding_data.courses) {
-                learner.custom_funding_data.courses = {};
-            }
-
-            learner.custom_funding_data.courses[course_id] = {
+            learner.custom_funding_data = {
                 original_amount: originalAmount,
                 custom_amount: custom_funding_amount,
                 funding_band_id: fundingBand.id,

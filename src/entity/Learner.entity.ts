@@ -2,6 +2,7 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateCol
 import { User } from './User.entity';
 import { Session } from './Session.entity';
 import { Employer } from './Employer.entity';
+import { FundingBand } from './FundingBand.entity';
 import { Gender } from '../util/constants';
 
 @Entity('learner')
@@ -34,8 +35,83 @@ export class Learner {
   @Column({ type: 'varchar', nullable: true })
   funding_body: string;
 
+  @ManyToOne(() => FundingBand, { nullable: true })
+  @JoinColumn({ name: 'funding_band_id', referencedColumnName: 'id' })
+  funding_band: FundingBand;
+
+  @Column({ type: 'json', nullable: true })
+  custom_funding_data: {
+    original_amount: number;
+    custom_amount: number;
+    funding_band_id: number;
+    updated_by_learner: boolean;
+    updated_at: Date;
+  }
+
   @Column({ type: 'varchar', nullable: true })
   uln: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  awarding_body: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  county: string;
+
+  @Column({ type: 'date', nullable: true })
+  course_expected_end_date: Date;
+
+  @Column({ type: 'date', nullable: true })
+  course_actual_end_date: Date;
+
+  @Column({ type: 'varchar', nullable: true })
+  fs_english_green_progress: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  fs_english_orange_progress: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  fs_maths_green_progress: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  fs_maths_orange_progress: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  lara_code: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  learning_difficulties: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  main_aim_green_progress: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  main_aim_orange_progress: string;
+
+  @Column({ type: 'numeric', nullable: true })
+  main_aim_guided_learning_hours_achieved: number;
+
+  @Column({ type: 'varchar', nullable: true })
+  off_the_job_training: string;
+
+  @Column({ type: 'date', nullable: true })
+  planned_review_date: Date;
+
+  @Column({ type: 'varchar', nullable: true })
+  registration_number: string;
+
+  @Column({ type: 'date', nullable: true })
+  registration_date: Date;
+
+  @Column({ type: 'date', nullable: true })
+  review_date: Date;
+
+  @Column({ type: 'numeric', nullable: true })
+  guided_learning_hours_achieved: number;
+
+  @Column({ type: 'varchar', nullable: true })
+  iqas_name: string;
+
+  learner_surname: string;
 
   @Column({ type: 'varchar', nullable: true })
   mis_learner_id: string;
