@@ -80,9 +80,18 @@ class RiskRatingController {
                 high_percentage,
                 medium_percentage,
                 low_percentage,
-                assessment_methods: assessment_methods || {},
-                courses: []
+                course_comments: []
             };
+
+            // Add assessment method risk ratings (no comments)
+            if (assessment_methods) {
+                Object.keys(assessment_methods).forEach(method => {
+                    const methodData = assessment_methods[method];
+                    if (methodData.risk || methodData) {
+                        riskRatingData[`${method}_risk`] = methodData.risk || methodData;
+                    }
+                });
+            }
 
             const riskRating = riskRatingRepository.create(riskRatingData);
             const savedRiskRating = await riskRatingRepository.save(riskRating);
@@ -245,24 +254,14 @@ class RiskRatingController {
             if (medium_percentage !== undefined) riskRating.medium_percentage = medium_percentage;
             if (low_percentage !== undefined) riskRating.low_percentage = low_percentage;
 
-            // Update assessment methods JSON
+            // Update assessment method risk ratings (no comments)
             if (assessment_methods) {
-                if (!riskRating.assessment_methods) {
-                    riskRating.assessment_methods = {};
-                }
-
-                // Merge new assessment methods with existing ones
                 Object.keys(assessment_methods).forEach(method => {
                     const methodData = assessment_methods[method];
-                    if (!riskRating.assessment_methods[method]) {
-                        riskRating.assessment_methods[method] = {};
-                    }
+                    const riskValue = methodData.risk || methodData;
 
-                    if (methodData.risk !== undefined) {
-                        riskRating.assessment_methods[method].risk = methodData.risk;
-                    }
-                    if (methodData.comment !== undefined) {
-                        riskRating.assessment_methods[method].comment = methodData.comment;
+                    if (riskValue !== undefined) {
+                        riskRating[`${method}_risk`] = riskValue;
                     }
                 });
             }
@@ -331,188 +330,26 @@ class RiskRatingController {
         }
     }
 
-    // POST /api/v1/risk-rating/:id/comment → add assessment method comment and risk to risk rating
-    public async addComment(req: CustomRequest, res: Response) {
-        try {
-            const { id } = req.params;
-            const { assessment_method, comment, risk } = req.body;
 
-            if (!id || !assessment_method) {
-                return res.status(400).json({
-                    message: 'Risk rating ID and assessment_method are required',
-                    status: false,
-                });
-            }
 
-            if (!comment && !risk) {
-                return res.status(400).json({
-                    message: 'Either comment or risk must be provided',
-                    status: false,
-                });
-            }
-
-            // Validate assessment_method - all 11 methods
-            const validMethods = ['do', 'wt', 'pe', 'qa', 'ps', 'di', 'si', 'et', 'ra', 'ot', 'apl_rpl'];
-            if (!validMethods.includes(assessment_method.toLowerCase())) {
-                return res.status(400).json({
-                    message: 'assessment_method must be one of: do, wt, pe, qa, ps, di, si, et, ra, ot, apl_rpl',
-                    status: false,
-                });
-            }
-
-            // Validate risk level if provided
-            if (risk && !['Low', 'Medium', 'High'].includes(risk)) {
-                return res.status(400).json({
-                    message: 'risk must be one of: Low, Medium, High',
-                    status: false,
-                });
-            }
-
-            const riskRatingRepository = AppDataSource.getRepository(RiskRating);
-
-            const riskRating = await riskRatingRepository.findOne({
-                where: { id: parseInt(id) },
-                relations: ['trainer', 'course']
-            });
-
-            if (!riskRating) {
-                return res.status(404).json({
-                    message: 'Risk rating not found',
-                    status: false,
-                });
-            }
-
-            // Initialize assessment_methods object if it doesn't exist
-            if (!riskRating.assessment_methods) {
-                riskRating.assessment_methods = {};
-            }
-
-            const methodLower = assessment_method.toLowerCase();
-
-            // Initialize the assessment method object if it doesn't exist
-            if (!riskRating.assessment_methods[methodLower]) {
-                riskRating.assessment_methods[methodLower] = {};
-            }
-
-            // Update comment and/or risk for the assessment method
-            if (comment) {
-                riskRating.assessment_methods[methodLower].comment = comment;
-            }
-            if (risk) {
-                riskRating.assessment_methods[methodLower].risk = risk;
-            }
-
-            const updatedRiskRating = await riskRatingRepository.save(riskRating);
-
-            return res.status(200).json({
-                message: 'Assessment method updated successfully',
-                status: true,
-                data: {
-                    id: updatedRiskRating.id,
-                    assessment_methods: updatedRiskRating.assessment_methods,
-                    trainer: updatedRiskRating.trainer,
-                    course: updatedRiskRating.course,
-                    updated_at: updatedRiskRating.updated_at
-                },
-            });
-
-        } catch (error) {
-            return res.status(500).json({
-                message: 'Internal Server Error',
-                status: false,
-                error: error.message,
-            });
-        }
-    }
-
-    // POST /api/v1/risk-rating/:id/course-comment → add course comment to risk rating
-    public async addCourseComment(req: CustomRequest, res: Response) {
-        try {
-            const { id } = req.params;
-            const { course_id, course_name, comment } = req.body;
-
-            if (!id || !comment || !course_id) {
-                return res.status(400).json({
-                    message: 'Risk rating ID, course_id, and comment are required',
-                    status: false,
-                });
-            }
-
-            const riskRatingRepository = AppDataSource.getRepository(RiskRating);
-
-            const riskRating = await riskRatingRepository.findOne({
-                where: { id: parseInt(id) },
-                relations: ['trainer', 'course']
-            });
-
-            if (!riskRating) {
-                return res.status(404).json({
-                    message: 'Risk rating not found',
-                    status: false,
-                });
-            }
-
-            // Initialize courses array if it doesn't exist
-            if (!riskRating.courses) {
-                riskRating.courses = [];
-            }
-
-            // Find existing course or create new one
-            const existingCourseIndex = riskRating.courses.findIndex(c => c.course_id === parseInt(course_id));
-
-            if (existingCourseIndex >= 0) {
-                // Update existing course comment
-                riskRating.courses[existingCourseIndex].comment = comment;
-                if (course_name) {
-                    riskRating.courses[existingCourseIndex].course_name = course_name;
-                }
-            } else {
-                // Add new course with comment
-                riskRating.courses.push({
-                    course_id: parseInt(course_id),
-                    course_name: course_name || '',
-                    comment: comment
-                });
-            }
-
-            const updatedRiskRating = await riskRatingRepository.save(riskRating);
-
-            return res.status(200).json({
-                message: 'Course comment added successfully',
-                status: true,
-                data: {
-                    id: updatedRiskRating.id,
-                    courses: updatedRiskRating.courses,
-                    trainer: updatedRiskRating.trainer,
-                    course: updatedRiskRating.course,
-                    updated_at: updatedRiskRating.updated_at
-                },
-            });
-
-        } catch (error) {
-            return res.status(500).json({
-                message: 'Internal Server Error',
-                status: false,
-                error: error.message,
-            });
-        }
-    }
-
-    // POST /api/v1/risk-rating/:id/bulk-course-comments → add multiple course comments at once
-    public async addBulkCourseComments(req: CustomRequest, res: Response) {
+    // POST /api/v1/risk-rating/:id/course-comments → add one or multiple course comments to risk rating
+    public async addCourseComments(req: CustomRequest, res: Response) {
         try {
             const { id } = req.params;
             const { course_comments } = req.body;
 
-            if (!id || !course_comments || !Array.isArray(course_comments)) {
+            if (!id || !course_comments) {
                 return res.status(400).json({
-                    message: 'Risk rating ID and course_comments array are required',
+                    message: 'Risk rating ID and course_comments are required',
                     status: false,
                 });
             }
 
-            // Validate course_comments structure
-            for (const courseComment of course_comments) {
+            // Support both single comment object and array of comments
+            const commentsArray = Array.isArray(course_comments) ? course_comments : [course_comments];
+
+            // Validate each comment
+            for (const courseComment of commentsArray) {
                 if (!courseComment.course_id || !courseComment.comment) {
                     return res.status(400).json({
                         message: 'Each course comment must have course_id and comment',
@@ -535,42 +372,48 @@ class RiskRatingController {
                 });
             }
 
-            // Initialize courses array if it doesn't exist
-            if (!riskRating.courses) {
-                riskRating.courses = [];
+            // Initialize course_comments array if it doesn't exist
+            if (!riskRating.course_comments) {
+                riskRating.course_comments = [];
             }
 
             // Process each course comment
-            course_comments.forEach(courseComment => {
+            commentsArray.forEach(courseComment => {
                 const { course_id, course_name, comment } = courseComment;
 
                 // Find existing course or create new one
-                const existingCourseIndex = riskRating.courses.findIndex(c => c.course_id === parseInt(course_id));
+                const existingCourseIndex = riskRating.course_comments.findIndex(c => c.course_id === parseInt(course_id));
 
                 if (existingCourseIndex >= 0) {
                     // Update existing course comment
-                    riskRating.courses[existingCourseIndex].comment = comment;
+                    riskRating.course_comments[existingCourseIndex].comment = comment;
+                    riskRating.course_comments[existingCourseIndex].updated_at = new Date();
                     if (course_name) {
-                        riskRating.courses[existingCourseIndex].course_name = course_name;
+                        riskRating.course_comments[existingCourseIndex].course_name = course_name;
                     }
                 } else {
                     // Add new course with comment
-                    riskRating.courses.push({
+                    riskRating.course_comments.push({
                         course_id: parseInt(course_id),
                         course_name: course_name || '',
-                        comment: comment
+                        comment: comment,
+                        updated_at: new Date()
                     });
                 }
             });
 
             const updatedRiskRating = await riskRatingRepository.save(riskRating);
 
+            const message = commentsArray.length === 1
+                ? 'Course comment added successfully'
+                : `${commentsArray.length} course comments added successfully`;
+
             return res.status(200).json({
-                message: 'Course comments added successfully',
+                message: message,
                 status: true,
                 data: {
                     id: updatedRiskRating.id,
-                    courses: updatedRiskRating.courses,
+                    course_comments: updatedRiskRating.course_comments,
                     trainer: updatedRiskRating.trainer,
                     course: updatedRiskRating.course,
                     updated_at: updatedRiskRating.updated_at
@@ -585,6 +428,8 @@ class RiskRatingController {
             });
         }
     }
+
+
 
     // GET /api/v1/risk-rating/trainers → get trainers with their courses for risk rating
     public async getTrainersWithCourses(req: CustomRequest, res: Response) {

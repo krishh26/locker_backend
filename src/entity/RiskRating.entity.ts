@@ -8,19 +8,6 @@ export enum RiskLevel {
     High = 'High'
 }
 
-// Interface for assessment method with risk and comment
-interface AssessmentMethodData {
-    risk?: RiskLevel;
-    comment?: string;
-}
-
-// Interface for course with comment
-interface CourseData {
-    course_id: number;
-    course_name?: string;
-    comment?: string;
-}
-
 @Entity('risk_ratings')
 export class RiskRating {
     @PrimaryGeneratedColumn()
@@ -40,6 +27,41 @@ export class RiskRating {
     @Column({ type: 'enum', enum: RiskLevel, default: RiskLevel.Medium })
     overall_risk_level: RiskLevel;
 
+    // Assessment Method Risk Ratings
+    @Column({ type: 'enum', enum: RiskLevel, nullable: true })
+    do_risk: RiskLevel; // Direct Observation
+
+    @Column({ type: 'enum', enum: RiskLevel, nullable: true })
+    wt_risk: RiskLevel; // Witness Testimony
+
+    @Column({ type: 'enum', enum: RiskLevel, nullable: true })
+    pe_risk: RiskLevel; // Product Evidence
+
+    @Column({ type: 'enum', enum: RiskLevel, nullable: true })
+    qa_risk: RiskLevel; // Questioning & Answers
+
+    @Column({ type: 'enum', enum: RiskLevel, nullable: true })
+    ps_risk: RiskLevel; // Personal Statement
+
+    @Column({ type: 'enum', enum: RiskLevel, nullable: true })
+    di_risk: RiskLevel; // Discussion
+
+    @Column({ type: 'enum', enum: RiskLevel, nullable: true })
+    si_risk: RiskLevel; // Simulation
+
+    @Column({ type: 'enum', enum: RiskLevel, nullable: true })
+    et_risk: RiskLevel; // Exams and Tests
+
+    @Column({ type: 'enum', enum: RiskLevel, nullable: true })
+    ra_risk: RiskLevel; // Reflective Account
+
+    @Column({ type: 'enum', enum: RiskLevel, nullable: true })
+    ot_risk: RiskLevel; // Other
+
+    @Column({ type: 'enum', enum: RiskLevel, nullable: true })
+    apl_rpl_risk: RiskLevel; // Recognised Prior Learning
+
+    // Percentage fields for assessment methods
     @Column({ type: 'decimal', precision: 5, scale: 2, nullable: true })
     high_percentage: number;
 
@@ -49,25 +71,14 @@ export class RiskRating {
     @Column({ type: 'decimal', precision: 5, scale: 2, nullable: true })
     medium_percentage: number;
 
-    // JSON field for assessment methods with risk and comment combined
+    // JSON field for course-specific comments only
     @Column({ type: 'json', nullable: true })
-    assessment_methods: {
-        do?: AssessmentMethodData;           // Direct Observation
-        wt?: AssessmentMethodData;           // Witness Testimony
-        pe?: AssessmentMethodData;           // Product Evidence
-        qa?: AssessmentMethodData;           // Questioning & Answers
-        ps?: AssessmentMethodData;           // Personal Statement
-        di?: AssessmentMethodData;           // Discussion
-        si?: AssessmentMethodData;           // Simulation
-        et?: AssessmentMethodData;           // Exams and Tests
-        ra?: AssessmentMethodData;           // Reflective Account
-        ot?: AssessmentMethodData;           // Other
-        apl_rpl?: AssessmentMethodData;      // Recognised Prior Learning
-    };
-
-    // JSON field for courses with comments
-    @Column({ type: 'json', nullable: true })
-    courses: CourseData[];
+    course_comments: Array<{
+        course_id: number;
+        course_name?: string;
+        comment: string;
+        updated_at?: Date;
+    }>;
 
     @Column({ type: 'boolean', default: true })
     is_active: boolean;

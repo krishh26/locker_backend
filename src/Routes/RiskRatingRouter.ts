@@ -24,14 +24,8 @@ RiskRatingRoutes.put('/:id', authorizeRoles(UserRole.Admin, UserRole.Trainer), R
 // DELETE /api/v1/risk-rating/:id → delete risk rating
 RiskRatingRoutes.delete('/:id', authorizeRoles(UserRole.Admin), RiskRatingController.deleteRiskRating);
 
-// POST /api/v1/risk-rating/:id/comment → add assessment method comment to risk rating
-RiskRatingRoutes.post('/:id/comment', authorizeRoles(), RiskRatingController.addComment);
-
-// POST /api/v1/risk-rating/:id/course-comment → add course comment to risk rating
-RiskRatingRoutes.post('/:id/course-comment', authorizeRoles(), RiskRatingController.addCourseComment);
-
-// POST /api/v1/risk-rating/:id/bulk-course-comments → add multiple course comments at once
-RiskRatingRoutes.post('/:id/bulk-course-comments', authorizeRoles(), RiskRatingController.addBulkCourseComments);
+// POST /api/v1/risk-rating/:id/course-comments → add one or multiple course comments to risk rating
+RiskRatingRoutes.post('/:id/course-comments', authorizeRoles(), RiskRatingController.addCourseComments);
 
 // PUT /api/v1/risk-rating/bulk-update → bulk update risk levels
 RiskRatingRoutes.put('/bulk-update', authorizeRoles(UserRole.Admin, UserRole.Trainer), RiskRatingController.bulkUpdateRiskLevels);
