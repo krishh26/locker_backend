@@ -9,23 +9,26 @@ import { UserRole } from '../util/constants';
 
 class RiskRatingController {
 
-    // POST /api/v1/risk-rating → create new risk rating
+    // POST /api/v1/risk-rating → create/update risk ratings
     public async createRiskRating(req: CustomRequest, res: Response) {
         try {
-            const { 
-                trainer_id, 
-                course_id, 
-                course_title,
-                overall_risk_level,
-                assessment_methods,
-                high_percentage,
-                medium_percentage,
-                low_percentage 
+            const {
+                trainer_id,
+                courses,
+                assessment_methods
             } = req.body;
 
-            if (!trainer_id || !course_id || !overall_risk_level) {
+            if (!trainer_id) {
                 return res.status(400).json({
-                    message: 'Trainer ID, course ID, and overall risk level are required',
+                    message: 'Trainer ID is required',
+                    status: false,
+                });
+            }
+
+            // Validate that at least courses or assessment_methods is provided
+            if (!courses && !assessment_methods) {
+                return res.status(400).json({
+                    message: 'Either courses array or assessment_methods must be provided',
                     status: false,
                 });
             }
@@ -34,10 +37,11 @@ class RiskRatingController {
             const userRepository = AppDataSource.getRepository(User);
             const courseRepository = AppDataSource.getRepository(Course);
 
-            // Validate trainer
-            const trainer = await userRepository.findOne({ 
-                where: { user_id: trainer_id } 
+            // Validate trainer exists
+            const trainer = await userRepository.findOne({
+                where: { user_id: trainer_id }
             });
+
             if (!trainer || !trainer.roles.includes(UserRole.Trainer)) {
                 return res.status(404).json({
                     message: 'Trainer not found or user is not a trainer',
@@ -45,62 +49,86 @@ class RiskRatingController {
                 });
             }
 
-            // Validate course
-            const course = await courseRepository.findOne({ 
-                where: { course_id: course_id } 
-            });
-            if (!course) {
-                return res.status(404).json({
-                    message: 'Course not found',
-                    status: false,
-                });
-            }
-
-            // Check if risk rating already exists for this trainer-course combination
-            const existingRating = await riskRatingRepository.findOne({
-                where: { 
-                    trainer: { user_id: trainer_id },
-                    course: { course_id: course_id }
-                }
+            // Check if risk rating already exists for this trainer
+            let existingRiskRating = await riskRatingRepository.findOne({
+                where: { trainer: { user_id: trainer_id } }
             });
 
-            if (existingRating) {
-                return res.status(400).json({
-                    message: 'Risk rating already exists for this trainer-course combination',
-                    status: false,
-                });
-            }
+            if (existingRiskRating) {
+                // Update existing risk rating
+                if (courses && Array.isArray(courses)) {
+                    // Validate all courses exist
+                    const validatedCourses = [];
+                    for (const courseData of courses) {
+                        if (!courseData.course_id) continue;
 
-            // Create risk rating
-            const riskRatingData: any = {
-                trainer: { user_id: trainer_id },
-                course: { course_id: course_id },
-                course_title,
-                overall_risk_level,
-                high_percentage,
-                medium_percentage,
-                low_percentage,
-                course_comments: []
-            };
+                        const course = await courseRepository.findOne({
+                            where: { course_id: courseData.course_id }
+                        });
 
-            // Add assessment method risk ratings (no comments)
-            if (assessment_methods) {
-                Object.keys(assessment_methods).forEach(method => {
-                    const methodData = assessment_methods[method];
-                    if (methodData.risk || methodData) {
-                        riskRatingData[`${method}_risk`] = methodData.risk || methodData;
+                        if (course) {
+                            validatedCourses.push({
+                                course_id: courseData.course_id,
+                                course_name: course.course_name,
+                                course_title: courseData.course_title || course.course_name,
+                                overall_risk_level: courseData.overall_risk_level || 'Medium'
+                            });
+                        }
                     }
+                    existingRiskRating.courses = validatedCourses;
+                }
+
+                if (assessment_methods) {
+                    existingRiskRating.assessment_methods = assessment_methods;
+                }
+
+                const updatedRiskRating = await riskRatingRepository.save(existingRiskRating);
+
+                return res.status(200).json({
+                    message: 'Risk rating updated successfully',
+                    status: true,
+                    data: updatedRiskRating
+                });
+
+            } else {
+                // Create new risk rating
+                const validatedCourses = [];
+
+                if (courses && Array.isArray(courses)) {
+                    for (const courseData of courses) {
+                        if (!courseData.course_id) continue;
+
+                        const course = await courseRepository.findOne({
+                            where: { course_id: courseData.course_id }
+                        });
+
+                        if (course) {
+                            validatedCourses.push({
+                                course_id: courseData.course_id,
+                                course_name: course.course_name,
+                                course_title: courseData.course_title || course.course_name,
+                                overall_risk_level: courseData.overall_risk_level || 'Medium'
+                            });
+                        }
+                    }
+                }
+
+                const riskRatingData: any = {
+                    trainer: { user_id: trainer_id },
+                    courses: validatedCourses,
+                    assessment_methods: assessment_methods || {},
+                    course_comments: []
+                };
+
+                const riskRating = riskRatingRepository.create(riskRatingData);
+                const savedRiskRating = await riskRatingRepository.save(riskRating);
+
+                return res.status(201).json({
+                    message: 'Risk rating created successfully',
+                    status: true,
+                    data: savedRiskRating
                 });
             }
-
-            const riskRating = riskRatingRepository.create(riskRatingData);
-            const savedRiskRating = await riskRatingRepository.save(riskRating);
-
-            return res.status(201).json({
-                message: 'Risk rating created successfully',
-                status: true,
-                data: savedRiskRating,
-            });
 
         } catch (error) {
             return res.status(500).json({
@@ -119,7 +147,6 @@ class RiskRatingController {
             const riskRatingRepository = AppDataSource.getRepository(RiskRating);
             const queryBuilder = riskRatingRepository.createQueryBuilder('risk_rating')
                 .leftJoinAndSelect('risk_rating.trainer', 'trainer')
-                .leftJoinAndSelect('risk_rating.course', 'course')
                 .orderBy('risk_rating.created_at', 'DESC');
 
             // Apply filters
@@ -127,12 +154,8 @@ class RiskRatingController {
                 queryBuilder.andWhere('risk_rating.trainer_id = :trainer_id', { trainer_id });
             }
 
-            if (course_id) {
-                queryBuilder.andWhere('risk_rating.course_id = :course_id', { course_id });
-            }
-
             if (risk_level) {
-                queryBuilder.andWhere('risk_rating.overall_risk_level = :risk_level', { risk_level });
+                queryBuilder.andWhere('risk_rating.courses.overall_risk_level = :risk_level', { risk_level });
             }
 
             queryBuilder.andWhere('risk_rating.is_active = :is_active', { is_active: true });
@@ -186,7 +209,7 @@ class RiskRatingController {
 
             const riskRating = await riskRatingRepository.findOne({
                 where: { id: parseInt(id) },
-                relations: ['trainer', 'course']
+                relations: ['trainer', 'courses']
             });
 
             if (!riskRating) {
@@ -215,14 +238,10 @@ class RiskRatingController {
     public async updateRiskRating(req: CustomRequest, res: Response) {
         try {
             const { id } = req.params;
-            const { 
-                course_title,
-                overall_risk_level,
+            const {
+                courses,
                 assessment_methods,
-                high_percentage,
-                medium_percentage,
-                low_percentage,
-                is_active 
+                is_active
             } = req.body;
 
             if (!id) {
@@ -233,10 +252,11 @@ class RiskRatingController {
             }
 
             const riskRatingRepository = AppDataSource.getRepository(RiskRating);
+            const courseRepository = AppDataSource.getRepository(Course);
 
             const riskRating = await riskRatingRepository.findOne({
                 where: { id: parseInt(id) },
-                relations: ['trainer', 'course']
+                relations: ['trainer']
             });
 
             if (!riskRating) {
@@ -246,24 +266,39 @@ class RiskRatingController {
                 });
             }
 
-            // Update fields
-            if (course_title !== undefined) riskRating.course_title = course_title;
-            if (overall_risk_level !== undefined) riskRating.overall_risk_level = overall_risk_level;
-            if (is_active !== undefined) riskRating.is_active = is_active;
-            if (high_percentage !== undefined) riskRating.high_percentage = high_percentage;
-            if (medium_percentage !== undefined) riskRating.medium_percentage = medium_percentage;
-            if (low_percentage !== undefined) riskRating.low_percentage = low_percentage;
+            // Update courses if provided
+            if (courses && Array.isArray(courses)) {
+                const validatedCourses = [];
+                for (const courseData of courses) {
+                    if (!courseData.course_id) continue;
 
-            // Update assessment method risk ratings (no comments)
-            if (assessment_methods) {
-                Object.keys(assessment_methods).forEach(method => {
-                    const methodData = assessment_methods[method];
-                    const riskValue = methodData.risk || methodData;
+                    const course = await courseRepository.findOne({
+                        where: { course_id: courseData.course_id }
+                    });
 
-                    if (riskValue !== undefined) {
-                        riskRating[`${method}_risk`] = riskValue;
+                    if (course) {
+                        validatedCourses.push({
+                            course_id: courseData.course_id,
+                            course_name: course.course_name,
+                            course_title: courseData.course_title || course.course_name,
+                            overall_risk_level: courseData.overall_risk_level || 'Medium',
+                            high_percentage: courseData.high_percentage || 0,
+                            medium_percentage: courseData.medium_percentage || 0,
+                            low_percentage: courseData.low_percentage || 0
+                        });
                     }
-                });
+                }
+                riskRating.courses = validatedCourses;
+            }
+
+            // Update assessment methods if provided
+            if (assessment_methods) {
+                riskRating.assessment_methods = assessment_methods;
+            }
+
+            // Update is_active if provided
+            if (is_active !== undefined) {
+                riskRating.is_active = is_active;
             }
 
             const updatedRiskRating = await riskRatingRepository.save(riskRating);
@@ -299,7 +334,7 @@ class RiskRatingController {
 
             const riskRating = await riskRatingRepository.findOne({
                 where: { id: parseInt(id) },
-                relations: ['trainer', 'course']
+                relations: ['trainer']
             });
 
             if (!riskRating) {
@@ -316,8 +351,8 @@ class RiskRatingController {
                 status: true,
                 data: {
                     id: parseInt(id),
-                    course_title: riskRating.course_title,
-                    trainer_name: `${riskRating.trainer.first_name} ${riskRating.trainer.last_name}`
+                    trainer_name: `${riskRating.trainer.first_name} ${riskRating.trainer.last_name}`,
+                    courses_count: riskRating.courses?.length || 0
                 }
             });
 
@@ -415,7 +450,7 @@ class RiskRatingController {
                     id: updatedRiskRating.id,
                     course_comments: updatedRiskRating.course_comments,
                     trainer: updatedRiskRating.trainer,
-                    course: updatedRiskRating.course,
+                    courses: updatedRiskRating.courses,
                     updated_at: updatedRiskRating.updated_at
                 },
             });
@@ -472,54 +507,6 @@ class RiskRatingController {
         }
     }
 
-    // PUT /api/v1/risk-rating/bulk-update → bulk update risk levels
-    public async bulkUpdateRiskLevels(req: CustomRequest, res: Response) {
-        try {
-            const { risk_level, trainer_id, course_id } = req.body;
-
-            if (!risk_level || !trainer_id) {
-                return res.status(400).json({
-                    message: 'Risk level and trainer ID are required',
-                    status: false,
-                });
-            }
-
-            const riskRatingRepository = AppDataSource.getRepository(RiskRating);
-
-            let whereCondition: any = { 
-                trainer: { user_id: trainer_id },
-                is_active: true 
-            };
-
-            if (course_id) {
-                whereCondition.course = { course_id: course_id };
-            }
-
-            // Update all matching risk ratings
-            const updateResult = await riskRatingRepository.update(
-                whereCondition,
-                { overall_risk_level: risk_level }
-            );
-
-            return res.status(200).json({
-                message: 'Risk levels updated successfully',
-                status: true,
-                data: {
-                    updated_count: updateResult.affected,
-                    risk_level,
-                    trainer_id,
-                    course_id: course_id || 'all_courses'
-                }
-            });
-
-        } catch (error) {
-            return res.status(500).json({
-                message: 'Internal Server Error',
-                status: false,
-                error: error.message,
-            });
-        }
-    }
 }
 
 export default new RiskRatingController();

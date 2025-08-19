@@ -21,6 +21,9 @@ CourseRoutes.get('/list', authorizeRoles(), paginationMiddleware, Controller.get
 CourseRoutes.get('/user/get', authorizeRoles(), Controller.getUserCourse);
 CourseRoutes.patch('/user/update/:id', authorizeRoles(), Controller.updateUserCourse);
 
+// GET /api/v1/course/trainer/:trainer_id → get courses by trainer ID
+CourseRoutes.get('/trainer/:trainer_id', authorizeRoles(), Controller.getCoursesByTrainer);
+
 // Funding band routes for specific course
 CourseRoutes.get('/:course_id/funding-band', authorizeRoles(), FundingBandController.getFundingBandsByCourse);
 
