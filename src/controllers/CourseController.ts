@@ -424,6 +424,71 @@ class CourseController {
         }
     }
 
+    // GET /api/v1/course/trainer/:trainer_id → get courses by trainer ID
+    public async getCoursesByTrainer(req: CustomRequest, res: Response): Promise<Response> {
+        try {
+            const { trainer_id } = req.params;
+
+            if (!trainer_id) {
+                return res.status(400).json({
+                    message: 'Trainer ID is required',
+                    status: false,
+                });
+            }
+
+            const userCourseRepository = AppDataSource.getRepository(UserCourse);
+
+            // Get all courses where the trainer is assigned
+            const userCourses = await userCourseRepository
+                .createQueryBuilder('user_course')
+                .where('user_course.trainer_id = :trainer_id', { trainer_id: parseInt(trainer_id) })
+                .getMany();
+
+            // Extract unique courses from the results
+            const coursesMap = new Map();
+            userCourses.forEach(userCourse => {
+                const courseData = userCourse.course as any;
+                if (courseData && courseData.course_id) {
+                    if (coursesMap.has(courseData.course_id)) {
+                        // Update existing course learner count
+                        const existingCourse = coursesMap.get(courseData.course_id);
+                        existingCourse.learner_count += 1;
+                    } else {
+                        // Add new course
+                        coursesMap.set(courseData.course_id, {
+                            course_id: courseData.course_id,
+                            course_name: courseData.course_name,
+                            course_code: courseData.course_code,
+                            level: courseData.level,
+                            total_credits: courseData.total_credits,
+                            course_core_type: courseData.course_core_type,
+                            learner_count: 1
+                        });
+                    }
+                }
+            });
+
+            const courses = Array.from(coursesMap.values());
+
+            return res.status(200).json({
+                message: 'Courses retrieved successfully',
+                status: true,
+                data: {
+                    trainer_id: parseInt(trainer_id),
+                    total_courses: courses.length,
+                    courses: courses
+                }
+            });
+
+        } catch (error) {
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                error: error.message,
+                status: false,
+            });
+        }
+    }
+
     public async updateUserCourse(req: Request, res: Response): Promise<Response> {
         try {
             const user_course_id: number = parseInt(req.params.id);

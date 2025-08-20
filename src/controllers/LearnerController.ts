@@ -75,6 +75,131 @@ class LearnerController {
         }
     }
 
+    public async CreateMultipleLearners(req: CustomRequest, res: Response) {
+        try {
+            const { learners } = req.body;
+
+            if (!learners || !Array.isArray(learners) || learners.length === 0) {
+                return res.status(400).json({
+                    message: "Learners array is required and must contain at least one learner",
+                    status: false
+                });
+            }
+
+            const userRepository = AppDataSource.getRepository(User);
+            const learnerRepository = AppDataSource.getRepository(Learner);
+
+            const results = [];
+            const errors = [];
+
+            for (let i = 0; i < learners.length; i++) {
+                const learnerData = learners[i];
+                const { user_name, first_name, last_name, email, password, confirmPassword, mobile, funding_body, funding_band_id, job_title } = learnerData;
+
+                try {
+                    // Validate required fields
+                    if (!user_name || !first_name || !last_name || !email || !password || !confirmPassword) {
+                        errors.push({
+                            index: i,
+                            email: email || 'unknown',
+                            error: "All fields required (user_name, first_name, last_name, email, password, confirmPassword)"
+                        });
+                        continue;
+                    }
+
+                    // Check if email already exists
+                    const userEmail = await userRepository.findOne({ where: { email: email } });
+                    if (userEmail) {
+                        errors.push({
+                            index: i,
+                            email: email,
+                            error: "Email already exists"
+                        });
+                        continue;
+                    }
+
+                    // Validate password confirmation
+                    if (password !== confirmPassword) {
+                        errors.push({
+                            index: i,
+                            email: email,
+                            error: "Password and confirm password do not match"
+                        });
+                        continue;
+                    }
+
+                    // Create user
+                    const hashedPassword = await bcryptpassword(password);
+                    const userData = {
+                        ...learnerData,
+                        password: hashedPassword
+                    };
+
+                    const user: any = await userRepository.save(await userRepository.create(userData));
+
+                    // Create learner
+                    const learnerCreateData = {
+                        ...learnerData,
+                        user_id: user.user_id
+                    };
+
+                    const learner = await learnerRepository.create(learnerCreateData);
+                    const savedLearner = await learnerRepository.save(learner);
+
+                    // Send password email
+                    const sendResult = await sendPasswordByEmail(email, password);
+                    if (!sendResult) {
+                        errors.push({
+                            index: i,
+                            email: email,
+                            error: "Learner created but failed to send email",
+                            learner_id: (savedLearner as any).learner_id
+                        });
+                    }
+
+                    results.push({
+                        index: i,
+                        status: 'success',
+                        email: email,
+                        learner_id: (savedLearner as any).learner_id,
+                        user_id: user.user_id,
+                        data: savedLearner
+                    });
+
+                } catch (learnerError) {
+                    errors.push({
+                        index: i,
+                        email: email || 'unknown',
+                        error: learnerError.message
+                    });
+                }
+            }
+
+            const successCount = results.length;
+            const errorCount = errors.length;
+            const totalCount = learners.length;
+
+            return res.status(successCount > 0 ? 200 : 400).json({
+                message: `Processed ${totalCount} learner(s): ${successCount} successful, ${errorCount} failed`,
+                status: successCount > 0,
+                data: {
+                    total_processed: totalCount,
+                    successful: successCount,
+                    failed: errorCount,
+                    results: results,
+                    errors: errors
+                }
+            });
+
+        } catch (error) {
+            return res.status(500).json({
+                message: "Internal Server Error",
+                error: error.message,
+                status: false
+            });
+        }
+    }
+
     public async getLearnerList(req: Request, res: Response): Promise<Response> {
         try {
             let { user_id, role, course_id, employer_id, status, trainer_id } = req.query as any;

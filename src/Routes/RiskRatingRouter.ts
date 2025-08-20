@@ -27,7 +27,6 @@ RiskRatingRoutes.delete('/:id', authorizeRoles(UserRole.Admin), RiskRatingContro
 // POST /api/v1/risk-rating/:id/course-comments → add one or multiple course comments to risk rating
 RiskRatingRoutes.post('/:id/course-comments', authorizeRoles(), RiskRatingController.addCourseComments);
 
-// PUT /api/v1/risk-rating/bulk-update → bulk update risk levels
-RiskRatingRoutes.put('/bulk-update', authorizeRoles(UserRole.Admin, UserRole.Trainer), RiskRatingController.bulkUpdateRiskLevels);
+
 
 export default RiskRatingRoutes;
