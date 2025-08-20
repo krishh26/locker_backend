@@ -142,23 +142,26 @@ class RiskRatingController {
     // GET /api/v1/risk-rating → list all risk ratings
     public async getRiskRatings(req: CustomRequest, res: Response) {
         try {
-            const { page = 1, limit = 10, trainer_id, course_id, risk_level } = req.query;
+            const { page = 1, limit = 10, trainer_id, course_id } = req.query;
 
             const riskRatingRepository = AppDataSource.getRepository(RiskRating);
-            const queryBuilder = riskRatingRepository.createQueryBuilder('risk_rating')
+            let queryBuilder = riskRatingRepository.createQueryBuilder('risk_rating')
                 .leftJoinAndSelect('risk_rating.trainer', 'trainer')
+                .where('risk_rating.is_active = :is_active', { is_active: true })
                 .orderBy('risk_rating.created_at', 'DESC');
 
             // Apply filters
             if (trainer_id) {
-                queryBuilder.andWhere('risk_rating.trainer_id = :trainer_id', { trainer_id });
+                queryBuilder.andWhere('trainer.user_id = :trainer_id', { trainer_id });
             }
 
-            if (risk_level) {
-                queryBuilder.andWhere('risk_rating.courses.overall_risk_level = :risk_level', { risk_level });
+            // Filter by course_id if provided (search within JSON courses array)
+            if (course_id) {
+                queryBuilder.andWhere(
+                    'JSON_SEARCH(risk_rating.courses, "one", :course_id, NULL, "$[*].course_id") IS NOT NULL',
+                    { course_id: course_id.toString() }
+                );
             }
-
-            queryBuilder.andWhere('risk_rating.is_active = :is_active', { is_active: true });
 
             // Apply pagination
             const pageNumber = parseInt(page as string);
@@ -169,18 +172,41 @@ class RiskRatingController {
 
             const [riskRatings, total] = await queryBuilder.getManyAndCount();
 
+            // Format the response data
+            const formattedRiskRatings = riskRatings.map(rating => ({
+                id: rating.id,
+                trainer: {
+                    user_id: rating.trainer.user_id,
+                    user_name: rating.trainer.user_name,
+                    first_name: rating.trainer.first_name,
+                    last_name: rating.trainer.last_name,
+                    full_name: `${rating.trainer.first_name} ${rating.trainer.last_name}`,
+                    email: rating.trainer.email
+                },
+                courses: rating.courses || [],
+                assessment_methods: rating.assessment_methods || {},
+                course_comments: rating.course_comments || [],
+                is_active: rating.is_active,
+                created_at: rating.created_at,
+                updated_at: rating.updated_at
+            }));
+
             const totalPages = Math.ceil(total / limitNumber);
 
             return res.status(200).json({
                 message: 'Risk ratings fetched successfully',
                 status: true,
-                data: riskRatings,
+                data: formattedRiskRatings,
                 meta_data: {
                     page: pageNumber,
-                    items: riskRatings.length,
+                    items: formattedRiskRatings.length,
                     page_size: limitNumber,
                     pages: totalPages,
-                    total: total
+                    total: total,
+                    filters: {
+                        trainer_id: trainer_id || null,
+                        course_id: course_id || null
+                    }
                 }
             });
 
