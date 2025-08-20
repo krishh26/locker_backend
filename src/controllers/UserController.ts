@@ -750,10 +750,21 @@ class UserController {
 
     public async getLineManagerCaseload(req: CustomRequest, res: Response) {
         try {
-            const { line_manager_id, include_learners } = req.query;
+            const {
+                line_manager_id,
+                include_learners,
+                page = 1,
+                limit = 10,
+                line_manager_name
+            } = req.query;
 
             const userRepository = AppDataSource.getRepository(User);
             const learnerRepository = AppDataSource.getRepository(Learner);
+
+            // Pagination setup
+            const pageNumber = parseInt(page as string) || 1;
+            const pageSize = parseInt(limit as string) || 10;
+            const skip = (pageNumber - 1) * pageSize;
 
             let queryBuilder = userRepository.createQueryBuilder('line_manager')
                 .where(':role = ANY(line_manager.roles)', { role: UserRole.LineManager })
@@ -765,7 +776,22 @@ class UserController {
                 queryBuilder.andWhere('line_manager.user_id = :line_manager_id', { line_manager_id });
             }
 
-            const lineManagers = await queryBuilder.getMany();
+            // Filter by line manager name if provided
+            if (line_manager_name) {
+                queryBuilder.andWhere(
+                    '(LOWER(line_manager.first_name) LIKE LOWER(:line_manager_name) OR LOWER(line_manager.last_name) LIKE LOWER(:line_manager_name) OR LOWER(CONCAT(line_manager.first_name, \' \', line_manager.last_name)) LIKE LOWER(:line_manager_name))',
+                    { line_manager_name: `%${line_manager_name}%` }
+                );
+            }
+
+            // Get total count for pagination
+            const totalLineManagers = await queryBuilder.getCount();
+
+            // Apply pagination
+            const lineManagers = await queryBuilder
+                .skip(skip)
+                .take(pageSize)
+                .getMany();
 
             if (lineManagers.length === 0) {
                 return res.status(404).json({
@@ -789,20 +815,31 @@ class UserController {
                 });
 
                 let managedLearners = [];
-                // if (include_learners === 'true') {
-                //     // Get learners where the line manager is assigned
-                //     managedLearners = await learnerRepository.find({
-                //         where: { 
-                //             line_manager_name: `${lineManager.first_name} ${lineManager.last_name}`,
-                //             deleted_at: null 
-                //         },
-                //         relations: ['user_id', 'employer_id', 'funding_band'],
-                //         select: [
-                //             'learner_id', 'first_name', 'last_name', 'email', 
-                //             'mobile', 'job_title', 'created_at'
-                //         ]
-                //     });
-                // }
+                if (include_learners === 'true') {
+                    // Build learner query with search functionality
+                    let learnerQueryBuilder = learnerRepository.createQueryBuilder('learner')
+                        .leftJoinAndSelect('learner.user_id', 'user')
+                        .leftJoinAndSelect('learner.employer_id', 'employer')
+                        .leftJoinAndSelect('learner.funding_band', 'funding_band')
+                        .where('learner.line_manager_name = :line_manager_name', {
+                            line_manager_name: `${lineManager.first_name} ${lineManager.last_name}`
+                        })
+                        .andWhere('learner.deleted_at IS NULL');
+
+
+
+                    managedLearners = await learnerQueryBuilder
+                        .select([
+                            'learner.learner_id', 'learner.first_name', 'learner.last_name',
+                            'learner.email', 'learner.mobile', 'learner.job_title',
+                            'learner.created_at', 'learner.line_manager_name',
+                            'user.user_id', 'user.user_name',
+                            'employer.employer_id', 'employer.employer_name',
+                            'funding_band.id', 'funding_band.band_name', 'funding_band.amount'
+                        ])
+                        .orderBy('learner.first_name', 'ASC')
+                        .getMany();
+                }
 
                 // Calculate statistics
                 const totalManagedUsers = managedUsers.length;
@@ -843,8 +880,14 @@ class UserController {
                 status: true,
                 data: line_manager_id ? caseloadData[0] : caseloadData,
                 meta_data: {
-                    total_line_managers: lineManagers.length,
-                    include_learners: include_learners === 'true'
+                    total_line_managers: totalLineManagers,
+                    current_page: pageNumber,
+                    page_size: pageSize,
+                    total_pages: Math.ceil(totalLineManagers / pageSize),
+                    has_next_page: pageNumber < Math.ceil(totalLineManagers / pageSize),
+                    has_previous_page: pageNumber > 1,
+                    include_learners: include_learners === 'true',
+                    line_manager_search: line_manager_name || null
                 }
             });
 

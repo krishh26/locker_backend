@@ -10,6 +10,7 @@ const learnerRoutes = express.Router();
 const Controller = new LearnerController();
 
 learnerRoutes.post("/create", authorizeRoles(UserRole.Admin), singleFileUpload("avatar"), Controller.CreateLearner);
+learnerRoutes.post("/create-multiple", authorizeRoles(UserRole.Admin), Controller.CreateMultipleLearners);
 learnerRoutes.get("/list", authorizeRoles(), paginationMiddleware, Controller.getLearnerList);
 learnerRoutes.get("/get/:id", authorizeRoles(), Controller.getLearner);
 learnerRoutes.get("/get", authorizeRoles(UserRole.Learner), Controller.getLearnerByToken);
@@ -20,7 +21,7 @@ learnerRoutes.post("/restore/:id", authorizeRoles(UserRole.Admin), Controller.re
 learnerRoutes.get("/dashboard", authorizeRoles(UserRole.Admin), Controller.getAdminDashboard);
 
 // Funding band routes - automatic based on assigned courses
-learnerRoutes.put("/update-funding-band/:id", authorizeRoles(UserRole.Learner), Controller.updateLearnerFundingBand);
+learnerRoutes.put("/update-funding-band", authorizeRoles(UserRole.Learner), Controller.updateLearnerFundingBand);
 learnerRoutes.get("/:id/funding-bands", authorizeRoles(), Controller.getLearnerFundingBands);
 
 export default learnerRoutes;
