@@ -8,6 +8,7 @@ import { User } from "../entity/User.entity";
 import { Learner } from "../entity/Learner.entity";
 import { SendNotification } from "../util/socket/notification";
 import { UserCourse } from "../entity/UserCourse.entity";
+import { RiskRating } from "../entity/RiskRating.entity";
 import { NotificationType, SocketDomain, UserRole, CourseType } from "../util/constants";
 import { convertDataToJson } from "../util/convertDataToJson";
 import { EnhancedUnit, LearningOutcome, AssessmentCriterion } from "../types/courseBuilder.types";
@@ -424,7 +425,7 @@ class CourseController {
         }
     }
 
-    // GET /api/v1/course/trainer/:trainer_id → get courses by trainer ID
+    // GET /api/v1/course/trainer/:trainer_id → get courses by trainer ID with risk ratings
     public async getCoursesByTrainer(req: CustomRequest, res: Response): Promise<Response> {
         try {
             const { trainer_id } = req.params;
@@ -437,6 +438,8 @@ class CourseController {
             }
 
             const userCourseRepository = AppDataSource.getRepository(UserCourse);
+            const riskRatingRepository = AppDataSource.getRepository(RiskRating);
+            const courseRepository = AppDataSource.getRepository(Course);
 
             // Get all courses where the trainer is assigned
             const userCourses = await userCourseRepository
@@ -468,15 +471,86 @@ class CourseController {
                 }
             });
 
-            const courses = Array.from(coursesMap.values());
+            let courses = Array.from(coursesMap.values());
+
+            // Get risk rating for this trainer
+            const riskRating = await riskRatingRepository.findOne({
+                where: { trainer: { user_id: parseInt(trainer_id) } },
+                relations: ['trainer']
+            });
+
+            // Enhance courses with risk rating information
+            const coursesWithRatings = courses.map(course => {
+                let ratingInfo = {
+                    overall_risk_level: '',
+                    has_rating: false
+                };
+
+                // Check if this course has a risk rating
+                if (riskRating && riskRating.courses) {
+                    const courseRating = riskRating.courses.find((rc: any) => rc.course_id === course.course_id);
+                    if (courseRating) {
+                        ratingInfo = {
+                            overall_risk_level: courseRating.overall_risk_level || '',
+                            has_rating: true
+                        };
+                    }
+                }
+
+                return {
+                    ...course,
+                    risk_rating: ratingInfo
+                };
+            });
+
+            // If trainer has no assigned courses but has risk ratings, include those courses too
+            if (riskRating && riskRating.courses && courses.length === 0) {
+                const ratedCourses = await Promise.all(
+                    riskRating.courses.map(async (ratedCourse: any) => {
+                        // Get full course details
+                        const fullCourse = await courseRepository.findOne({
+                            where: { course_id: ratedCourse.course_id }
+                        });
+
+                        if (fullCourse) {
+                            return {
+                                course_id: fullCourse.course_id,
+                                course_name: fullCourse.course_name,
+                                course_code: fullCourse.course_code,
+                                level: fullCourse.level,
+                                total_credits: fullCourse.total_credits,
+                                course_core_type: fullCourse.course_core_type,
+                                learner_count: 0, // No learners assigned yet
+                                risk_rating: {
+                                    overall_risk_level: ratedCourse.overall_risk_level || '',
+                                    has_rating: true
+                                }
+                            };
+                        }
+                        return null;
+                    })
+                );
+
+                coursesWithRatings.push(...ratedCourses.filter(course => course !== null));
+            }
 
             return res.status(200).json({
-                message: 'Courses retrieved successfully',
+                message: 'Courses with risk ratings retrieved successfully',
                 status: true,
                 data: {
                     trainer_id: parseInt(trainer_id),
-                    total_courses: courses.length,
-                    courses: courses
+                    total_courses: coursesWithRatings.length,
+                    courses_with_ratings: coursesWithRatings.filter(c => c.risk_rating.has_rating).length,
+                    courses_without_ratings: coursesWithRatings.filter(c => !c.risk_rating.has_rating).length,
+                    risk_rating_info: {
+                        id: riskRating?.id || null,
+                        assessment_methods: riskRating?.assessment_methods || {},
+                        course_comments: riskRating?.course_comments || [],
+                        is_active: riskRating?.is_active || true,
+                        created_at: riskRating?.created_at || null,
+                        updated_at: riskRating?.updated_at || null
+                    },
+                    courses: coursesWithRatings
                 }
             });
 

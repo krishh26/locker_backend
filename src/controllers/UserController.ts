@@ -496,7 +496,7 @@ class UserController {
 
                 return {
                     ...user,
-                    line_manager: user.line_manager?.user_name,
+                    line_manager: user.line_manager,
                     ...additionalFields
                 };
             }));
