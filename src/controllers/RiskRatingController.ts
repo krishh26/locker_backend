@@ -235,7 +235,7 @@ class RiskRatingController {
 
             const riskRating = await riskRatingRepository.findOne({
                 where: { id: parseInt(id) },
-                relations: ['trainer', 'courses']
+                relations: ['trainer']
             });
 
             if (!riskRating) {
@@ -423,7 +423,7 @@ class RiskRatingController {
 
             const riskRating = await riskRatingRepository.findOne({
                 where: { id: parseInt(id) },
-                relations: ['trainer', 'course']
+                relations: ['trainer']
             });
 
             if (!riskRating) {
