@@ -170,6 +170,11 @@ class EmployerController {
                     "employer.assessment_date",
                     "employer.assessment_renewal_date",
                     "employer.insurance_renewal_date",
+                    "employer.employer_county",
+                    "employer.health_safety_renewal_date",
+                    "employer.employer_postcode",
+                    "employer.employer_town_city",
+                    "employer.employer_telephone",
                     "employer.file",
                     "employer.deleted_at",
                     "employer.created_at",
@@ -188,14 +193,25 @@ class EmployerController {
                 .orderBy("employer.employer_id", "ASC")
                 .getManyAndCount();
 
+            // Get learner counts for each employer
+            const learnerRepository = AppDataSource.getRepository(Learner);
+            const employerData = await Promise.all(employer.map(async (emp) => {
+                const learnerCount = await learnerRepository.count({
+                    where: { employer_id: { employer_id: emp.employer_id } }
+                });
+
+                return {
+                    ...emp,
+                    email: emp.user?.email,
+                    number: emp.user?.mobile,
+                    number_of_learners: learnerCount
+                };
+            }));
+
             return res.status(200).json({
                 message: "Employer fetched successfully",
                 status: true,
-                data: employer.map(emp => ({
-                    ...emp,
-                    email: emp.user?.email,
-                    number: emp.user?.mobile
-                })),
+                data: employerData,
                 ...(req.query.meta === "true" && {
                     meta_data: {
                         page: req.pagination.page,
