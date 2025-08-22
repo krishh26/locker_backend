@@ -616,24 +616,53 @@ class LearnerController {
             const learner_forename = learner.first_name;
             const learner_surname = learner.last_name;
 
-            // Get list of assessors (trainers)
-            const trainers = await userRepository
-                .createQueryBuilder('user')
-                .where(':role = ANY(user.roles)', { role: 'Trainer' })
-                .andWhere('user.deleted_at IS NULL')
-                .select(['user.user_id', 'user.first_name', 'user.last_name', 'user.user_name'])
-                .getMany();
-
-            const list_assessors = trainers.map(trainer => ({
-                user_id: trainer.user_id,
-                name: `${trainer.first_name} ${trainer.last_name}`,
-                user_name: trainer.user_name
-            }));
-
-            // Get primary assessor name (trainer from most recent learner plan)
+            // Get list of assessors (trainers) assigned to this specific learner
+            const learnerTrainers = new Set();
             let primary_assessor_name = null;
-            if (learnerPlans.length > 0 && learnerPlans[0].assessor_id) {
-                primary_assessor_name = `${learnerPlans[0].assessor_id.first_name} ${learnerPlans[0].assessor_id.last_name}`;
+
+            // Get trainers from UserCourse assignments
+            courses.forEach(course => {
+                if (course.trainer_id) {
+                    learnerTrainers.add(course.trainer_id.user_id);
+                }
+                // if (course.IQA_id) {
+                //     learnerTrainers.add(course.IQA_id.user_id);
+                // }
+                // if (course.LIQA_id) {
+                //     learnerTrainers.add(course.LIQA_id.user_id);
+                // }
+                // if (course.EQA_id) {
+                //     learnerTrainers.add(course.EQA_id.user_id);
+                // }
+            });
+
+            // Get trainers from LearnerPlan sessions
+            learnerPlans.forEach(plan => {
+                if (plan.assessor_id) {
+                    learnerTrainers.add(plan.assessor_id.user_id);
+                }
+            });
+
+            // Get primary assessor (main trainer from most recent course assignment)
+            if (courses.length > 0 && courses[0].trainer_id) {
+                primary_assessor_name = `${courses[0].trainer_id.first_name} ${courses[0].trainer_id.last_name}`;
+            }
+
+            // Fetch details for all assigned trainers
+            const list_assessors = [];
+            if (learnerTrainers.size > 0) {
+                const assignedTrainers = await userRepository
+                    .createQueryBuilder('user')
+                    .where('user.user_id IN (:...trainerIds)', { trainerIds: Array.from(learnerTrainers) })
+                    .andWhere('user.deleted_at IS NULL')
+                    .select(['user.user_id', 'user.first_name', 'user.last_name', 'user.user_name'])
+                    .getMany();
+
+                list_assessors.push(...assignedTrainers.map(trainer => ({
+                    user_id: trainer.user_id,
+                    name: `${trainer.first_name} ${trainer.last_name}`,
+                    user_name: trainer.user_name
+                })));
             }
 
             // Get course status from UserCourse
