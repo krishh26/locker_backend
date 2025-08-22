@@ -76,6 +76,21 @@ export class Employer {
   @Column({ type: 'timestamp', nullable: true })
   insurance_renewal_date: Date;
 
+  @Column({ type: 'varchar', nullable: true })
+  employer_county: string;
+
+  @Column({ type: 'date', nullable: true })
+  health_safety_renewal_date: Date;
+
+  @Column({ type: 'varchar', nullable: true })
+  employer_postcode: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  employer_town_city: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  employer_telephone: string;
+
   @Column({ type: 'json', nullable: true })
   file: object;
 

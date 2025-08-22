@@ -12,6 +12,7 @@ import { Employer } from "../entity/Employer.entity";
 import { TimeLog } from "../entity/TimeLog.entity";
 import { Session } from "../entity/Session.entity";
 import { FundingBand } from "../entity/FundingBand.entity";
+import { LearnerPlan, LearnerPlanType } from "../entity/LearnerPlan.entity";
 
 
 class LearnerController {
@@ -546,7 +547,143 @@ class LearnerController {
                 }));
             }
 
+            // ✅ NEW: Enhanced learner data with all requested keys
+            const learnerPlanRepository = AppDataSource.getRepository(LearnerPlan);
+            const userRepository = AppDataSource.getRepository(User);
 
+            // Get learner plan sessions for this learner
+            const learnerPlans = await learnerPlanRepository
+                .createQueryBuilder('learner_plan')
+                .leftJoinAndSelect('learner_plan.learners', 'learner')
+                .leftJoinAndSelect('learner_plan.courses', 'course')
+                .leftJoinAndSelect('learner_plan.assessor_id', 'assessor')
+                .where('learner.learner_id = :learner_id', { learner_id })
+                .orderBy('learner_plan.startDate', 'DESC')
+                .getMany();
+
+            // Get course name from the most recent learner plan session
+            let course_name = null;
+            let course_start_date = null;
+            if (learnerPlans.length > 0 && learnerPlans[0].courses && learnerPlans[0].courses.length > 0) {
+                course_name = learnerPlans[0].courses[0].course_name;
+                course_start_date = learnerPlans[0].startDate;
+            }
+
+            // Get next session date (next learner plan session)
+            const nextLearnerPlan = await learnerPlanRepository
+                .createQueryBuilder('learner_plan')
+                .leftJoin('learner_plan.learners', 'learner')
+                .where('learner.learner_id = :learner_id', { learner_id })
+                .andWhere('learner_plan.startDate > :currentDate', { currentDate: new Date() })
+                .orderBy('learner_plan.startDate', 'ASC')
+                .getOne();
+
+            const next_session_date_key = nextLearnerPlan ? nextLearnerPlan.startDate : null;
+
+            // Get formal review dates
+            const formalReviews = await learnerPlanRepository
+                .createQueryBuilder('learner_plan')
+                .leftJoin('learner_plan.learners', 'learner')
+                .where('learner.learner_id = :learner_id', { learner_id })
+                .andWhere('learner_plan.type = :type', { type: LearnerPlanType.FormalReview })
+                .orderBy('learner_plan.startDate', 'DESC')
+                .getMany();
+
+            // Get planned review date (most recent formal review date)
+            const planned_review_date = formalReviews.length > 0 ? formalReviews[0].startDate : null;
+
+            // Get next planned review date (next formal review)
+            const nextFormalReview = await learnerPlanRepository
+                .createQueryBuilder('learner_plan')
+                .leftJoin('learner_plan.learners', 'learner')
+                .where('learner.learner_id = :learner_id', { learner_id })
+                .andWhere('learner_plan.type = :type', { type: LearnerPlanType.FormalReview })
+                .andWhere('learner_plan.startDate > :currentDate', { currentDate: new Date() })
+                .orderBy('learner_plan.startDate', 'ASC')
+                .getOne();
+
+            const next_planned_review_date = nextFormalReview ? nextFormalReview.startDate : null;
+
+            // Calculate weeks since last review
+            let weeks_since_last_review = null;
+            if (planned_review_date) {
+                const timeDiff = new Date().getTime() - new Date(planned_review_date).getTime();
+                weeks_since_last_review = Math.floor(timeDiff / (1000 * 3600 * 24 * 7));
+            }
+
+            // Get line manager information
+            const line_manager_name = learner.line_manager_name || null;
+            const learner_forename = learner.first_name;
+            const learner_surname = learner.last_name;
+
+            // Get list of assessors (trainers) assigned to this specific learner
+            const learnerTrainers = new Set();
+            let primary_assessor_name = null;
+
+            // Get trainers from UserCourse assignments
+            courses.forEach(course => {
+                if (course.trainer_id) {
+                    learnerTrainers.add(course.trainer_id.user_id);
+                }
+                // if (course.IQA_id) {
+                //     learnerTrainers.add(course.IQA_id.user_id);
+                // }
+                // if (course.LIQA_id) {
+                //     learnerTrainers.add(course.LIQA_id.user_id);
+                // }
+                // if (course.EQA_id) {
+                //     learnerTrainers.add(course.EQA_id.user_id);
+                // }
+            });
+
+            // Get trainers from LearnerPlan sessions
+            learnerPlans.forEach(plan => {
+                if (plan.assessor_id) {
+                    learnerTrainers.add(plan.assessor_id.user_id);
+                }
+            });
+
+            // Get primary assessor (main trainer from most recent course assignment)
+            if (courses.length > 0 && courses[0].trainer_id) {
+                primary_assessor_name = `${courses[0].trainer_id.first_name} ${courses[0].trainer_id.last_name}`;
+            }
+
+            // Fetch details for all assigned trainers
+            const list_assessors = [];
+            if (learnerTrainers.size > 0) {
+                const assignedTrainers = await userRepository
+                    .createQueryBuilder('user')
+                    .where('user.user_id IN (:...trainerIds)', { trainerIds: Array.from(learnerTrainers) })
+                    .andWhere('user.deleted_at IS NULL')
+                    .select(['user.user_id', 'user.first_name', 'user.last_name', 'user.user_name'])
+                    .getMany();
+
+                list_assessors.push(...assignedTrainers.map(trainer => ({
+                    user_id: trainer.user_id,
+                    name: `${trainer.first_name} ${trainer.last_name}`,
+                    user_name: trainer.user_name
+                })));
+            }
+
+            // Get course status from UserCourse
+            let status_of_course = null;
+            if (course_ids.length > 0) {
+                const userCourseRepository = AppDataSource.getRepository(UserCourse);
+
+                // Get all user courses for this learner and filter by course_id
+                const userCourses = await userCourseRepository
+                    .createQueryBuilder('user_course')
+                    .where('user_course.learner_id = :learner_id', { learner_id })
+                    .getMany();
+
+                // Find the course with matching course_id in the JSON
+                const userCourse = userCourses.find(uc => {
+                    const courseData = uc.course as any;
+                    return courseData && courseData.course_id === course_ids[0];
+                });
+
+                status_of_course = userCourse ? userCourse.course_status : null;
+            }
 
             return res.status(200).json({
                 message: 'Learner retrieved successfully',
@@ -560,6 +697,20 @@ class LearnerController {
                     employer_name: learner?.employer_id?.employer_name,
                     nextvisitdate: nextVisitDate,
                     available_funding_bands: fundingBandData,
+
+                    // ✅ NEW: All requested keys
+                    course_name: course_name,
+                    course_start_date: course_start_date,
+                    next_session_date_key: next_session_date_key,
+                    planned_review_date: planned_review_date,
+                    line_manager_name: line_manager_name,
+                    learner_forename: learner_forename,
+                    learner_surname: learner_surname,
+                    list_assessors: list_assessors,
+                    next_planned_review_date: next_planned_review_date,
+                    weeks_since_last_review: weeks_since_last_review,
+                    primary_assessor_name: primary_assessor_name,
+                    status_of_course: status_of_course
                 }
             });
         } catch (error) {
