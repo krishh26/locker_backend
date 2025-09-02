@@ -504,16 +504,16 @@ class LearnerController {
             learner.otjTimeSpendRequired = 100;
 
             // Get next visit date
-            const sessionRepository = AppDataSource.getRepository(Session);
-            const nextSession = await sessionRepository.createQueryBuilder('session')
-                .leftJoin('session.learners', 'learner')
-                .where('learner.learner_id = :learner_id', { learner_id })
-                .andWhere('session.startDate > :currentDate', { currentDate: new Date() })
-                .orderBy('session.startDate', 'ASC')
-                .select(['session.startDate'])
-                .getOne();
+            // const sessionRepository = AppDataSource.getRepository(LearnerPlan);
+            // const nextSession = await sessionRepository.createQueryBuilder('session')
+            //     .leftJoin('session.learners', 'learner')
+            //     .where('learner.learner_id = :learner_id', { learner_id })
+            //     .andWhere('session.startDate > :currentDate', { currentDate: new Date() })
+            //     .orderBy('session.startDate', 'ASC')
+            //     .select(['session.startDate'])
+            //     .getOne();
 
-            const nextVisitDate = nextSession ? nextSession.startDate : null;
+            // const nextVisitDate = nextSession ? nextSession.startDate : null;
 
             // Automatically fetch funding bands based on learner's assigned courses
             let fundingBandData = null;
@@ -590,7 +590,22 @@ class LearnerController {
                 .getMany();
 
             // Get planned review date (most recent formal review date)
-            const planned_review_date = formalReviews.length > 0 ? formalReviews[0].startDate : null;
+            let planned_review_date: Date | null = null;
+
+            if (formalReviews.length > 0) {
+                const now = new Date();
+
+                // find the first review that is today or in the future
+                const nextOrToday = formalReviews
+                    .filter(r => r.startDate >= new Date(now.toDateString())) // ignore past ones
+                    .sort((a, b) => a.startDate.getTime() - b.startDate.getTime()); // ascending
+
+                if (nextOrToday.length > 0) {
+                    planned_review_date = nextOrToday[0].startDate; // closest upcoming (or today)
+                } else {
+                    planned_review_date = null; // no upcoming reviews
+                }
+            }
 
             // Get next planned review date (next formal review)
             const nextFormalReview = await learnerPlanRepository
@@ -605,10 +620,22 @@ class LearnerController {
             const next_planned_review_date = nextFormalReview ? nextFormalReview.startDate : null;
 
             // Calculate weeks since last review
-            let weeks_since_last_review = null;
-            if (planned_review_date) {
-                const timeDiff = new Date().getTime() - new Date(planned_review_date).getTime();
-                weeks_since_last_review = Math.floor(timeDiff / (1000 * 3600 * 24 * 7));
+            let last_review_date: Date | null = null;
+            let weeks_since_last_review: number | null = null;
+
+            if (formalReviews.length > 0) {
+                const now = new Date();
+
+                const pastReviews = formalReviews
+                    .filter(r => r.startDate < new Date(now.toDateString()))
+                    .sort((a, b) => b.startDate.getTime() - a.startDate.getTime()); // latest past
+
+                if (pastReviews.length > 0) {
+                    last_review_date = pastReviews[0].startDate;
+
+                    const diffMs = now.getTime() - last_review_date.getTime();
+                    weeks_since_last_review = Math.floor(diffMs / (1000 * 60 * 60 * 24 * 7));
+                }
             }
 
             // Get line manager information
@@ -695,7 +722,7 @@ class LearnerController {
                     course: courses,
                     employer_id: learner?.employer_id?.employer_id,
                     employer_name: learner?.employer_id?.employer_name,
-                    nextvisitdate: nextVisitDate,
+                    nextvisitdate: next_session_date_key,
                     available_funding_bands: fundingBandData,
 
                     // ✅ NEW: All requested keys
