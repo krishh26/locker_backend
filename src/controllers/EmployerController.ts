@@ -196,9 +196,10 @@ class EmployerController {
             // Get learner counts for each employer
             const learnerRepository = AppDataSource.getRepository(Learner);
             const employerData = await Promise.all(employer.map(async (emp) => {
-                const learnerCount = await learnerRepository.count({
-                    where: { employer_id: { employer_id: emp.employer_id } }
-                });
+                const learnerCount = await learnerRepository
+                    .createQueryBuilder("learner")
+                    .where("learner.employer_id = :id", { id: emp.employer_id })
+                    .getCount();
 
                 return {
                     ...emp,
