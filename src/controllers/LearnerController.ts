@@ -1347,6 +1347,210 @@ class LearnerController {
             });
         }
     }
+
+    public async bulkCreateLearnersWithCourses(req: CustomRequest, res: Response) {
+        try {
+            const { learners } = req.body;
+            if (!learners || !Array.isArray(learners) || learners.length === 0) {
+                return res.status(400).json({
+                    message: "Learners array is required and must contain at least one learner",
+                    status: false
+                });
+            }
+
+            const userRepository = AppDataSource.getRepository(User);
+            const learnerRepository = AppDataSource.getRepository(Learner);
+            const employerRepository = AppDataSource.getRepository(Employer);
+            const courseRepository = AppDataSource.getRepository("Course");
+            const userCourseRepository = AppDataSource.getRepository(UserCourse);
+
+            // Helper to resolve user by name (for trainer, IQA, etc.)
+            const resolveUserByName = async (name: string) => {
+                if (!name) return null;
+                const [first_name, ...lastArr] = name.trim().split(" ");
+                const last_name = lastArr.join(" ");
+                return await userRepository.findOne({ where: { first_name, last_name } });
+            };
+
+            // Helper to resolve employer by name
+            const resolveEmployerByName = async (employer_name: string) => {
+                if (!employer_name) return null;
+                return await employerRepository.findOne({ where: { employer_name } });
+            };
+
+            // Helper to resolve course by name
+            const resolveCourseByName = async (course_name: string) => {
+                if (!course_name) return null;
+                return await courseRepository.findOne({ where: { course_name } });
+            };
+
+            const results = [];
+            const errors = [];
+
+            for (let i = 0; i < learners.length; i++) {
+                const learnerData = learners[i];
+                const {
+                    user_name, first_name, last_name, email, password, confirmPassword, mobile,
+                    national_ins_no, funding_body, employer_name, courses
+                } = learnerData;
+
+                try {
+                    // Validate required fields
+                    if (!user_name || !first_name || !last_name || !email || !password || !confirmPassword || !courses || !Array.isArray(courses) || courses.length === 0) {
+                        errors.push({
+                            index: i,
+                            email: email || 'unknown',
+                            error: "All fields required (user_name, first_name, last_name, email, password, confirmPassword, courses)"
+                        });
+                        continue;
+                    }
+
+                    // Check if email already exists
+                    let user = await userRepository.findOne({ where: { email } });
+                    if (user) {
+                        errors.push({
+                            index: i,
+                            email,
+                            error: "Email already exists"
+                        });
+                        continue;
+                    }
+
+                    // Validate password confirmation
+                    if (password !== confirmPassword) {
+                        errors.push({
+                            index: i,
+                            email,
+                            error: "Password and confirm password do not match"
+                        });
+                        continue;
+                    }
+
+                    // Resolve employer
+                    let employer = null;
+                    if (employer_name) {
+                        employer = await resolveEmployerByName(employer_name);
+                        if (!employer) {
+                            errors.push({
+                                index: i,
+                                email,
+                                error: `Employer "${employer_name}" not found`
+                            });
+                            continue;
+                        }
+                    }
+
+                    // Create user
+                    const hashedPassword = await bcryptpassword(password);
+                    user = await userRepository.save(userRepository.create({
+                        user_name, first_name, last_name, email, password: hashedPassword, mobile
+                    }));
+
+                    // Create learner (fix: pass user object, not just ID)
+                    const learner = await learnerRepository.save(
+                        learnerRepository.create({
+                            user_id: user, // <-- pass the user object, not user.user_id
+                            user_name, first_name, last_name, email, mobile,
+                            national_ins_no, funding_body,
+                            employer_id: employer ? employer : null // <-- pass employer object or null
+                        })
+                    );
+
+                    // Assign courses
+                    for (let c = 0; c < courses.length; c++) {
+                        const courseRow = courses[c];
+                        const {
+                            course_name, start_date, end_date,
+                            trainer_name, iqa_name, liqa_name, eqa_name, employer_name: courseEmployerName
+                        } = courseRow;
+
+                        // Resolve course
+                        const course = await resolveCourseByName(course_name);
+                        if (!course) {
+                            errors.push({
+                                index: i,
+                                email,
+                                course_name,
+                                error: `Course "${course_name}" not found`
+                            });
+                            continue;
+                        }
+
+                        // Resolve employer for this course (fallback to top-level employer)
+                        let courseEmployer = employer;
+                        if (courseEmployerName && courseEmployerName !== employer_name) {
+                            courseEmployer = await resolveEmployerByName(courseEmployerName);
+                            if (!courseEmployer) {
+                                errors.push({
+                                    index: i,
+                                    email,
+                                    course_name,
+                                    error: `Employer "${courseEmployerName}" not found for course`
+                                });
+                                continue;
+                            }
+                        }
+
+                        // Resolve trainer, IQA, LIQA, EQA
+                        const trainer = await resolveUserByName(trainer_name);
+                        const iqa = await resolveUserByName(iqa_name);
+                        const liqa = await resolveUserByName(liqa_name);
+                        const eqa = await resolveUserByName(eqa_name);
+
+                        // Create UserCourse (fix: pass course object, not just { course_id })
+                        await userCourseRepository.save(
+                            userCourseRepository.create({
+                                course: course, // <-- pass the course object
+                                learner_id: learner, // <-- pass the learner object
+                                trainer_id: trainer ? trainer : null,
+                                IQA_id: iqa ? iqa : null,
+                                LIQA_id: liqa ? liqa : null,
+                                EQA_id: eqa ? eqa : null,
+                                employer_id: courseEmployer ? courseEmployer.employer_id : null,
+                                start_date,
+                                end_date
+                            })
+                        );
+                    }
+
+                    results.push({
+                        index: i,
+                        status: 'success',
+                        email,
+                        learner_id: learner.learner_id,
+                        user_id: user.user_id
+                    });
+
+                } catch (err) {
+                    errors.push({
+                        index: i,
+                        email: email || 'unknown',
+                        error: err.message
+                    });
+                }
+            }
+
+            return res.status(results.length > 0 ? 200 : 400).json({
+                message: `Processed ${learners.length} learner(s): ${results.length} successful, ${errors.length} failed`,
+                status: results.length > 0,
+                data: {
+                    total_processed: learners.length,
+                    successful: results.length,
+                    failed: errors.length,
+                    results,
+                    errors
+                }
+            });
+
+        } catch (error) {
+            return res.status(500).json({
+                message: "Internal Server Error",
+                error: error.message,
+                status: false
+            });
+        }
+    }
+
 }
 
 export default LearnerController;
