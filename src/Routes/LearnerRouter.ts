@@ -19,6 +19,7 @@ learnerRoutes.patch("/update/:id", authorizeRoles(UserRole.Admin), Controller.up
 learnerRoutes.delete("/delete/:id", authorizeRoles(UserRole.Admin), Controller.deleteLearner);
 learnerRoutes.post("/restore/:id", authorizeRoles(UserRole.Admin), Controller.restoreLearner);
 learnerRoutes.get("/dashboard", authorizeRoles(UserRole.Admin), Controller.getAdminDashboard);
+learnerRoutes.post("/bulk-upload", authorizeRoles(), Controller.bulkCreateLearnersWithCourses);
 
 // Funding band routes - automatic based on assigned courses
 learnerRoutes.put("/update-funding-band", authorizeRoles(UserRole.Learner), Controller.updateLearnerFundingBand);
