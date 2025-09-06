@@ -545,7 +545,6 @@ class CourseController {
                     risk_rating_info: {
                         id: riskRating?.id || null,
                         assessment_methods: riskRating?.assessment_methods || {},
-                        course_comments: riskRating?.course_comments || [],
                         is_active: riskRating?.is_active || true,
                         created_at: riskRating?.created_at || null,
                         updated_at: riskRating?.updated_at || null

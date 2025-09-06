@@ -10,6 +10,9 @@ import { CustomRequest } from "../util/Interface/expressInterface";
 import { resetPasswordByEmail, sendPasswordByEmail, sendUserEmail } from "../util/mailSend";
 import { getHighestPriorityRole, UserRole } from "../util/constants";
 import { UserCourse } from "../entity/UserCourse.entity";
+import { Employer } from "../entity/Employer.entity";
+import { Raw, In } from 'typeorm';
+
 
 class UserController {
 
@@ -760,6 +763,7 @@ class UserController {
 
             const userRepository = AppDataSource.getRepository(User);
             const learnerRepository = AppDataSource.getRepository(Learner);
+            const employerRepository = AppDataSource.getRepository(Employer);
 
             // Pagination setup
             const pageNumber = parseInt(page as string) || 1;
@@ -802,7 +806,7 @@ class UserController {
 
             // Get linked users and learners for each line manager
             const caseloadData = await Promise.all(lineManagers.map(async (lineManager) => {
-                // Get users managed by this line manager
+                // Get users managed by this line manager (only employers and trainers)
                 const managedUsers = await userRepository.find({
                     where: { 
                         line_manager: { user_id: lineManager.user_id },
@@ -814,38 +818,59 @@ class UserController {
                     ]
                 });
 
+                // Filter to only include employers and trainers
+                const employersAndTrainers = managedUsers.filter(user => 
+                    user.roles.includes(UserRole.Employer) || user.roles.includes(UserRole.Trainer)
+                );
+
+                // Get all learners under employers managed by this line manager
                 let managedLearners = [];
-                if (include_learners === 'true') {
-                    // Build learner query with search functionality
-                    let learnerQueryBuilder = learnerRepository.createQueryBuilder('learner')
-                        .leftJoinAndSelect('learner.user_id', 'user')
-                        .leftJoinAndSelect('learner.employer_id', 'employer')
-                        .leftJoinAndSelect('learner.funding_band', 'funding_band')
-                        .where('learner.line_manager_name = :line_manager_name', {
-                            line_manager_name: `${lineManager.first_name} ${lineManager.last_name}`
-                        })
-                        .andWhere('learner.deleted_at IS NULL');
+                if (employersAndTrainers.length > 0) {
+                    // Get employer IDs from managed users who are employers
+                    const employerUserIds = employersAndTrainers
+                        .filter(user => user.roles.includes(UserRole.Employer))
+                        .map(user => user.user_id);
 
+                    if (employerUserIds.length > 0) {
+                        // Get employers associated with these users
+                        const employers = await employerRepository.find({
+                            where: {
+                                user: { user_id: In(employerUserIds) }
+                            },
+                            select: ['employer_id']
+                        });
 
+                        const employerIds = employers.map(emp => emp.employer_id);
 
-                    managedLearners = await learnerQueryBuilder
-                        .select([
-                            'learner.learner_id', 'learner.first_name', 'learner.last_name',
-                            'learner.email', 'learner.mobile', 'learner.job_title',
-                            'learner.created_at', 'learner.line_manager_name',
-                            'user.user_id', 'user.user_name',
-                            'employer.employer_id', 'employer.employer_name',
-                            'funding_band.id', 'funding_band.band_name', 'funding_band.amount'
-                        ])
-                        .orderBy('learner.first_name', 'ASC')
-                        .getMany();
+                        if (employerIds.length > 0) {
+                            // Get all learners under these employers
+                            let learnerQueryBuilder = learnerRepository.createQueryBuilder('learner')
+                                .leftJoinAndSelect('learner.user_id', 'user')
+                                .leftJoinAndSelect('learner.employer_id', 'employer')
+                                .leftJoinAndSelect('learner.funding_band', 'funding_band')
+                                .where('learner.employer_id IN (:...employerIds)', { employerIds })
+                                .andWhere('learner.deleted_at IS NULL');
+
+                            managedLearners = await learnerQueryBuilder
+                                .select([
+                                    'learner.learner_id', 'learner.first_name', 'learner.last_name',
+                                    'learner.email', 'learner.mobile', 'learner.job_title',
+                                    'learner.created_at', 'learner.manager_name',
+                                    'user.user_id', 'user.user_name',
+                                    'employer.employer_id', 'employer.employer_name',
+                                    'funding_band.id', 'funding_band.band_name', 'funding_band.amount'
+                                ])
+                                .orderBy('learner.first_name', 'ASC')
+                                .getMany();
+                        }
+                    }
                 }
 
                 // Calculate statistics
-                const totalManagedUsers = managedUsers.length;
-                const totalManagedLearners = managedLearners.length;
-                const activeUsers = managedUsers.filter(user => user.status === 'Active').length;
-                const usersByRole = managedUsers.reduce((acc, user) => {
+                const totalManagedUsers = employersAndTrainers.length; // Only employers and trainers
+                const totalManagedLearners = managedLearners.length; // All learners under managed employers
+                const activeUsers = employersAndTrainers.filter(user => user.status === 'Active').length;
+                const usersByRole = employersAndTrainers.reduce((acc, user) => {
                     user.roles.forEach(role => {
                         acc[role] = (acc[role] || 0) + 1;
                     });
@@ -870,7 +895,7 @@ class UserController {
                         active_users: activeUsers,
                         users_by_role: usersByRole
                     },
-                    managed_users: managedUsers,
+                    managed_users: employersAndTrainers, // Only employers and trainers
                     ...(include_learners === 'true' && { managed_learners: managedLearners })
                 };
             }));
