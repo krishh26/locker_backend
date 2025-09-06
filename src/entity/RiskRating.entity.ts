@@ -25,6 +25,8 @@ export class RiskRating {
         course_name: string;
         course_title?: string;
         overall_risk_level?: RiskLevel;
+        comment: string;
+        updated_at?: Date;
     }>;
 
     // Assessment methods for the trainer (applies to all courses)
@@ -43,14 +45,6 @@ export class RiskRating {
         apl_rpl?: RiskLevel;
     };
 
-    // JSON field for course-specific comments only
-    @Column({ type: 'json', nullable: true })
-    course_comments: Array<{
-        course_id: number;
-        course_name?: string;
-        comment: string;
-        updated_at?: Date;
-    }>;
     @Column({ type: 'decimal', precision: 5, scale: 2, nullable: true })
     high_percentage?: number;
     @Column({ type: 'decimal', precision: 5, scale: 2, nullable: true })

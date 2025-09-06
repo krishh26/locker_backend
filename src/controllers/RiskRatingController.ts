@@ -15,7 +15,10 @@ class RiskRatingController {
             const {
                 trainer_id,
                 courses,
-                assessment_methods
+                assessment_methods,
+                high_percentage,
+                medium_percentage,
+                low_percentage
             } = req.body;
 
             if (!trainer_id) {
@@ -81,7 +84,9 @@ class RiskRatingController {
                 if (assessment_methods) {
                     existingRiskRating.assessment_methods = assessment_methods;
                 }
-
+                existingRiskRating.high_percentage = high_percentage
+                existingRiskRating.medium_percentage = medium_percentage
+                existingRiskRating.low_percentage = low_percentage
                 const updatedRiskRating = await riskRatingRepository.save(existingRiskRating);
 
                 return res.status(200).json({
@@ -117,7 +122,10 @@ class RiskRatingController {
                     trainer: { user_id: trainer_id },
                     courses: validatedCourses,
                     assessment_methods: assessment_methods || {},
-                    course_comments: []
+                    course_comments: [],
+                    high_percentage: high_percentage,
+                    medium_percentage: medium_percentage,
+                    low_percentage: low_percentage
                 };
 
                 const riskRating = riskRatingRepository.create(riskRatingData);
@@ -185,7 +193,6 @@ class RiskRatingController {
                 },
                 courses: rating.courses || [],
                 assessment_methods: rating.assessment_methods || {},
-                course_comments: rating.course_comments || [],
                 is_active: rating.is_active,
                 created_at: rating.created_at,
                 updated_at: rating.updated_at
@@ -267,7 +274,10 @@ class RiskRatingController {
             const {
                 courses,
                 assessment_methods,
-                is_active
+                is_active,
+                high_percentage,
+                medium_percentage,
+                low_percentage
             } = req.body;
 
             if (!id) {
@@ -307,10 +317,7 @@ class RiskRatingController {
                             course_id: courseData.course_id,
                             course_name: course.course_name,
                             course_title: courseData.course_title || course.course_name,
-                            overall_risk_level: courseData.overall_risk_level || 'Medium',
-                            high_percentage: courseData.high_percentage || 0,
-                            medium_percentage: courseData.medium_percentage || 0,
-                            low_percentage: courseData.low_percentage || 0
+                            overall_risk_level: courseData.overall_risk_level || 'Medium'
                         });
                     }
                 }
@@ -326,6 +333,10 @@ class RiskRatingController {
             if (is_active !== undefined) {
                 riskRating.is_active = is_active;
             }
+
+            riskRating.high_percentage = high_percentage
+            riskRating.medium_percentage = medium_percentage
+            riskRating.low_percentage = low_percentage
 
             const updatedRiskRating = await riskRatingRepository.save(riskRating);
 
@@ -406,7 +417,7 @@ class RiskRatingController {
                 });
             }
 
-            // Support both single comment object and array of comments
+            // Normalize to array
             const commentsArray = Array.isArray(course_comments) ? course_comments : [course_comments];
 
             // Validate each comment
@@ -433,31 +444,30 @@ class RiskRatingController {
                 });
             }
 
-            // Initialize course_comments array if it doesn't exist
-            if (!riskRating.course_comments) {
-                riskRating.course_comments = [];
+            // Initialize courses array if missing
+            if (!riskRating.courses) {
+                riskRating.courses = [];
             }
 
-            // Process each course comment
+            // Update courses with comments
             commentsArray.forEach(courseComment => {
-                const { course_id, course_name, comment } = courseComment;
+                const { course_id, course_name, comment, overall_risk_level } = courseComment;
 
-                // Find existing course or create new one
-                const existingCourseIndex = riskRating.course_comments.findIndex(c => c.course_id === parseInt(course_id));
+                const existingCourseIndex = riskRating.courses.findIndex(c => c.course_id === parseInt(course_id));
 
                 if (existingCourseIndex >= 0) {
-                    // Update existing course comment
-                    riskRating.course_comments[existingCourseIndex].comment = comment;
-                    riskRating.course_comments[existingCourseIndex].updated_at = new Date();
-                    if (course_name) {
-                        riskRating.course_comments[existingCourseIndex].course_name = course_name;
-                    }
+                    // Update existing
+                    riskRating.courses[existingCourseIndex].comment = comment;
+                    riskRating.courses[existingCourseIndex].updated_at = new Date();
+                    if (course_name) riskRating.courses[existingCourseIndex].course_name = course_name;
+                    if (overall_risk_level) riskRating.courses[existingCourseIndex].overall_risk_level = overall_risk_level;
                 } else {
-                    // Add new course with comment
-                    riskRating.course_comments.push({
+                    // Insert new
+                    riskRating.courses.push({
                         course_id: parseInt(course_id),
                         course_name: course_name || '',
                         comment: comment,
+                        overall_risk_level: overall_risk_level || null,
                         updated_at: new Date()
                     });
                 }
@@ -470,13 +480,12 @@ class RiskRatingController {
                 : `${commentsArray.length} course comments added successfully`;
 
             return res.status(200).json({
-                message: message,
+                message,
                 status: true,
                 data: {
                     id: updatedRiskRating.id,
-                    course_comments: updatedRiskRating.course_comments,
-                    trainer: updatedRiskRating.trainer,
                     courses: updatedRiskRating.courses,
+                    trainer: updatedRiskRating.trainer,
                     updated_at: updatedRiskRating.updated_at
                 },
             });
