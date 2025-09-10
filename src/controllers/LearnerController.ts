@@ -455,6 +455,8 @@ class LearnerController {
             courses = courses?.map((userCourse: any) => {
                 let partiallyCompleted = new Set();
                 let fullyCompleted = new Set();
+                let partiallyCompletedUnits = new Set();
+                let fullyCompletedUnits = new Set();
 
                 let courseAssignments: any = filteredAssignments.filter(assignment => assignment.course_id.course_id === userCourse.course.course_id);
 
@@ -464,6 +466,12 @@ class LearnerController {
                         if (unitfound !== -1) {
                             userCourse.course.units[unitfound] = unit;
                         }
+                        
+                        // Track unit completion status
+                        let unitHasPartialSubUnits = false;
+                        let unitHasCompletedSubUnits = false;
+                        let unitHasStartedSubUnits = false;
+                        
                         unit.subUnit?.forEach(subunit => {
                             if (fullyCompleted.has(subunit.id)) {
                                 return;
@@ -480,19 +488,44 @@ class LearnerController {
                             else if (subunit?.learnerMap || subunit?.trainerMap) {
                                 partiallyCompleted.add(subunit.id)
                             }
+                            
+                            // Check subunit status for unit completion tracking
+                            if (subunit?.learnerMap && subunit?.trainerMap) {
+                                unitHasCompletedSubUnits = true;
+                            } else if (subunit?.learnerMap || subunit?.trainerMap) {
+                                unitHasPartialSubUnits = true;
+                            } else {
+                                unitHasStartedSubUnits = true;
+                            }
                         });
+                        
+                        // Determine unit completion status
+                        if (unitHasCompletedSubUnits && !unitHasPartialSubUnits && !unitHasStartedSubUnits) {
+                            // All subunits are completed
+                            fullyCompletedUnits.add(unit.id);
+                        } else if (unitHasCompletedSubUnits || unitHasPartialSubUnits || unitHasStartedSubUnits) {
+                            // Some subunits are started/completed
+                            partiallyCompletedUnits.add(unit.id);
+                        }
                     });
                 })
 
                 const totalSubUnits = userCourse.course.units?.reduce((count, unit) => {
                     return count + (unit.subUnit?.length || 0);
                 }, 0) || 0;
+                
+                const totalUnits = userCourse.course.units?.length || 0;
+                
                 return {
                     ...userCourse,
                     totalSubUnits,
                     notStarted: totalSubUnits - (fullyCompleted.size + partiallyCompleted.size),
                     partiallyCompleted: partiallyCompleted.size,
                     fullyCompleted: fullyCompleted.size,
+                    totalUnits,
+                    unitsNotStarted: totalUnits - (fullyCompletedUnits.size + partiallyCompletedUnits.size),
+                    unitsPartiallyCompleted: partiallyCompletedUnits.size,
+                    unitsFullyCompleted: fullyCompletedUnits.size,
                 }
             })
 
@@ -1569,11 +1602,18 @@ const getCourseData = async (courses: any[], user_id: string) => {
         courses = courses?.map((userCourse: any) => {
             let partiallyCompleted = new Set();
             let fullyCompleted = new Set();
+            let partiallyCompletedUnits = new Set();
+            let fullyCompletedUnits = new Set();
 
             let courseAssignments: any = filteredAssignments.filter(assignment => assignment.course_id.course_id === userCourse.course.course_id);
 
             courseAssignments?.forEach((assignment) => {
                 assignment.units?.forEach(unit => {
+                    // Track unit completion status
+                    let unitHasPartialSubUnits = false;
+                    let unitHasCompletedSubUnits = false;
+                    let unitHasStartedSubUnits = false;
+                    
                     unit.subUnit?.forEach(subunit => {
                         if (fullyCompleted.has(subunit.id)) {
                             return;
@@ -1590,19 +1630,44 @@ const getCourseData = async (courses: any[], user_id: string) => {
                         else if (subunit?.learnerMap || subunit?.trainerMap) {
                             partiallyCompleted.add(subunit.id)
                         }
+                        
+                        // Check subunit status for unit completion tracking
+                        if (subunit?.learnerMap && subunit?.trainerMap) {
+                            unitHasCompletedSubUnits = true;
+                        } else if (subunit?.learnerMap || subunit?.trainerMap) {
+                            unitHasPartialSubUnits = true;
+                        } else {
+                            unitHasStartedSubUnits = true;
+                        }
                     });
+                    
+                    // Determine unit completion status
+                    if (unitHasCompletedSubUnits && !unitHasPartialSubUnits && !unitHasStartedSubUnits) {
+                        // All subunits are completed
+                        fullyCompletedUnits.add(unit.id);
+                    } else if (unitHasCompletedSubUnits || unitHasPartialSubUnits || unitHasStartedSubUnits) {
+                        // Some subunits are started/completed
+                        partiallyCompletedUnits.add(unit.id);
+                    }
                 });
             })
 
             const totalSubUnits = userCourse.course.units?.reduce((count, unit) => {
                 return count + (unit.subUnit?.length || 0);
             }, 0) || 0;
+            
+            const totalUnits = userCourse.course.units?.length || 0;
+            
             return {
                 ...userCourse,
                 totalSubUnits,
                 notStarted: totalSubUnits - (fullyCompleted.size + partiallyCompleted.size),
                 partiallyCompleted: partiallyCompleted.size,
                 fullyCompleted: fullyCompleted.size,
+                totalUnits,
+                unitsNotStarted: totalUnits - (fullyCompletedUnits.size + partiallyCompletedUnits.size),
+                unitsPartiallyCompleted: partiallyCompletedUnits.size,
+                unitsFullyCompleted: fullyCompletedUnits.size,
             }
         })
         return courses
