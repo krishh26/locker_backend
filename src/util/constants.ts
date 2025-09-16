@@ -94,34 +94,11 @@ export enum CourseCoretype {
 }
 
 export enum CourseType {
-    A2Level = 'A2 Level',
-    ASLevel = 'AS Level',
     BtecNational = 'Btec National',
-    CORE = 'CORE',
-    CoreSkillsCommunication = 'Core Skills - Communication',
-    CoreSkillsICT = 'Core Skills - ICT',
-    CoreSkillsNumeracy = 'Core Skills - Numeracy',
-    CoreSkillsProblemSolving = 'Core Skills - Problem Solving',
-    CoreSkillsUnknown = 'Core Skills - Unknown',
-    CoreSkillsWorkingwithothers = 'Core Skills - Working with others',
-    ERR = 'ERR',
-    FUNCTIONALSKILLS = 'FUNCTIONAL SKILLS',
-    FunctionalSkillsICT = 'Functional Skills - ICT',
     FunctionalSkillsMaths = 'Functional Skills - Maths',
     FunctionalSkillsEnglish = 'Functional Skills English',
-    GCSE = 'GCSE',
-    KeySkillsCommunication = 'Key Skills - Communication',
-    KeySkillsICT = 'Key Skills - ICT',
-    KeySkillsImprovingownlearning = 'Key Skills - Improving own learning',
-    KeySkillsNumber = 'Key Skills - Number',
-    KeySkillsunknown = 'Key Skills - unknown',
-    MAIN = 'MAIN',
-    NVQ = 'NVQ',
-    PLTS = 'PLTS',
-    SVQ = 'SVQ',
-    TECH = 'TECH',
-    VCQ = 'VCQ',
-    VRQ = 'VRQ',
+    Diploma = 'Diploma',
+    RQF = 'RQF',
 }
 
 export const SocketDomain = {

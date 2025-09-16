@@ -20,9 +20,6 @@ export class Course {
     sector: string;
 
     @Column({ type: 'varchar' })
-    qualification_type: string;
-
-    @Column({ type: 'varchar' })
     recommended_minimum_age: string;
 
     @Column({ type: 'varchar' })
@@ -39,9 +36,6 @@ export class Course {
         nullable: true
     })
     brand_guidelines: string;
-
-    @Column({ type: 'varchar', nullable: true })
-    qualification_status: string;
 
     @Column({ type: 'varchar', nullable: true })
     overall_grading_type: string;
