@@ -19,13 +19,13 @@ export class Employer {
   @Column({ type: 'varchar' })
   msi_employer_id: string;
 
-  @Column({ type: 'varchar' })
+  @Column({ type: 'varchar', nullable: true })
   business_department: string;
 
-  @Column({ type: 'varchar' })
+  @Column({ type: 'varchar', nullable: true })
   business_location: string;
 
-  @Column({ type: 'varchar' })
+  @Column({ type: 'varchar', nullable: true })
   branch_code: string;
 
   @Column({ type: 'varchar' })
@@ -43,28 +43,25 @@ export class Employer {
   @Column({ type: 'numeric' })
   postal_code: number;
 
-  @Column({ type: 'varchar' })
-  edrs_number: string;
-
-  @Column({ type: 'varchar' })
+  @Column({ type: 'varchar', nullable: true })
   business_category: string;
 
-  @Column({ type: 'varchar' })
-  external_data_code: string;
-
-  @Column({ type: 'varchar' })
+  @Column({ type: 'varchar', nullable: true })
   telephone: string;
 
-  @Column({ type: 'varchar' })
+  @Column({ type: 'varchar', nullable: true })
   website: string;
 
-  @Column({ type: 'varchar' })
-  key_contact: string;
+  @Column({ type: 'varchar', nullable: true})
+  key_contact_name: string;
 
-  @Column({ type: 'varchar' })
+  @Column({ type: 'varchar', nullable: true })
+  key_contact_number: string;
+
+  @Column({ type: 'varchar', nullable: true })
   business_description: string;
 
-  @Column({ type: 'varchar' })
+  @Column({ type: 'varchar', nullable: true })
   comments: string;
 
   @Column({ type: 'timestamp', nullable: true })
@@ -90,6 +87,9 @@ export class Employer {
 
   @Column({ type: 'varchar', nullable: true })
   employer_telephone: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  email: string;
 
   @Column({ type: 'json', nullable: true })
   file: object;

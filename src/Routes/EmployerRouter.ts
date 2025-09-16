@@ -12,6 +12,7 @@ EmployerRoutes.post('/create', authorizeRoles(UserRole.Admin), Controller.create
 EmployerRoutes.get('/list', authorizeRoles(UserRole.Admin), paginationMiddleware, Controller.getEmployerList);
 EmployerRoutes.patch('/update/:id', authorizeRoles(UserRole.Admin), Controller.updateEmployer);
 EmployerRoutes.delete('/delete/:id', authorizeRoles(UserRole.Admin), Controller.deleteEmployer);
+EmployerRoutes.post('/bulk-create', authorizeRoles(UserRole.Admin), Controller.createMultipleEmployers);
 
 
 export default EmployerRoutes;

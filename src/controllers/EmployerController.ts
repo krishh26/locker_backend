@@ -23,14 +23,14 @@ class EmployerController {
                 address_2,
                 city,
                 country,
+                employer_county,
                 postal_code,
-                edrs_number,
                 business_category,
                 number,
-                external_data_code,
                 telephone,
                 website,
-                key_contact,
+                key_contact_name,
+                key_contact_number,
                 business_description,
                 comments,
                 email,
@@ -41,23 +41,11 @@ class EmployerController {
             } = req.body
             if (!employer_name ||
                 !msi_employer_id ||
-                !business_department ||
-                !business_location ||
-                !branch_code ||
                 !address_1 ||
                 !address_2 ||
                 !city ||
                 !country ||
                 !postal_code ||
-                !edrs_number ||
-                !business_category ||
-                !number ||
-                !external_data_code ||
-                !telephone ||
-                !website ||
-                !key_contact ||
-                !business_description ||
-                !comments ||
                 !email) {
                 return res.status(400).json({
                     message: "All Field Required",
@@ -89,13 +77,13 @@ class EmployerController {
                 address_2,
                 city,
                 country,
+                employer_county,
                 postal_code,
-                edrs_number,
                 business_category,
-                external_data_code,
                 telephone,
                 website,
-                key_contact,
+                key_contact_name,
+                key_contact_number,
                 business_description,
                 comments,
                 assessment_date,
@@ -159,12 +147,11 @@ class EmployerController {
                     "employer.city",
                     "employer.country",
                     "employer.postal_code",
-                    "employer.edrs_number",
                     "employer.business_category",
-                    "employer.external_data_code",
                     "employer.telephone",
                     "employer.website",
-                    "employer.key_contact",
+                    "employer.key_contact_name",
+                    "employer.key_contact_number",
                     "employer.business_description",
                     "employer.comments",
                     "employer.assessment_date",
@@ -231,6 +218,141 @@ class EmployerController {
         }
     }
 
+    public async createMultipleEmployers(req: CustomRequest, res: Response) {
+        try {
+            const { employers } = req.body;
+
+            if (!employers || !Array.isArray(employers) || employers.length === 0) {
+                return res.status(400).json({
+                    message: "Employers array is required and must contain at least one employer",
+                    status: false
+                });
+            }
+
+            const userRepository = AppDataSource.getRepository(User);
+            const employerRepository = AppDataSource.getRepository(Employer);
+
+            const results: any[] = [];
+            const errors: any[] = [];
+
+            for (let i = 0; i < employers.length; i++) {
+                const employerData = employers[i];
+                const {
+                    employer_name,
+                    msi_employer_id,
+                    business_department,
+                    business_location,
+                    branch_code,
+                    address_1,
+                    address_2,
+                    city,
+                    country,
+                    employer_county,
+                    postal_code,
+                    business_category,
+                    number,
+                    telephone,
+                    website,
+                    key_contact_name,
+                    key_contact_number,
+                    business_description,
+                    comments,
+                    email,
+                    assessment_date,
+                    assessment_renewal_date,
+                    insurance_renewal_date
+                } = employerData;
+
+                try {
+                    // Validate required fields (all from createEmployer except file)
+                    if (!employer_name || !msi_employer_id || !address_1 || !address_2 || !city || !country || !postal_code || !email) {
+                        errors.push({ index: i, email: email || 'unknown', error: "Missing required fields" });
+                        continue;
+                    }
+
+                    // Check existing email
+                    const existing = await userRepository.findOne({ where: { email } });
+                    if (existing) {
+                        errors.push({ index: i, email, error: "Email already exists" });
+                        continue;
+                    }
+
+                    // Generate password and hash
+                    const plainPassword = generatePassword();
+                    const hashedPassword = await bcryptpassword(plainPassword);
+
+                    // Create employer
+                    let employer = await employerRepository.save(
+                        employerRepository.create({
+                            employer_name,
+                            msi_employer_id,
+                            business_department,
+                            business_location,
+                            branch_code,
+                            address_1,
+                            address_2,
+                            city,
+                            country,
+                            employer_county,
+                            postal_code,
+                            business_category,
+                            telephone,
+                            website,
+                            key_contact_name,
+                            key_contact_number,
+                            business_description,
+                            comments,
+                            assessment_date,
+                            assessment_renewal_date,
+                            insurance_renewal_date
+                        })
+                    );
+
+                    // Create user and link
+                    let user = userRepository.create({
+                        email,
+                        password: hashedPassword,
+                        mobile: number,
+                        roles: [UserRole.Employer],
+                        employer: employer
+                    });
+                    user = await userRepository.save(user);
+
+                    employer.user = user;
+                    employer = await employerRepository.save(employer);
+
+                    const sent = await sendPasswordByEmail(email, plainPassword);
+                    if (!sent) {
+                        errors.push({ index: i, email, error: "Employer created but failed to send email", employer_id: employer.employer_id, user_id: user.user_id });
+                    }
+
+                    results.push({ index: i, status: 'success', email, employer_id: employer.employer_id, user_id: user.user_id });
+
+                } catch (e: any) {
+                    errors.push({ index: i, email: email || 'unknown', error: e.message });
+                }
+            }
+
+            return res.status(results.length > 0 ? 200 : 400).json({
+                message: `Processed ${employers.length} employer(s): ${results.length} successful, ${errors.length} failed`,
+                status: results.length > 0,
+                data: {
+                    total_processed: employers.length,
+                    successful: results.length,
+                    failed: errors.length,
+                    results,
+                    errors
+                }
+            });
+
+        } catch (error) {
+            return res.status(500).json({
+                message: "Internal Server Error",
+                error: (error as any).message,
+                status: false
+            });
+        }
+    }
     public async updateEmployer(req: Request, res: Response): Promise<Response> {
         try {
             const employerId: number = parseInt(req.params.id);
