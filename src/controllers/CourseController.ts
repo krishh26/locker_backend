@@ -198,9 +198,9 @@ class CourseController {
                 });
             }
 
-            if (!Object.values(CourseType).includes(data.course_type)) {
-                data.course_type = CourseType.CORE;
-            }
+            // if (!Object.values(CourseType).includes(data.course_type)) {
+            //     data.course_type = CourseType.CORE;
+            // }
 
             if (data.course_core_type === 'Gateway' && !data.level) {
                 data.level = 'N/A';
