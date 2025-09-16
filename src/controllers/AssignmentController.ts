@@ -197,7 +197,25 @@ class AssignmentController {
             }
         }
 
-            const assignments = await assignmentRepository.find({ where: { course_id, user: { user_id } } })
+            const qb = assignmentRepository
+                .createQueryBuilder("assignment")
+                .leftJoinAndSelect("assignment.course_id", "course")
+                .leftJoinAndSelect("assignment.user", "user")
+                .where("user.user_id = :user_id", { user_id });
+
+            if (course_id) {
+                qb.andWhere("assignment.course_id = :course_id", { course_id });
+            }
+
+            const assignments = await qb
+                .select([
+                    "assignment",
+                    "course.course_id",
+                    "course.course_name",
+                    "course.course_code"
+                ])
+                .getMany();
+
 
             return res.status(200).json({
                 message: 'Assignment retrieved successfully',
