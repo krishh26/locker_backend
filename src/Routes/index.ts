@@ -27,6 +27,7 @@ import sessionLearnerActionRoutes from './SessionLearnerActionRouter';
 import learnerPlanDocumentRoutes from './LearnerPlanDocumentRouter';
 import FundingBandRoutes from './FundingBandRouter';
 import RiskRatingRoutes from './RiskRatingRouter';
+import wellbeingRoutes from './WellbeingResourceRouter';
 
 const fileController = new FileController;
 const Routes = express.Router();
@@ -55,6 +56,7 @@ Routes.use("/learner-action", sessionLearnerActionRoutes)
 Routes.use("/learner-document", learnerPlanDocumentRoutes)
 Routes.use("/funding-band", FundingBandRoutes)
 Routes.use("/risk-rating", RiskRatingRoutes)
+Routes.use("/wellbeing", wellbeingRoutes)
 
 // API routes
 Routes.get("/file", fileController.getFile)
