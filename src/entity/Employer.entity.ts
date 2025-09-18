@@ -40,8 +40,8 @@ export class Employer {
   @Column({ type: 'varchar' })
   country: string;
 
-  @Column({ type: 'numeric' })
-  postal_code: number;
+  @Column({ type: 'varchar' })
+  postal_code: string;
 
   @Column({ type: 'varchar', nullable: true })
   business_category: string;
