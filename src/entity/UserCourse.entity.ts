@@ -42,6 +42,13 @@ export class UserCourse {
     @Column({ type: 'timestamp', nullable: false })
     end_date: Date;
 
+    // Predicted and final grades for the learner's course
+    @Column({ type: 'varchar', nullable: true })
+    predicted_grade: string;
+
+    @Column({ type: 'varchar', nullable: true })
+    final_grade: string;
+
     @Column({
         type: 'enum',
         enum: CourseStatus,
