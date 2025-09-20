@@ -234,7 +234,7 @@ class CourseController {
             const courseRepository = AppDataSource.getRepository(Course);
             const userCourseRepository = AppDataSource.getRepository(UserCourse);
 
-            if (!learner_id || !course_id || !trainer_id || !IQA_id || !LIQA_id || !EQA_id || !employer_id || !start_date || !end_date) {
+            if (!learner_id || !course_id || !trainer_id || !IQA_id || !LIQA_id || !EQA_id || !start_date || !end_date) {
                 return res.status(400).json({
                     message: "Please pass all Field",
                     status: false
