@@ -29,9 +29,9 @@ export class UserCourse {
     @JoinColumn({ name: 'EQA_id', referencedColumnName: 'user_id' })
     EQA_id: User;
 
-    @ManyToOne(() => User)
+    @ManyToOne(() => User, { nullable: true })
     @JoinColumn({ name: 'employer_id', referencedColumnName: 'user_id' })
-    employer_id: User;
+    employer_id: User | null;
 
     @Column({ type: 'json', nullable: false })
     course: Object;

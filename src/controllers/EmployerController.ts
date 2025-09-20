@@ -177,7 +177,7 @@ class EmployerController {
             const [employer, count] = await qb
                 .skip(Number(req.pagination.skip))
                 .take(Number(req.pagination.limit))
-                .orderBy("employer.employer_id", "ASC")
+                .orderBy("employer.created_at", "ASC")
                 .getManyAndCount();
 
             // Get learner counts for each employer
