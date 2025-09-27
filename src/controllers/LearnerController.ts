@@ -19,7 +19,7 @@ class LearnerController {
 
     public async CreateLearner(req: CustomRequest, res: Response) {
         try {
-            const { user_name, first_name, last_name, email, password, confirmPassword, mobile, funding_body, funding_band_id, job_title } = req.body
+            const { user_name, first_name, last_name, email, password, confirmPassword, mobile, funding_body, funding_band_id, job_title, comment } = req.body
             if (!user_name || !first_name || !last_name || !email || !password || !confirmPassword) {
                 return res.status(400).json({
                     message: "All Field Required",
@@ -95,7 +95,7 @@ class LearnerController {
 
             for (let i = 0; i < learners.length; i++) {
                 const learnerData = learners[i];
-                const { user_name, first_name, last_name, email, password, confirmPassword, mobile, funding_body, funding_band_id, job_title } = learnerData;
+                const { user_name, first_name, last_name, email, password, confirmPassword, mobile, funding_body, funding_band_id, job_title, comment } = learnerData;
 
                 try {
                     // Validate required fields
@@ -261,6 +261,7 @@ class LearnerController {
                     'learner.guided_learning_hours_achieved',
                     'learner.iqas_name',
                     'learner.custom_funding_data',
+                    'learner.comment',
                     'user_id.user_id',
                     'user_id.avatar',
                     'user_id.deleted_at',

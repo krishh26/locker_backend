@@ -262,6 +262,9 @@ export class Learner {
   @DeleteDateColumn({ type: 'timestamp', nullable: true })
   deleted_at: Date;
 
+  @Column({ type: 'varchar', nullable: true })
+  comment: string;
+
   @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   created_at: Date;
 

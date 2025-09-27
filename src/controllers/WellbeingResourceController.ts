@@ -105,35 +105,70 @@ export class WellbeingResourceController {
         try {
             const { search } = req.query as any;
             const repo = AppDataSource.getRepository(WellbeingResource);
-
+    
             const qb = repo.createQueryBuilder('r')
                 .leftJoin(User, 'u', 'u.user_id = CAST(r.createdBy AS INT)')
-                .addSelect([ 'u.first_name', 'u.last_name' ]);
+                .addSelect(['u.first_name', 'u.last_name'])
+                .leftJoin(LearnerResourceActivity, 'lra', 'lra.resource_id = r.id')
+                .leftJoin(User, 'lu', 'lu.user_id = lra.learner_id')
+                .addSelect([
+                    'lra.id AS lra_id',
+                    'lra.feedback AS lra_feedback',
+                    'lra.lastOpenedDate AS lra_lastOpenedDate',
+                    'lu.user_id AS lu_id',
+                    'lu.first_name AS lu_first_name',
+                    'lu.last_name AS lu_last_name',
+                    'lu.user_name AS lu_user_name'
+                ]);
     
             if (search) {
                 qb.where('r.location ILIKE :search', { search: `%${search}%` });
             }
     
             const raws = await qb.orderBy('r.createdAt', 'DESC').getRawMany();
-            
-            const result = raws.map(raw => ({
-                id: raw.r_id,
-                location: raw.r_location,
-                resource_name: raw.r_resource_name,
-                isActive: raw.r_isActive,
-                createdAt: raw.r_createdAt,
-                createdByName: `${raw.u_first_name || ''} ${raw.u_last_name || ''}`.trim() || null
-            }));
+    
+            // Group feedbacks under each resource
+            const grouped: Record<number, any> = {};
+            raws.forEach(raw => {
+                const resourceId = raw.r_id;
+                if (!grouped[resourceId]) {
+                    grouped[resourceId] = {
+                        id: raw.r_id,
+                        location: raw.r_location,
+                        resource_name: raw.r_resource_name,
+                        isActive: raw.r_isActive,
+                        createdAt: raw.r_createdAt,
+                        createdByName: `${raw.u_first_name || ''} ${raw.u_last_name || ''}`.trim() || null,
+                        feedbacks: []
+                    };
+                }
+                if (raw.lra_id) {
+                    grouped[resourceId].feedbacks.push({
+                        id: raw.lra_id,
+                        feedback: raw.lra_feedback,
+                        lastOpenedDate: raw.lra_lastOpenedDate,
+                        learner: {
+                            id: raw.lu_id,
+                            first_name: raw.lu_first_name,
+                            last_name: raw.lu_last_name,
+                            user_name: raw.lu_user_name
+                        }
+                    });
+                }
+            });
+    
+            const result = Object.values(grouped);
     
             return res.status(200).json({ message: 'OK', status: true, data: result });
         } catch (error: any) {
-            return res.status(500).json({ 
-                message: 'Internal Server Error', 
-                status: false, 
-                error: error.message 
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                status: false,
+                error: error.message
             });
         }
     }
+    
     
 
     // Admin: Toggle activate/deactivate
