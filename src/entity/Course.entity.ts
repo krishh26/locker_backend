@@ -74,6 +74,9 @@ export class Course {
     @OneToMany(() => Resource, resource => resource.course_id, { cascade: true, onDelete: 'CASCADE' })
     resources: Resource[];
 
+    @Column({ type: 'varchar', nullable: true })
+    awarding_body: string;
+
     @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
     created_at: Date;
 
