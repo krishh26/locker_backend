@@ -28,6 +28,8 @@ import learnerPlanDocumentRoutes from './LearnerPlanDocumentRouter';
 import FundingBandRoutes from './FundingBandRouter';
 import RiskRatingRoutes from './RiskRatingRouter';
 import wellbeingRoutes from './WellbeingResourceRouter';
+import iqaQuestionRoutes from './IQAQuestionRouter';
+import safeguardingContactRoutes from './SafeguardingContactRouter';
 
 const fileController = new FileController;
 const Routes = express.Router();
@@ -57,6 +59,8 @@ Routes.use("/learner-document", learnerPlanDocumentRoutes)
 Routes.use("/funding-band", FundingBandRoutes)
 Routes.use("/risk-rating", RiskRatingRoutes)
 Routes.use("/wellbeing", wellbeingRoutes)
+Routes.use("/iqa-questions", iqaQuestionRoutes)
+Routes.use("/safeguarding-contact", safeguardingContactRoutes)
 
 // API routes
 Routes.get("/file", fileController.getFile)
