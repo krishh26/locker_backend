@@ -59,7 +59,7 @@ Routes.use("/learner-document", learnerPlanDocumentRoutes)
 Routes.use("/funding-band", FundingBandRoutes)
 Routes.use("/risk-rating", RiskRatingRoutes)
 Routes.use("/wellbeing", wellbeingRoutes)
-Routes.use("/iqa-questions", iqaQuestionRoutes)
+//Routes.use("/iqa-questions", iqaQuestionRoutes)
 Routes.use("/safeguarding-contact", safeguardingContactRoutes)
 
 // API routes
