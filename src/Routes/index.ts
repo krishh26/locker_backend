@@ -30,6 +30,8 @@ import RiskRatingRoutes from './RiskRatingRouter';
 import wellbeingRoutes from './WellbeingResourceRouter';
 import iqaQuestionRoutes from './IQAQuestionRouter';
 import safeguardingContactRoutes from './SafeguardingContactRouter';
+import acknowledgementRoutes from './AcknowledgementRouter';
+
 
 const fileController = new FileController;
 const Routes = express.Router();
@@ -61,6 +63,7 @@ Routes.use("/risk-rating", RiskRatingRoutes)
 Routes.use("/wellbeing", wellbeingRoutes)
 Routes.use("/iqa-questions", iqaQuestionRoutes)
 Routes.use("/safeguarding-contact", safeguardingContactRoutes)
+Routes.use("/acknowledgement", acknowledgementRoutes)
 
 // API routes
 Routes.get("/file", fileController.getFile)
