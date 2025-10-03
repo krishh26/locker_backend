@@ -3,6 +3,7 @@ import { AppDataSource } from '../data-source';
 import { CustomRequest } from '../util/Interface/expressInterface';
 import { Acknowledgement } from '../entity/Acknowledgement.entity';
 import { deleteFromS3, uploadToS3 } from '../util/aws';
+import { Learner } from '../entity/Learner.entity';
 
 export class AcknowledgementController {
     // POST /acknowledgement → Add new acknowledgement
@@ -125,11 +126,11 @@ export class AcknowledgementController {
         }
     }
 
-    // DELETE /acknowledgement → Clear all learner acknowledgements
+    // DELETE /acknowledgement → Clear all learner's isShowMessage to true
     public async clearAll(req: CustomRequest, res: Response) {
         try {
-            const repo = AppDataSource.getRepository(Acknowledgement);
-            await repo.createQueryBuilder().delete().from(Acknowledgement).execute();
+            const repo = AppDataSource.getRepository(Learner);
+            await repo.createQueryBuilder().update(Learner).set({ isShowMessage: true }).execute();
             return res.status(200).json({ status: true, message: 'All acknowledgements cleared', data: null });
         } catch (error: any) {
             return res.status(500).json({ status: false, message: 'Internal Server Error', data: { error: error.message } });
