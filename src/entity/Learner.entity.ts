@@ -265,6 +265,9 @@ export class Learner {
   @Column({ type: 'varchar', nullable: true })
   comment: string;
 
+  @Column({ type: 'boolean', default: true })
+  isShowMessage: boolean;
+
   @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   created_at: Date;
 
