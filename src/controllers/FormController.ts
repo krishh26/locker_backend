@@ -39,6 +39,14 @@ class FormController {
                 other_emails: other_emails || null
             }
 
+            let findForm = await formRepository.findOne({ where: { form_name: form_name } });
+            if (findForm) {
+                return res.status(400).json({
+                    message: "Form already exists",
+                    status: false,
+                });
+            }
+            
             const form = formRepository.create(data)
 
             const savedForm = await formRepository.save(form);
