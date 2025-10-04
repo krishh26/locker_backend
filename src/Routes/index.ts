@@ -31,6 +31,7 @@ import wellbeingRoutes from './WellbeingResourceRouter';
 import iqaQuestionRoutes from './IQAQuestionRouter';
 import safeguardingContactRoutes from './SafeguardingContactRouter';
 import acknowledgementRoutes from './AcknowledgementRouter';
+import defaultReviewSettingRoutes from './DefaultReviewSettingRouter';
 
 
 const fileController = new FileController;
@@ -64,6 +65,7 @@ Routes.use("/wellbeing", wellbeingRoutes)
 Routes.use("/iqa-questions", iqaQuestionRoutes)
 Routes.use("/safeguarding-contact", safeguardingContactRoutes)
 Routes.use("/acknowledgement", acknowledgementRoutes)
+Routes.use("/review-setting", defaultReviewSettingRoutes)
 
 // API routes
 Routes.get("/file", fileController.getFile)
