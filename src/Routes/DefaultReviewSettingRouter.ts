@@ -12,6 +12,6 @@ const Controller = new DefaultReviewSettingController();
 reviewSettingRoutes.post("/add", authorizeRoles(), Controller.createOrUpdateReviewSetting);
 
 // GET /api/review-setting → Fetch the current setting
-reviewSettingRoutes.get("/get", Controller.getReviewSetting);
+reviewSettingRoutes.get("/get", authorizeRoles(), Controller.getReviewSetting);
 
 export default reviewSettingRoutes;
