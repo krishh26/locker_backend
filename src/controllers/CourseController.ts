@@ -261,9 +261,11 @@ class CourseController {
             }
 
             // if learner has one main course, then return error to select other course
-            const mainCourse = await userCourseRepository.findOne({ where: { learner_id, is_main_course: true } });
-            if (mainCourse) {
-                return res.status(400).json({ message: 'learner has one main course', status: false });
+            if (is_main_course === true) {
+                const mainCourse = await userCourseRepository.findOne({ where: { learner_id, is_main_course: true } });
+                if (mainCourse) {
+                    return res.status(400).json({ message: 'learner has one main course', status: false });
+                }
             }
 
             delete course.created_at, course.updated_at
@@ -580,6 +582,16 @@ class CourseController {
                     message: 'User Course not found',
                     status: false,
                 });
+            }
+
+            if (req.body.is_main_course === true) {
+                let otherMainCourse = await userCourseRepository.findOne({ where: { learner_id: existingCourse.learner_id, is_main_course: true } });
+                if (otherMainCourse) {
+                    return res.status(400).json({
+                        message: 'Learner has one main course',
+                        status: false,
+                    });
+                }
             }
 
             userCourseRepository.merge(existingCourse, req.body);
