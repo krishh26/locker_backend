@@ -228,7 +228,7 @@ class CourseController {
 
     public async courseEnrollment(req: CustomRequest, res: Response): Promise<Response> {
         try {
-            const { learner_id, course_id, trainer_id, IQA_id, LIQA_id, EQA_id, employer_id, start_date, end_date } = req.body
+            const { learner_id, course_id, trainer_id, IQA_id, LIQA_id, EQA_id, employer_id, start_date, end_date, is_main_course } = req.body
 
             const learnerRepository = AppDataSource.getRepository(Learner);
             const courseRepository = AppDataSource.getRepository(Course);
@@ -260,6 +260,12 @@ class CourseController {
                 return res.status(404).json({ message: 'course or learner not found', status: false });
             }
 
+            // if learner has one main course, then return error to select other course
+            const mainCourse = await userCourseRepository.findOne({ where: { learner_id, is_main_course: true } });
+            if (mainCourse) {
+                return res.status(400).json({ message: 'learner has one main course', status: false });
+            }
+
             delete course.created_at, course.updated_at
             const courseData = {
                 ...course,
@@ -285,7 +291,7 @@ class CourseController {
                     }
                 })
             }
-            await userCourseRepository.save(userCourseRepository.create({ learner_id, trainer_id, IQA_id, LIQA_id, EQA_id, employer_id, course: courseData, start_date, end_date }))
+            await userCourseRepository.save(userCourseRepository.create({ learner_id, trainer_id, IQA_id, LIQA_id, EQA_id, employer_id, course: courseData, start_date, end_date, is_main_course }))
 
             const userRepository = AppDataSource.getRepository(User);
             const admin = await userRepository.findOne({ where: { user_id: req.user.user_id } });
