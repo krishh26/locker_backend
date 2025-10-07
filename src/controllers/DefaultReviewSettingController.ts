@@ -8,7 +8,7 @@ class DefaultReviewSettingController {
     public async createOrUpdateReviewSetting(req: CustomRequest, res: Response) {
         try {
             const { noReviewWeeks, noInductionWeeks, requireFileUpload } = req.body;
-            console.log(noInductionWeeks, noInductionWeeks)
+
             // Validate required fields
             if (!noReviewWeeks || !noInductionWeeks) {
                 return res.status(400).json({

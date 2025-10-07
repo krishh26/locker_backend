@@ -56,6 +56,9 @@ export class UserCourse {
     })
     course_status: CourseStatus;
 
+    @Column({ type: 'boolean', nullable: true })
+    is_main_course: boolean;
+
     @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
     created_at: Date;
 

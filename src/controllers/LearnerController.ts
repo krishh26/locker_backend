@@ -810,7 +810,7 @@ class LearnerController {
                 existingLearner.employer_id = employer;
             }
 
-            if (existingLearner.user_id.email !== req.body.email) {
+            if (req.body.email && (existingLearner.user_id.email !== req.body.email)) {
                 const user = await userRepository.findOne({
                     where: { email: req.body.email }
                 });
