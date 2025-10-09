@@ -5,6 +5,7 @@ import { Form, FormAccessRole, FormType } from "../entity/Form.entity";
 import { UserRole } from "../util/constants";
 import { User } from "../entity/User.entity";
 import { UserForm } from "../entity/UserForm.entity";
+import { LearnerPlan } from "../entity/LearnerPlan.entity";
 import { SendEmailTemplet } from "../util/nodemailer";
 import { uploadToS3, uploadMultipleFilesToS3 } from "../util/aws";
 
@@ -313,7 +314,7 @@ class FormController {
     public async createUserFormData(req: CustomRequest, res: Response) {
         try {
             const userFormRepository = AppDataSource.getRepository(UserForm);
-            const { form_id, form_data, user_id } = req.body;
+            const { form_id, form_data, user_id, submit, learner_plan_id } = req.body;
 
             if (!form_id || !form_data) {
                 return res.status(400).json({
@@ -403,21 +404,43 @@ class FormController {
                 where: {
                     user: { user_id: user_id || req.user.user_id },
                     form: { id: form_id }
-                }
+                },
+                relations: ['user', 'form']
             });
+
+            // learners cannot modify when locked
+            const actingUserId = user_id || req.user.user_id;
+            const isLearnerActingOnSelf = !user_id || user_id === req.user.user_id;
+            if (userForm && userForm.is_locked && isLearnerActingOnSelf) {
+                return res.status(403).json({
+                    message: 'Form is locked and cannot be edited. Contact trainer/admin to unlock.',
+                    status: false,
+                });
+            }
 
             if (userForm) {
                 // Update existing form
                 userForm.form_data = parsedFormData;
                 userForm.form_files = formFiles.length > 0 ? formFiles : userForm.form_files;
+                if (learner_plan_id) {
+                    (userForm as any).learner_plan = { learner_plan_id: Number(learner_plan_id) } as LearnerPlan;
+                }
             } else {
                 // Create new form
                 userForm = userFormRepository.create({
                     user: { user_id: user_id || req.user.user_id },
                     form: { id: form_id },
                     form_data: parsedFormData,
-                    form_files: formFiles.length > 0 ? formFiles : null
+                    form_files: formFiles.length > 0 ? formFiles : null,
+                    ...(learner_plan_id ? { learner_plan: { learner_plan_id: Number(learner_plan_id) } as any } : {})
                 });
+            }
+
+            // If submit, lock the form for this learner
+            if (submit === true || submit === 'true') {
+                userForm.is_locked = true;
+                userForm.locked_at = new Date();
+                (userForm as any).locked_by = { user_id: actingUserId } as any;
             }
 
             const savedForm = await userFormRepository.save(userForm);
@@ -441,7 +464,10 @@ class FormController {
                         file_count: field.files.length
                     })),
                     created_at: completeForm.created_at,
-                    updated_at: completeForm.updated_at
+                    updated_at: completeForm.updated_at,
+                    is_locked: (completeForm as any).is_locked,
+                    locked_at: (completeForm as any).locked_at,
+                    locked_by_user_id: (completeForm as any).locked_by ? (completeForm as any).locked_by.user_id : null
                 }
             });
         } catch (error) {
@@ -453,12 +479,66 @@ class FormController {
         }
     }
 
+    public async lockUserForm(req: CustomRequest, res: Response) {
+        try {
+            const userFormRepository = AppDataSource.getRepository(UserForm);
+            const { formId, userId } = req.params as any;
+
+            let userForm = await userFormRepository.findOne({
+                where: { user: { user_id: Number(userId) }, form: { id: Number(formId) } },
+                relations: ['user', 'form']
+            });
+
+            if (!userForm) {
+                return res.status(404).json({ message: 'User form not found', status: false });
+            }
+
+            userForm.is_locked = true;
+            userForm.locked_at = new Date();
+            (userForm as any).locked_by = { user_id: req.user.user_id } as any;
+
+            await userFormRepository.save(userForm);
+
+            return res.status(200).json({ message: 'Form locked successfully', status: true });
+        } catch (error) {
+            return res.status(500).json({ message: 'Internal Server Error', status: false, error: error.message });
+        }
+    }
+
+    public async unlockUserForm(req: CustomRequest, res: Response) {
+        try {
+            const userFormRepository = AppDataSource.getRepository(UserForm);
+            const { formId, userId } = req.params as any;
+            const { reason } = req.body || {};
+
+            let userForm = await userFormRepository.findOne({
+                where: { user: { user_id: Number(userId) }, form: { id: Number(formId) } },
+                relations: ['user', 'form']
+            });
+
+            if (!userForm) {
+                return res.status(404).json({ message: 'User form not found', status: false });
+            }
+
+            userForm.is_locked = false;
+            userForm.unlocked_at = new Date();
+            (userForm as any).unlocked_by = { user_id: req.user.user_id } as any;
+            (userForm as any).unlock_reason = reason || null;
+
+            await userFormRepository.save(userForm);
+
+            return res.status(200).json({ message: 'Form unlocked successfully', status: true });
+        } catch (error) {
+            return res.status(500).json({ message: 'Internal Server Error', status: false, error: error.message });
+        }
+    }
+
     public async getUserFormData(req: CustomRequest, res: Response) {
         try {
             const userFormRepository = AppDataSource.getRepository(UserForm);
             const id = req.params.id as any;
             const user_id = req.query.user_id as any;
-            let userForm = await userFormRepository.findOne({ where: { user: { user_id }, form: { id } }, relations: ['form'] });
+            let userForm = await userFormRepository.findOne({ where: { user: { user_id }, form: { id } }, relations: ['form', 'locked_by', 'unlocked_by'] });
 
             if (!userForm) {
                 return res.status(404).json({
@@ -501,11 +581,17 @@ class FormController {
             const qb = userFormRepository.createQueryBuilder('user_form')
                 .innerJoinAndSelect('user_form.user', 'user')
                 .innerJoinAndSelect('user_form.form', 'form')
+                .leftJoinAndSelect('user_form.locked_by', 'locked_by')
+                .leftJoinAndSelect('user_form.unlocked_by', 'unlocked_by')
                 .select([
                     'user_form.id',
                     'user_form.form_data',
                     'user_form.created_at',
                     'user_form.updated_at',
+                    'user_form.is_locked',
+                    'user_form.locked_at',
+                    'user_form.unlocked_at',
+                    'user_form.unlock_reason',
                     'user.user_name',
                     'user.email',
                     'user.user_id',
@@ -517,13 +603,21 @@ class FormController {
                     'form.created_at',
                     'form.updated_at',
                     'user_form.form_files',
-                    'user_form.user_id'
+                    'user_form.user_id',
+                    'locked_by.user_id',
+                    'locked_by.user_name',
+                    'unlocked_by.user_id',
+                    'unlocked_by.user_name'
                 ]);
 
             if (req.query.keyword) {
                 qb.andWhere("(form.form_name ILIKE :keyword OR user.user_name ILIKE :keyword)", { keyword: `%${req.query.keyword}%` });
             }
-
+            
+            if(req.user.role === UserRole.Trainer){
+                qb.andWhere("user.trainer_id = :trainer_id", { trainer_id: req.user.user_id });
+            }
+            
             const [forms, count] = await qb
                 .skip(Number(req.pagination.skip))
                 .take(Number(req.pagination.limit))
