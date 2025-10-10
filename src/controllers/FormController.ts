@@ -616,7 +616,6 @@ class FormController {
             if(req.user.role === UserRole.Trainer){
                 qb.andWhere('uc.trainer_id = :trainer_id', { trainer_id: req.user.user_id });
             }
-            console.log(qb.getQuery());
 
             const [forms, count] = await qb
                 .skip(Number(req.pagination.skip))
