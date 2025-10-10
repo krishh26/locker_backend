@@ -314,7 +314,7 @@ class FormController {
     public async createUserFormData(req: CustomRequest, res: Response) {
         try {
             const userFormRepository = AppDataSource.getRepository(UserForm);
-            const { form_id, form_data, user_id, submit, learner_plan_id } = req.body;
+            const { form_id, form_data, user_id, submit } = req.body;
 
             if (!form_id || !form_data) {
                 return res.status(400).json({
@@ -422,17 +422,13 @@ class FormController {
                 // Update existing form
                 userForm.form_data = parsedFormData;
                 userForm.form_files = formFiles.length > 0 ? formFiles : userForm.form_files;
-                if (learner_plan_id) {
-                    (userForm as any).learner_plan = { learner_plan_id: Number(learner_plan_id) } as LearnerPlan;
-                }
             } else {
                 // Create new form
                 userForm = userFormRepository.create({
                     user: { user_id: user_id || req.user.user_id },
                     form: { id: form_id },
                     form_data: parsedFormData,
-                    form_files: formFiles.length > 0 ? formFiles : null,
-                    ...(learner_plan_id ? { learner_plan: { learner_plan_id: Number(learner_plan_id) } as any } : {})
+                    form_files: formFiles.length > 0 ? formFiles : null
                 });
             }
 
@@ -617,11 +613,12 @@ class FormController {
             if(req.user.role === UserRole.Trainer){
                 qb.andWhere("user.trainer_id = :trainer_id", { trainer_id: req.user.user_id });
             }
-            
+            console.log(qb.getQuery());
+
             const [forms, count] = await qb
                 .skip(Number(req.pagination.skip))
                 .take(Number(req.pagination.limit))
-                .orderBy(`user_form.created_at`, 'DESC')
+                .orderBy('user_form.created_at', 'DESC')
                 .getManyAndCount();
 
             return res.status(200).json({

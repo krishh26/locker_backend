@@ -22,7 +22,7 @@ FormRoutes.post("/send-assignment-email", authorizeRoles(), singleFileUpload("pd
 // UserForm routes
 FormRoutes.post('/user/create', authorizeRoles(), dynamicFileUpload(), Controller.createUserFormData);
 FormRoutes.get("/user/:id", authorizeRoles(), Controller.getUserFormData);
-FormRoutes.get("/list/user", authorizeRoles(UserRole.Admin, UserRole.Trainer), paginationMiddleware, Controller.getUserForms);
+FormRoutes.get("/list/user", authorizeRoles(), paginationMiddleware, Controller.getUserForms);
 
 // Lock / Unlock
 FormRoutes.post("/:formId/users/:userId/lock", authorizeRoles(), Controller.lockUserForm);
