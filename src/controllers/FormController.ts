@@ -314,7 +314,7 @@ class FormController {
     public async createUserFormData(req: CustomRequest, res: Response) {
         try {
             const userFormRepository = AppDataSource.getRepository(UserForm);
-            const { form_id, form_data, user_id, submit } = req.body;
+            const { form_id, form_data, user_id, submit, learner_plan_id } = req.body;
 
             if (!form_id || !form_data) {
                 return res.status(400).json({
@@ -422,13 +422,17 @@ class FormController {
                 // Update existing form
                 userForm.form_data = parsedFormData;
                 userForm.form_files = formFiles.length > 0 ? formFiles : userForm.form_files;
+                if (learner_plan_id) {
+                    (userForm as any).learner_plan = { learner_plan_id: Number(learner_plan_id) } as LearnerPlan;
+                }
             } else {
                 // Create new form
                 userForm = userFormRepository.create({
                     user: { user_id: user_id || req.user.user_id },
                     form: { id: form_id },
                     form_data: parsedFormData,
-                    form_files: formFiles.length > 0 ? formFiles : null
+                    form_files: formFiles.length > 0 ? formFiles : null,
+                    ...(learner_plan_id ? { learner_plan: { learner_plan_id: Number(learner_plan_id) } as any } : {})
                 });
             }
 
@@ -579,6 +583,9 @@ class FormController {
                 .innerJoinAndSelect('user_form.form', 'form')
                 .leftJoinAndSelect('user_form.locked_by', 'locked_by')
                 .leftJoinAndSelect('user_form.unlocked_by', 'unlocked_by')
+                // Join learner and user_course
+                .leftJoin('learner', 'learner', 'learner.user_id = user.user_id')
+                .leftJoin('user_course', 'uc', 'uc.learner_id = learner.learner_id')
                 .select([
                     'user_form.id',
                     'user_form.form_data',
@@ -611,9 +618,8 @@ class FormController {
             }
             
             if(req.user.role === UserRole.Trainer){
-                qb.andWhere("user.trainer_id = :trainer_id", { trainer_id: req.user.user_id });
+                qb.andWhere('uc.trainer_id = :trainer_id', { trainer_id: req.user.user_id });
             }
-            console.log(qb.getQuery());
 
             const [forms, count] = await qb
                 .skip(Number(req.pagination.skip))

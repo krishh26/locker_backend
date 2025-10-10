@@ -52,6 +52,11 @@ export class UserForm {
 
     @Column({ type: 'text', nullable: true })
     unlock_reason: string;
+    
+    // Optional context link back to LearnerPlan session that assigned this form
+    @ManyToOne(() => LearnerPlan, { nullable: true, onDelete: 'SET NULL' })
+    @JoinColumn({ name: 'learner_plan_id', referencedColumnName: 'learner_plan_id' })
+    learner_plan: LearnerPlan;
 
     @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
     created_at: Date;
