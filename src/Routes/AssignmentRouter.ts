@@ -8,7 +8,7 @@ const AssignmentRoutes = express.Router();
 
 const Controller = new AssignmentController();
 
-AssignmentRoutes.post('/create', authorizeRoles(UserRole.Learner), singleFileUpload("file"), Controller.CreateAssignment);
+AssignmentRoutes.post('/create', authorizeRoles(UserRole.Learner, UserRole.Trainer), singleFileUpload("file"), Controller.CreateAssignment);
 AssignmentRoutes.get("/list", authorizeRoles(), Controller.getAssignmentBycourse);
 AssignmentRoutes.patch("/update/:id", authorizeRoles(), Controller.updateAssignment);
 AssignmentRoutes.delete("/delete/:id", authorizeRoles(), Controller.deleteAssignment);
