@@ -51,7 +51,9 @@ class AssignmentController {
 
     public async CreateAssignment(req: CustomRequest, res: Response) {
         try {
-            const { course_id, evidence_time_log } = req.body;
+            const { course_id, evidence_time_log, user_id } = req.body;
+
+            let userId = user_id ? user_id : req.user.user_id;
             if (!req.file && !course_id) {
                 return res.status(400).json({
                     message: "All field is required",
@@ -68,7 +70,7 @@ class AssignmentController {
                     size: req.file.size,
                     ...fileUpload
                 },
-                user: req.user.user_id,
+                user: userId,
                 course_id,
                 evidence_time_log: evidence_time_log || false
             })
@@ -77,7 +79,7 @@ class AssignmentController {
 
             const assignmentWithUserDetails = await assignmentRepository.findOne({
                 where: { assignment_id: savedAssignment.assignment_id },
-                relations: ['user']
+                relations: ['user', 'user.user_id']
             });
 
             res.status(200).json({
@@ -98,7 +100,7 @@ class AssignmentController {
     public async updateAssignment(req: CustomRequest, res: Response) {
         try {
             const AssignmentId = parseInt(req.params.id);
-            const { file, declaration, description, trainer_feedback, external_feedback, learner_comments, points_for_improvement, assessment_method, session, grade, title, units, status, evidence_time_log } = req.body;
+            const { file, declaration, description, trainer_feedback, external_feedback, learner_comments, points_for_improvement, assessment_method, session, grade, title, units, status, evidence_time_log, user_id } = req.body;
             if (!file && !declaration && !description && !trainer_feedback && !external_feedback && !learner_comments && !points_for_improvement && !assessment_method && !session && !grade && !title && !units && !status && evidence_time_log === undefined) {
                 return res.status(400).json({
                     message: 'At least one field required',
@@ -110,7 +112,7 @@ class AssignmentController {
 
             const assignment = await assignmentRepository.findOne({
                 where: { assignment_id: AssignmentId },
-                relations: ['course_id', 'user']
+                relations: ['course_id', 'user', 'user.user_id']
             });
 
             if (!assignment) {
@@ -134,6 +136,9 @@ class AssignmentController {
                     status: false
                 });
             }
+
+            let userId = user_id ? user_id : req.user.user_id;
+            assignment.user = userId;
 
             assignment.file = file || assignment.file;
             assignment.declaration = declaration || assignment.declaration;
@@ -201,6 +206,7 @@ class AssignmentController {
                 .createQueryBuilder("assignment")
                 .leftJoinAndSelect("assignment.course_id", "course")
                 .leftJoinAndSelect("assignment.user", "user")
+                .leftJoinAndSelect("user.user_id", "user_id")
                 .where("user.user_id = :user_id", { user_id });
 
             if (course_id) {
@@ -238,7 +244,7 @@ class AssignmentController {
 
             const assignment = await assignmentRepository.findOne({
                 where: { assignment_id: assignmentId },
-                relations: ['course_id', 'user']
+                relations: ['course_id', 'user', 'user.user_id']
             });
 
             if (!assignment) {
@@ -286,7 +292,7 @@ class AssignmentController {
 
             const assignment = await assignmentRepository.findOne({
                 where: { assignment_id: id },
-                relations: ['course_id', 'user']
+                relations: ['course_id', 'user', 'user.user_id']
             });
 
             if (!assignment) {
@@ -338,7 +344,7 @@ class AssignmentController {
             const assignmentRepository = AppDataSource.getRepository(Assignment);
             const assignment = await assignmentRepository.findOne({
                 where: { assignment_id: assignmentId },
-                relations: ['course_id', 'user']
+                relations: ['course_id', 'user', 'user.user_id']
             });
 
             if (!assignment) {
@@ -409,7 +415,7 @@ class AssignmentController {
             const assignmentRepository = AppDataSource.getRepository(Assignment);
             const assignment = await assignmentRepository.findOne({
                 where: { assignment_id: assignmentId },
-                relations: ['course_id', 'user']
+                relations: ['course_id', 'user', 'user.user_id']
             });
 
             if (!assignment) {
@@ -468,7 +474,7 @@ class AssignmentController {
             const assignmentRepository = AppDataSource.getRepository(Assignment);
             const assignment = await assignmentRepository.findOne({
                 where: { assignment_id: assignmentId },
-                relations: ['course_id', 'user']
+                relations: ['course_id', 'user', 'user.user_id']
             });
 
             if (!assignment) {
