@@ -231,6 +231,7 @@ class AssignmentController {
                 .leftJoinAndSelect("assignment.course_id", "course")
                 .leftJoinAndSelect("assignment.user", "user")
                 .where("user.user_id = :user_id", { user_id })
+                .orderBy("assignment.created_at", "DESC")
                 .skip(req.pagination.skip)
                 .take(Number(req.pagination.limit));
 
@@ -278,7 +279,7 @@ class AssignmentController {
         try {
             const assignmentId = parseInt(req.params.id);
             const assignmentRepository = AppDataSource.getRepository(Assignment);
-
+            const assignmentSignatureRepository = AppDataSource.getRepository(AssignmentSignature);
             const assignment = await assignmentRepository.findOne({
                 where: { assignment_id: assignmentId },
                 relations: ['course_id', 'user']
@@ -307,6 +308,7 @@ class AssignmentController {
             }
 
             deleteFromS3(assignment.file)
+            await assignmentSignatureRepository.delete({ assignment: { assignment_id: assignmentId } });
             await assignmentRepository.remove(assignment);
 
             return res.status(200).json({
@@ -464,7 +466,6 @@ class AssignmentController {
                 signatureRow.signed_at = new Date();
                 // Ensure user recorded on sign
                 signatureRow.user = { user_id: userId } as any;
-                signatureRow.is_requested = false;
             } else {
                 signatureRow.signed_at = null as any;
             }
@@ -484,19 +485,29 @@ class AssignmentController {
                 .leftJoinAndSelect('sig.user', 'user')
                 .leftJoin('sig.assignment', 'assignment')
                 .where('assignment.assignment_id = :assignmentId', { assignmentId })
+                .leftJoinAndSelect('sig.requested_by', 'requested_by')
                 .getMany();
 
-            // Map to response
-            const result = signatures.map((s: any) => ({
-                id: s.id,
-                role: s.role,
-                user_id: s.user?.user_id || null,
-                name: s.user?.user_name || null,
-                isSigned: s.is_signed,
-                isRequested: s.is_requested,
-                signedAt: s.signed_at,
-                requestedAt: s.requested_at
-            }));
+                            
+            const result = signatures.map((s: any) => {
+                const requestedByUser = Array.isArray(s.requested_by) ? s.requested_by[0] : s.requested_by;
+                return {
+                    id: s.id,
+                    role: s.role,
+                    user_id: s.user?.user_id || null,
+                    name: s.user ? `${s.user.first_name || ''} ${s.user.last_name || ''}`.trim() : null,
+                    isSigned: s.is_signed,
+                    isRequested: s.is_requested,
+                    signedAt: s.signed_at,
+                    requestedAt: s.requested_at,
+                    //add null if requested_by is null or undefined , not in database
+                    requestedBy: requestedByUser
+                        ? `${requestedByUser.first_name || ''} ${requestedByUser.last_name || ''}`.trim()
+                        : null,
+                    requestedByNameId: requestedByUser?.user_id || null,
+                    requestedByName: requestedByUser?.first_name + ' ' + requestedByUser?.last_name || null,
+                };
+            });
 
             return res.status(200).json({ message: 'Signatures fetched', status: true, data: result });
         } catch (error) {

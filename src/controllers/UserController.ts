@@ -541,6 +541,7 @@ class UserController {
                 .leftJoin('sig.user', 'sig_user')
                 .where('sig_user.user_id = :userId', { userId })
                 .andWhere('sig.is_requested = true')
+                .andWhere('sig.is_signed = false')
                 .orderBy('sig.requested_at', 'DESC')
                 .getMany();
 
