@@ -12,6 +12,7 @@ import { getHighestPriorityRole, UserRole } from "../util/constants";
 import { UserCourse } from "../entity/UserCourse.entity";
 import { Employer } from "../entity/Employer.entity";
 import { Raw, In } from 'typeorm';
+import { AssignmentSignature } from "../entity/AssignmentSignature.entity";
 
 
 class UserController {
@@ -525,6 +526,75 @@ class UserController {
                 status: false,
                 error: error.message
             })
+        }
+    }
+
+    public async getPendingSignatures(req: any, res: Response) {
+        try {
+            //get only is_requested is true
+            const userId = parseInt(req.params.id);
+            const signatureRepository = AppDataSource.getRepository(AssignmentSignature);
+            
+            const pendingRows = await signatureRepository.createQueryBuilder('sig')
+                .leftJoinAndSelect('sig.assignment', 'assignment')
+                .leftJoinAndSelect('assignment.course_id', 'course')
+                .leftJoin('sig.user', 'sig_user')
+                .where('sig_user.user_id = :userId', { userId })
+                .andWhere('sig.is_requested = true')
+                .orderBy('sig.requested_at', 'DESC')
+                .getMany();
+
+            const seen = new Set<number>();
+            const assignmentIds: number[] = [];
+            for (const row of pendingRows as any[]) {
+                const aid = row.assignment?.assignment_id;
+                if (!aid || seen.has(aid)) continue;
+                seen.add(aid);
+                assignmentIds.push(aid);
+            }
+
+            if (!assignmentIds.length) {
+                return res.status(200).json({ message: 'Pending signatures', status: true, data: [] });
+            }
+
+            const fullSignatures = await signatureRepository.createQueryBuilder('sig')
+                .leftJoinAndSelect('sig.user', 'sig_user')
+                .leftJoinAndSelect('sig.requested_by', 'requested_by_user')
+                .leftJoinAndSelect('sig.assignment', 'assignment')
+                .where('assignment.assignment_id IN (:...ids)', { ids: assignmentIds })
+                .getMany();
+
+            const data = assignmentIds.map((aid) => {
+                const row = (pendingRows as any[]).find(pr => pr.assignment?.assignment_id === aid);
+                const signatures = (fullSignatures as any[])
+                    .filter(s => s.assignment?.assignment_id === aid)
+                    .map(s => ({
+                        id: s.id,
+                        role: s.role,
+                        user_id: s.user?.user_id || null,
+                        name: s.user ? (s.user.first_name + ' ' + s.user.last_name).trim() : null,
+                        is_requested: s.is_requested,
+                        is_signed: s.is_signed,
+                        requested_at: s.requested_at,
+                        requested_by: s.requested_by?.user_id,
+                        requested_by_name: s.requested_by ? (s.requested_by.first_name + ' ' + s.requested_by.last_name).trim() : null,
+                        signed_at: s.signed_at
+                    }));
+                return {
+                    assignment_id: aid,
+                    assignment_name: row?.assignment?.title,
+                    course_id: row?.assignment?.course_id?.course_id,
+                    course_name: row?.assignment?.course_id?.course_name,
+                    assignment_created_at: row?.assignment?.created_at,
+                    assignment_created_by: row?.assignment?.user?.user_id,
+                    assignment_created_by_name: row?.assignment?.user ? (row?.assignment?.user.first_name + ' ' + row?.assignment?.user.last_name).trim() : null,
+                    signatures
+                };
+            });
+
+            return res.status(200).json({ message: 'Pending signatures', status: true, data });
+        } catch (error) {
+            return res.status(500).json({ message: 'Internal Server Error', status: false, error: error.message });
         }
     }
 

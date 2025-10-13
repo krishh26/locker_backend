@@ -5,6 +5,7 @@ import { Assignment } from "../entity/Assignment.entity";
 import { deleteFromS3, uploadToS3 } from "../util/aws";
 import { UserCourse } from "../entity/UserCourse.entity";
 import { UserRole } from "../util/constants";
+import { AssignmentSignature } from "../entity/AssignmentSignature.entity";
 
 class AssignmentController {
 
@@ -61,6 +62,7 @@ class AssignmentController {
                 });
             }
             const assignmentRepository = AppDataSource.getRepository(Assignment);
+            const signatureRepository = AppDataSource.getRepository(AssignmentSignature);
 
             const fileUpload = await uploadToS3(req.file, "Assignment")
 
@@ -77,9 +79,31 @@ class AssignmentController {
 
             const savedAssignment = await assignmentRepository.save(assignment);
 
+            // Initialize signature rows for key roles
+            const defaultRoles = [
+                'Trainer',
+                'Learner',
+                'Employer',
+                'IQA'
+            ];
+
+            const signatureRows = defaultRoles.map((role) => {
+                const row = new AssignmentSignature();
+                row.assignment = savedAssignment as any;
+                row.role = role;
+                row.user = null;
+                row.is_signed = false;
+                row.is_requested = false;
+                row.signed_at = null;
+                row.requested_by = null as any;
+                row.requested_at = null;
+                return row;
+            });
+            await signatureRepository.save(signatureRows);
+
             const assignmentWithUserDetails = await assignmentRepository.findOne({
                 where: { assignment_id: savedAssignment.assignment_id },
-                relations: ['user', 'user.user_id']
+                relations: ['user']
             });
 
             res.status(200).json({
@@ -112,7 +136,7 @@ class AssignmentController {
 
             const assignment = await assignmentRepository.findOne({
                 where: { assignment_id: AssignmentId },
-                relations: ['course_id', 'user', 'user.user_id']
+                relations: ['course_id', 'user']
             });
 
             if (!assignment) {
@@ -173,7 +197,7 @@ class AssignmentController {
 
     public async getAssignmentBycourse(req: CustomRequest, res: Response) {
         try {
-            const { user_id, course_id } = req.query as any;
+            const { user_id, course_id, search } = req.query as any;
             const assignmentRepository = AppDataSource.getRepository(Assignment);
             const userCourseRepository = AppDataSource.getRepository(UserCourse);
 
@@ -206,27 +230,40 @@ class AssignmentController {
                 .createQueryBuilder("assignment")
                 .leftJoinAndSelect("assignment.course_id", "course")
                 .leftJoinAndSelect("assignment.user", "user")
-                .leftJoinAndSelect("user.user_id", "user_id")
-                .where("user.user_id = :user_id", { user_id });
+                .where("user.user_id = :user_id", { user_id })
+                .skip(req.pagination.skip)
+                .take(Number(req.pagination.limit));
 
             if (course_id) {
                 qb.andWhere("assignment.course_id = :course_id", { course_id });
             }
 
-            const assignments = await qb
+            if (search) {
+                qb.andWhere("(assignment.title ILIKE :search OR assignment.description ILIKE :search)", { search: `%${search}%` })
+            }
+
+            const [assignments, count] = await qb
                 .select([
                     "assignment",
                     "course.course_id",
                     "course.course_name",
                     "course.course_code"
                 ])
-                .getMany();
+                .getManyAndCount();
 
 
             return res.status(200).json({
                 message: 'Assignment retrieved successfully',
                 status: true,
                 data: assignments,
+                ...(req.query.meta === "true" && {
+                    meta_data: {
+                        page: req.pagination.page,
+                        items: count,
+                        page_size: req.pagination.limit,
+                        pages: Math.ceil(count / req.pagination.limit)
+                    }
+                })
             });
         } catch (error) {
             return res.status(500).json({
@@ -244,7 +281,7 @@ class AssignmentController {
 
             const assignment = await assignmentRepository.findOne({
                 where: { assignment_id: assignmentId },
-                relations: ['course_id', 'user', 'user.user_id']
+                relations: ['course_id', 'user']
             });
 
             if (!assignment) {
@@ -285,6 +322,188 @@ class AssignmentController {
         }
     }
 
+    // Request a signature for an assignment for a role/user
+    public async requestSignature(req: CustomRequest, res: Response) {
+        try {
+            const assignmentId = parseInt(req.params.id);
+            // add is requested field for all role separately in signature table
+            const { role, roles, user_id } = req.body as any;
+
+            const signatureRepository = AppDataSource.getRepository(AssignmentSignature);
+            const assignmentRepository = AppDataSource.getRepository(Assignment);
+            const userCourseRepository = AppDataSource.getRepository(UserCourse);
+
+            const assignment = await assignmentRepository.findOne({ where: { assignment_id: assignmentId }, relations: ['course_id', 'user'] });
+            if (!assignment) {
+                return res.status(404).json({ message: 'Assignment not found', status: false });
+            }
+
+            // Only trainers assigned to this course or Admin can request
+            //const courseId = assignment.course_id.course_id;
+            // const isAdmin = (req.user.roles || [req.user.role]).includes(UserRole.Admin);
+            // let authorized = isAdmin;
+            // if (!authorized) {
+            //     const trainerInvolvement = await userCourseRepository.createQueryBuilder('user_course')
+            //         .leftJoin('user_course.trainer_id', 'trainer')
+            //         .where('user_course.course->>\'course_id\' = :courseId', { courseId })
+            //         .andWhere('trainer.user_id = :userId', { userId: req.user.user_id })
+            //         .getOne();
+            //     authorized = !!trainerInvolvement;
+            // }
+            // if (!authorized) {
+            //     return res.status(403).json({ message: 'Not authorized to request signatures', status: false });
+            // }
+
+            const rolesToProcess: string[] = Array.isArray(roles) && roles.length ? roles : (role ? [role] : []);
+            if (!rolesToProcess.length) {
+                return res.status(400).json({ message: 'role or roles[] is required', status: false });
+            }
+
+            // Fetch all signature rows for this assignment
+            const allSignatures = await signatureRepository.find({ 
+            where: { assignment: { assignment_id: assignmentId } } 
+            });
+            console.log(allSignatures)
+            const results: any[] = [];
+            const notFound: string[] = [];
+
+            for (const sig of allSignatures) {
+                // Set true if role is in request array, otherwise false
+                const shouldRequest = rolesToProcess.includes(sig.role);
+    
+                sig.is_requested = shouldRequest;
+                sig.requested_at = shouldRequest ? new Date() : null;
+                sig.requested_by = shouldRequest ? { user_id: req.user.user_id } as any : null;
+    
+                if (user_id) {
+                    sig.user = { user_id } as any;
+                }
+    
+                const updated = await signatureRepository.save(sig);
+                results.push(updated);
+            }
+
+            return res.status(200).json({
+                message: 'Signature request(s) processed',
+                status: true,
+                data: results,
+                ...(notFound.length ? { not_found_roles: notFound } : {})
+            });
+        } catch (error) {
+            return res.status(500).json({ message: 'Internal Server Error', status: false, error: error.message });
+        }
+    }
+
+    // Mark signature as signed by current user
+    public async signAssignment(req: CustomRequest, res: Response) {
+        try {
+            const assignmentId = parseInt(req.params.id);
+            const { role, is_signed } = req.body as any;
+
+            const signatureRepository = AppDataSource.getRepository(AssignmentSignature);
+            const assignmentRepository = AppDataSource.getRepository(Assignment);
+            const userCourseRepository = AppDataSource.getRepository(UserCourse);
+
+            const assignment = await assignmentRepository.findOne({ where: { assignment_id: assignmentId }, relations: ['course_id', 'user'] });
+            if (!assignment) {
+                return res.status(404).json({ message: 'Assignment not found', status: false });
+            }
+
+            // Permission checks per role
+            const userId = req.user.user_id;
+            const roles = req.user.roles || [req.user.role];
+            const isAdmin = roles.includes(UserRole.Admin);
+
+            let canSign = false;
+            if (role === 'Learner') {
+                canSign = assignment.user.user_id === userId || isAdmin;
+            } else if (role === 'Employer') {
+                // Employer mapped on user_course for this course
+                const courseId = assignment.course_id.course_id;
+                const employerInvolvement = await userCourseRepository.createQueryBuilder('user_course')
+                    .leftJoin('user_course.employer_id', 'employer')
+                    .where('user_course.course->>\'course_id\' = :courseId', { courseId })
+                    .andWhere('employer.user_id = :userId', { userId })
+                    .getOne();
+                canSign = !!employerInvolvement || isAdmin;
+            } else if (role === 'IQA') {
+                const courseId = assignment.course_id.course_id;
+                const iqaInvolvement = await userCourseRepository.createQueryBuilder('user_course')
+                    .leftJoin('user_course.IQA_id', 'IQA')
+                    .where('user_course.course->>\'course_id\' = :courseId', { courseId })
+                    .andWhere('IQA.user_id = :userId', { userId })
+                    .getOne();
+                canSign = !!iqaInvolvement || isAdmin;
+            } else if (role === 'Trainer') {
+                const courseId = assignment.course_id.course_id;
+                const trainerInvolvement = await userCourseRepository.createQueryBuilder('user_course')
+                    .leftJoin('user_course.trainer_id', 'trainer')
+                    .where('user_course.course->>\'course_id\' = :courseId', { courseId })
+                    .andWhere('trainer.user_id = :userId', { userId })
+                    .getOne();
+                canSign = !!trainerInvolvement || isAdmin;
+            }
+
+            if (!canSign) {
+                return res.status(403).json({ message: 'Not authorized to sign for this role', status: false });
+            }
+
+            const signatureRow = await signatureRepository.createQueryBuilder('sig')
+                .leftJoin('sig.assignment', 'assignment')
+                .where('assignment.assignment_id = :assignmentId', { assignmentId })
+                .andWhere('sig.role = :role', { role })
+                .getOne();
+
+            if (!signatureRow) {
+                return res.status(404).json({ message: 'Signature row not found for role', status: false });
+            }
+
+            const shouldSign = (typeof is_signed === 'boolean') ? is_signed : true;
+            signatureRow.is_signed = shouldSign;
+            if (shouldSign) {
+                signatureRow.signed_at = new Date();
+                // Ensure user recorded on sign
+                signatureRow.user = { user_id: userId } as any;
+                signatureRow.is_requested = false;
+            } else {
+                signatureRow.signed_at = null as any;
+            }
+            const updated = await signatureRepository.save(signatureRow);
+
+            return res.status(200).json({ message: shouldSign ? 'Signed successfully' : 'Signature removed', status: true, data: updated });
+        } catch (error) {
+            return res.status(500).json({ message: 'Internal Server Error', status: false, error: error.message });
+        }
+    }
+
+    public async getAssignmentSignatures(req: CustomRequest, res: Response) {
+        try {
+            const assignmentId = parseInt(req.params.id);
+            const signatureRepository = AppDataSource.getRepository(AssignmentSignature);
+            const signatures = await signatureRepository.createQueryBuilder('sig')
+                .leftJoinAndSelect('sig.user', 'user')
+                .leftJoin('sig.assignment', 'assignment')
+                .where('assignment.assignment_id = :assignmentId', { assignmentId })
+                .getMany();
+
+            // Map to response
+            const result = signatures.map((s: any) => ({
+                id: s.id,
+                role: s.role,
+                user_id: s.user?.user_id || null,
+                name: s.user?.user_name || null,
+                isSigned: s.is_signed,
+                isRequested: s.is_requested,
+                signedAt: s.signed_at,
+                requestedAt: s.requested_at
+            }));
+
+            return res.status(200).json({ message: 'Signatures fetched', status: true, data: result });
+        } catch (error) {
+            return res.status(500).json({ message: 'Internal Server Error', status: false, error: error.message });
+        }
+    }
+
     public async getAssignment(req: CustomRequest, res: Response) {
         try {
             const { id } = req.params as any;
@@ -292,7 +511,7 @@ class AssignmentController {
 
             const assignment = await assignmentRepository.findOne({
                 where: { assignment_id: id },
-                relations: ['course_id', 'user', 'user.user_id']
+                relations: ['course_id', 'user']
             });
 
             if (!assignment) {
@@ -344,7 +563,7 @@ class AssignmentController {
             const assignmentRepository = AppDataSource.getRepository(Assignment);
             const assignment = await assignmentRepository.findOne({
                 where: { assignment_id: assignmentId },
-                relations: ['course_id', 'user', 'user.user_id']
+                relations: ['course_id', 'user']
             });
 
             if (!assignment) {
@@ -415,7 +634,7 @@ class AssignmentController {
             const assignmentRepository = AppDataSource.getRepository(Assignment);
             const assignment = await assignmentRepository.findOne({
                 where: { assignment_id: assignmentId },
-                relations: ['course_id', 'user', 'user.user_id']
+                relations: ['course_id', 'user']
             });
 
             if (!assignment) {

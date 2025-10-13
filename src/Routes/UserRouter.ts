@@ -24,6 +24,7 @@ userRoutes.get("/list/eqa", authorizeRoles(), paginationMiddleware, Controller.g
 userRoutes.post("/mail", authorizeRoles(), Controller.sendMail);
 userRoutes.post("/password-mail", authorizeRoles(UserRole.Admin), Controller.mailPassword);
 userRoutes.get('/line-managers', authorizeRoles(), Controller.getLineManagerCaseload);
+userRoutes.get('/:id/pending-signatures', authorizeRoles(), Controller.getPendingSignatures);
 
 // avatar routes
 userRoutes.post("/avatar", authorizeRoles(), singleFileUpload("avatar"), Controller.UploadAvatar)
