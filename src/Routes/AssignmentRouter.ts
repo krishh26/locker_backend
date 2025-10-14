@@ -11,6 +11,7 @@ const Controller = new AssignmentController();
 
 AssignmentRoutes.post('/create', authorizeRoles(UserRole.Learner, UserRole.Trainer), singleFileUpload("file"), Controller.CreateAssignment);
 AssignmentRoutes.get("/list", authorizeRoles(), paginationMiddleware, Controller.getAssignmentBycourse);
+AssignmentRoutes.get("/list-with-signatures", paginationMiddleware, Controller.listWithSignatures);
 AssignmentRoutes.patch("/update/:id", authorizeRoles(), Controller.updateAssignment);
 AssignmentRoutes.delete("/delete/:id", authorizeRoles(), Controller.deleteAssignment);
 AssignmentRoutes.get("/get/:id", authorizeRoles(), Controller.getAssignment);
