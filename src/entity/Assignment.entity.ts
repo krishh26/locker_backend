@@ -1,7 +1,8 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, OneToMany } from 'typeorm';
 import { User } from './User.entity';
 import { Course } from './Course.entity';
 import { AssessmentMethod, AssessmentStatus } from '../util/constants';
+import { AssignmentSignature } from './AssignmentSignature.entity';
 
 @Entity('assignment')
 export class Assignment {
@@ -62,6 +63,9 @@ export class Assignment {
 
     @Column({ type: 'boolean', default: false })
     evidence_time_log: boolean;
+
+    @OneToMany(() => AssignmentSignature, sig => sig.assignment)
+    signatures: AssignmentSignature[];
 
     @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
     created_at: Date;

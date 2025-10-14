@@ -6,6 +6,8 @@ import { deleteFromS3, uploadToS3 } from "../util/aws";
 import { UserCourse } from "../entity/UserCourse.entity";
 import { UserRole } from "../util/constants";
 import { AssignmentSignature } from "../entity/AssignmentSignature.entity";
+import { Learner } from "../entity/Learner.entity";
+import { User } from "../entity/User.entity";
 
 class AssignmentController {
 
@@ -49,6 +51,91 @@ class AssignmentController {
             return false;
         }
     }
+
+    // Assignment listing with course and signature summary for roles: Trainer, Learner, Employer, IQA
+    public async listWithSignatures(req: CustomRequest, res: Response) {
+  try {
+    const { assessor_id, course_id, learner_id, search } = req.query as any;
+
+      const qb = AppDataSource.getRepository(Assignment)
+          .createQueryBuilder('a')
+          .leftJoinAndSelect('a.course_id', 'course')
+          .leftJoinAndSelect('a.user', 'learnerUser') // learner
+          .leftJoinAndSelect('a.signatures', 'sig')
+          .leftJoinAndSelect('sig.user', 'sigUser')
+          .leftJoinAndSelect('sig.requested_by', 'requestedBy')
+          .leftJoin(UserCourse, 'uc', 'uc.learner_id = learnerUser.user_id') // connect userCourse via learner
+          .leftJoin('uc.trainer_id', 'trainer')
+          .leftJoin('uc.employer_id', 'employer')
+          .where('sig.is_requested = true');
+
+    // Filters
+    if (assessor_id) qb.andWhere('trainer.user_id = :assessor_id', { assessor_id });
+    if (course_id) qb.andWhere('course.course_id = :course_id', { course_id });
+    if (learner_id) qb.andWhere('learnerUser.user_id = :learner_id', { learner_id });
+    if (search) qb.andWhere('LOWER(a.title) LIKE :search', { search: `%${search.toLowerCase()}%` });
+
+    const assignments = await qb.getMany();
+
+    const result = assignments.map((a: any) => {
+      const roleSig: any = {};
+      (a.signatures || []).forEach((s: any) => {
+        roleSig[s.role] = {
+          id: s.id,
+          user_id: s.user?.user_id || null,
+          name: s.user ? `${s.user.first_name} ${s.user.last_name}`.trim() : null,
+          isSigned: s.is_signed,
+          signedAt: s.signed_at,
+          is_requested: s.is_requested,
+          requestedAt: s.requested_at,
+          requestedBy: s.requested_by
+            ? `${s.requested_by.first_name} ${s.requested_by.last_name}`.trim()
+            : null,
+        };
+      });
+
+      return {
+        assignment_id: a.assignment_id,
+        learner: {
+          id: a.user?.user_id || null,
+          name: a.user ? `${a.user.first_name} ${a.user.last_name}`.trim() : null,
+        },
+        course: {
+          id: a.course_id?.course_id || null,
+          name: a.course_id?.course_name || null,
+          code: a.course_id?.course_code || null,
+        },
+        employer_name: a?.employer ? `${a.employer.first_name} ${a.employer.last_name}`.trim() : null,
+        trainer_name: a?.trainer ? `${a.trainer.first_name} ${a.trainer.last_name}`.trim() : null,
+        file_type: 'Evidence',
+        file_name: (a.file as any)?.name || null,
+        file_description: a.description || null,
+        uploaded_at: a.created_at,
+        signatures: {
+          Trainer: roleSig['Trainer'] || null,
+          Learner: roleSig['Learner'] || null,
+          Employer: roleSig['Employer'] || null,
+          IQA: roleSig['IQA'] || null,
+        },
+      };
+    });
+
+    return res.status(200).json({
+      message: 'Assignments fetched successfully',
+      status: true,
+      data: result,
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      message: 'Internal Server Error',
+      status: false,
+      error: error.message,
+    });
+  }
+}
+
+      
+
 
     public async CreateAssignment(req: CustomRequest, res: Response) {
         try {
