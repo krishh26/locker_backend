@@ -113,7 +113,7 @@ class TimeLogController {
     public async getTimeLogs(req: CustomRequest, res: Response): Promise<Response> {
         try {
             const timeLogRepository = AppDataSource.getRepository(TimeLog);
-            const { pagination, user_id, approved, course_id, type, year, month, } = req.query;
+            const { pagination, user_id, approved, course_id, type, year, month, trainer_id, date_from, date_to } = req.query;
 
             const qb = timeLogRepository.createQueryBuilder('timelog')
                 .leftJoinAndSelect('timelog.trainer_id', "trainer_id")
@@ -140,9 +140,13 @@ class TimeLogController {
                     "course_id.course_name",
                     "course_id.course_code"
                 ])
-                .where('user_id.user_id = :user_id', { user_id })
 
             console.log(approved)
+            if (user_id) {
+                qb.where('user.user_id = :user_id', { user_id });
+            } else {
+                qb.where('1=1');
+            }   
             if (approved !== null && approved !== undefined) {
                 qb.andWhere('timelog.verified = :approved', { approved })
             }
@@ -152,15 +156,25 @@ class TimeLogController {
             if (type) {
                 qb.andWhere('timelog.type = :type', { type })
             }
-            if (year && month) {
+            if (trainer_id) {
+                qb.andWhere('trainer_id.user_id = :trainer_id', { trainer_id });
+            }
+            // Filter: Date range
+            if (date_from && date_to) {
+                qb.andWhere('timelog.activity_date BETWEEN :date_from AND :date_to', {
+                    date_from,
+                    date_to
+                });
+            } else if (year && month) {
                 const startDate = new Date(Number(year), Number(month) - 1, 1);
                 const endDate = new Date(Number(year), Number(month), 0);
-                qb
-                    .andWhere('timelog.activity_date BETWEEN :startDate AND :endDate', { startDate, endDate });
+                qb.andWhere('timelog.activity_date BETWEEN :startDate AND :endDate', {
+                    startDate,
+                    endDate
+                });
             }
             if (pagination) {
-                qb.skip(req.pagination.skip)
-                    .take(Number(req.pagination.limit))
+                qb.skip(req.pagination.skip).take(Number(req.pagination.limit))
             }
 
             const [timeLogs, count] = await qb
