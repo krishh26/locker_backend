@@ -143,7 +143,7 @@ class TimeLogController {
 
             console.log(approved)
             if (user_id) {
-                qb.where('user.user_id = :user_id', { user_id });
+                qb.where('user_id.user_id = :user_id', { user_id });
             } else {
                 qb.where('1=1');
             }   

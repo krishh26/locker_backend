@@ -1,4 +1,5 @@
-import { SendEmailTemplet } from "./nodemailer";
+import { SendEmailTemplet, SendCalendarInvite } from "./nodemailer";
+const ical = require('ical-toolkit');
 
 export const sendPasswordByEmail = async (email: string, password: any): Promise<boolean> => {
     try {
@@ -323,4 +324,132 @@ export const sendUserEmail = async (email: string, data: any): Promise<any> => {
     const response = await SendEmailTemplet(email, data.subject, null, html);
 
     return true;
+};
+
+export const sendSessionInviteEmail = async (
+    learnerEmail: string,
+    sessionData: {
+        title: string;
+        description: string;
+        trainerName: string;
+        startDate: string;
+        endDate: string;
+        location: string;
+        duration: number;
+    }
+): Promise<boolean> => {
+    try {
+        // Format dates for display
+        const startDateTime = new Date(sessionData.startDate);
+        const endDateTime = new Date(sessionData.endDate);
+
+        const formatDate = (date: Date) => {
+            return date.toLocaleDateString('en-GB', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            });
+        };
+
+        const formatTime = (date: Date) => {
+            return date.toLocaleTimeString('en-GB', {
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: true
+            });
+        };
+
+        // Create calendar invitation using ical-toolkit
+        const calendarEvent = generateICalEvent(sessionData, learnerEmail);
+
+        // Calendar invitation email content
+        const emailContent = `You have been invited to a training session.
+
+        Session Details:
+        - Title: ${sessionData.title}
+        - Trainer: ${sessionData.trainerName}
+        - Date: ${formatDate(startDateTime)}
+        - Time: ${formatTime(startDateTime)} - ${formatTime(endDateTime)}
+        - Duration: ${sessionData.duration} minutes
+        - Location: ${sessionData.location || 'To be confirmed'}
+            
+        ${sessionData.description ? `Description: ${sessionData.description}` : ''}
+            
+        If you have any questions, please contact your trainer.`;
+
+        // Send as calendar invitation
+        const response = await SendCalendarInvite(
+            learnerEmail,
+            `Training Session Invitation: ${sessionData.title}`,
+            emailContent,
+            calendarEvent
+        );
+
+        return true;
+    } catch (error) {
+        console.log('Error sending session invite email:', error);
+        return false;
+    }
+};
+
+// Helper function to generate calendar invitation using ical-toolkit
+const generateICalEvent = (sessionData: {
+    title: string;
+    description: string;
+    trainerName: string;
+    startDate: string;
+    endDate: string;
+    location: string;
+}, attendeeEmail: string) => {
+    const startDate = new Date(sessionData.startDate);
+    const endDate = new Date(sessionData.endDate);
+
+    // Create calendar using ical-toolkit
+    const builder = ical.createIcsFileBuilder();
+
+    builder.spacers = true;
+    builder.NEWLINE_CHAR = '\r\n';
+    builder.throwError = false;
+    builder.ignoreTZIDMismatch = true;
+
+    // Add calendar properties for invitation
+    builder.calname = 'Locker Training Sessions';
+    builder.timezone = 'UTC';
+    builder.tzid = 'UTC';
+    builder.method = 'REQUEST';
+    builder.additionalTags = {
+        'PRODID': '-//Locker//Training Session//EN',
+        'VERSION': '2.0',
+        'CALSCALE': 'GREGORIAN',
+        'METHOD': 'REQUEST'
+    };
+
+    // Add the event with attendee
+    builder.events.push({
+        start: startDate,
+        end: endDate,
+        transp: 'OPAQUE',
+        summary: sessionData.title,
+        alarms: [15], // 15 minutes before
+        description: `Training session with ${sessionData.trainerName}\n\n${sessionData.description || 'No additional description provided.'}`,
+        location: sessionData.location || 'To be confirmed',
+        organizer: {
+            name: sessionData.trainerName,
+            email: 'noreply@locker.com'
+        },
+        attendees: [{
+            name: attendeeEmail.split('@')[0],
+            email: attendeeEmail,
+            rsvp: true,
+            partstat: 'NEEDS-ACTION',
+            role: 'REQ-PARTICIPANT'
+        }],
+        uid: `session-${Date.now()}@locker.com`,
+        sequence: 0,
+        //status: 'CONFIRMED',
+        method: 'REQUEST'
+    });
+
+    return builder.toString();
 };
