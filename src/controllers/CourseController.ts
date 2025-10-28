@@ -576,7 +576,10 @@ class CourseController {
 
             const userCourseRepository = AppDataSource.getRepository(UserCourse);
             const existingCourse = await userCourseRepository.findOne({ where: { user_course_id } });
-
+            const existingCourseWithRelations = await userCourseRepository.findOne({
+                where: { user_course_id },
+                relations: ['learner_id', 'trainer_id', 'IQA_id', 'LIQA_id', 'EQA_id', 'employer_id'],
+            });
             if (!existingCourse) {
                 return res.status(404).json({
                     message: 'User Course not found',
@@ -584,9 +587,16 @@ class CourseController {
                 });
             }
 
-            if (req.body.is_main_course === true) {
-                let otherMainCourse = await userCourseRepository.findOne({ where: { learner_id: existingCourse.learner_id, is_main_course: true } });
-                if (otherMainCourse) {
+            const learnerId = existingCourseWithRelations.learner_id?.learner_id;
+
+            if (req.body.is_main_course === true && learnerId) {
+                const otherMainCourse = await userCourseRepository
+                    .createQueryBuilder('uc')
+                    .where('uc.learner_id = :learnerId', { learnerId })
+                    .andWhere('uc.is_main_course = true')
+                    .getOne();
+
+                if (otherMainCourse && otherMainCourse.user_course_id !== user_course_id) {
                     return res.status(400).json({
                         message: 'Learner has one main course',
                         status: false,
