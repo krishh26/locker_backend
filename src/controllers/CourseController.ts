@@ -46,6 +46,43 @@ class CourseController {
                 data.level = 'N/A';
             }
 
+            if (data.course_core_type === 'Gateway') {
+                const userCourseRepo = AppDataSource.getRepository(UserCourse);
+
+                // find all learners from assigned standards
+                const assignedLearners = await userCourseRepo
+                    .createQueryBuilder('uc')
+                    .leftJoinAndSelect('uc.learner_id', 'learner')
+                    .leftJoinAndSelect('uc.trainer_id', 'trainer')
+                    .leftJoinAndSelect('uc.IQA_id', 'iqa')
+                    .leftJoinAndSelect('uc.LIQA_id', 'liqa')
+                    .leftJoinAndSelect('uc.EQA_id', 'eqa')
+                    .leftJoinAndSelect('uc.employer_id', 'employer')
+                    .where("uc.course ->> 'course_id' IN (:...ids)", { ids: data.assigned_standards })
+                    .getMany();
+
+                for (const learnerUC of assignedLearners) {
+                    console.log('Creating user_course for learner:', learnerUC.learner_id?.learner_id);
+
+                    const newUserCourse = userCourseRepo.create({
+                        learner_id: learnerUC.learner_id ? { learner_id: learnerUC.learner_id.learner_id } : null,
+                        trainer_id: learnerUC.trainer_id ? { user_id: learnerUC.trainer_id.user_id } : null,
+                        IQA_id: learnerUC.IQA_id ? { user_id: learnerUC.IQA_id.user_id } : null,
+                        LIQA_id: learnerUC.LIQA_id ? { user_id: learnerUC.LIQA_id.user_id } : null,
+                        EQA_id: learnerUC.EQA_id ? { user_id: learnerUC.EQA_id.user_id } : null,
+                        employer_id: learnerUC.employer_id ? { user_id: learnerUC.employer_id.user_id } : null,
+                        course: data,
+                        course_status: CourseStatus.Transferred,
+                        start_date: data.start_date ? new Date(data.start_date) : new Date(),
+                        end_date: data.end_date ? new Date(data.end_date) : null,
+                        created_at: new Date(),
+                        updated_at: new Date(),
+                    });
+
+                    await userCourseRepo.save(newUserCourse);
+                }
+            }
+
             if (data.questions && !Array.isArray(data.questions)) {
                 return res.status(400).json({ message: 'questions must be an array', status: false });
             }
@@ -735,40 +772,50 @@ class CourseController {
     public async reviewGatewayForUserCourse(req: CustomRequest, res: Response) {
         try {
             const userCourseId = parseInt(req.params.userCourseId);
-            const { reviewer_user_id, status, trainer_feedback, trainer_signature } = req.body; // status: 'Approved'|'Rejected'|'NeedsWork'
+            const { questionId, achieved } = req.body; // achieved: true/false
 
-            if (!status) {
-                return res.status(400).json({ message: 'Status required', status: false });
+            if (!questionId) {
+                return res.status(400).json({ message: 'questionId is required', status: false });
             }
 
             const userCourseRepo = AppDataSource.getRepository(UserCourse);
             const uc = await userCourseRepo.findOne({ where: { user_course_id: userCourseId } });
-            if (!uc) return res.status(404).json({ message: 'UserCourse not found', status: false });
 
-            // Ensure reviewer is authorized
-            // if (req.user.role !== 'Trainer' && req.user.role !== 'IQA') return 403
+            if (!uc) {
+                return res.status(404).json({ message: 'UserCourse not found', status: false });
+            }
 
             const courseJson: any = uc.course || {};
-            courseJson.gateway_review = courseJson.gateway_review || {};
-            courseJson.gateway_review.status = status;
-            courseJson.gateway_review.trainer_feedback = trainer_feedback || courseJson.gateway_review.trainer_feedback || null;
-            courseJson.gateway_review.trainer_signature = trainer_signature || courseJson.gateway_review.trainer_signature || null;
-            courseJson.gateway_review.reviewed_at = new Date().toISOString();
-            courseJson.gateway_review.reviewer_id = reviewer_user_id || req.user.user_id;
+            if (!Array.isArray(courseJson.questions)) courseJson.questions = [];
+
+            //update specific question achieved status
+            courseJson.questions = courseJson.questions.map((q: any) => {
+                if (String(q.id) === String(questionId)) {
+                    return {
+                        ...q,
+                        achieved: achieved === true,
+                        achieved_at: achieved ? new Date().toISOString() : null
+                    };
+                }
+                return q;
+            });
 
             uc.course = courseJson;
 
-            //when Approved, update uc.course_status or mark child courses complete
-            if (status === 'Approved') {
-                uc.course_status = CourseStatus.Completed;
-            }
-
             const saved = await userCourseRepo.save(uc);
 
-            return res.status(200).json({ message: 'Gateway reviewed', status: true, data: saved });
+            return res.status(200).json({
+                message: 'Question achievement status updated successfully',
+                status: true,
+                data: saved
+            });
         } catch (err) {
             console.error(err);
-            return res.status(500).json({ message: 'Internal Server Error', error: err.message, status: false });
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                error: err.message,
+                status: false
+            });
         }
     }
 
