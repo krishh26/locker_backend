@@ -9,9 +9,10 @@ import { Learner } from "../entity/Learner.entity";
 import { SendNotification } from "../util/socket/notification";
 import { UserCourse } from "../entity/UserCourse.entity";
 import { RiskRating } from "../entity/RiskRating.entity";
-import { NotificationType, SocketDomain, UserRole, CourseType } from "../util/constants";
+import { NotificationType, SocketDomain, UserRole, CourseType, CourseStatus } from "../util/constants";
 import { convertDataToJson } from "../util/convertDataToJson";
 import { EnhancedUnit, LearningOutcome, AssessmentCriterion } from "../types/courseBuilder.types";
+import { In, Raw } from 'typeorm';
 
 const enhanceCourseData = (course: any) => {
     return {
@@ -43,6 +44,10 @@ class CourseController {
             // For Gateway courses, ensure level is set
             if (data.course_core_type === 'Gateway' && !data.level) {
                 data.level = 'N/A';
+            }
+
+            if (data.questions && !Array.isArray(data.questions)) {
+                return res.status(400).json({ message: 'questions must be an array', status: false });
             }
 
             const courseRepository = AppDataSource.getRepository(Course);
@@ -206,6 +211,10 @@ class CourseController {
                 data.level = 'N/A';
             }
 
+            if (data.questions && !Array.isArray(data.questions)) {
+                return res.status(400).json({ message: 'questions must be an array', status: false });
+            }
+
             courseRepository.merge(existingCourse, data);
             const updatedCourse = await courseRepository.save(existingCourse);
 
@@ -271,7 +280,7 @@ class CourseController {
             delete course.created_at, course.updated_at
             const courseData = {
                 ...course,
-                units: course.units.map((unit: any) => {
+                units: course.units?.map((unit: any) => {
                     if (unit.learning_outcomes) {
                         return {
                             ...unit,
@@ -346,10 +355,27 @@ class CourseController {
 
             const enhancedCourse = enhanceCourseData(course);
 
+            let assignedStandardsDetails: any[] = [];
+
+            if (course.course_core_type === 'Gateway') {
+                const assignedIds: number[] = Array.isArray(course.assigned_standards)
+                    ? course.assigned_standards.map((id: any) => Number(id)).filter(Boolean)
+                    : [];
+
+                if (assignedIds.length > 0) {
+                    assignedStandardsDetails = await courseRepository.findBy({
+                        course_id: In(assignedIds),
+                    });
+                }
+            }
+
             return res.status(200).json({
-                message: "Course get successfully",
-                data: enhancedCourse,
-                status: true
+                message: 'Course fetched successfully',
+                data: {
+                    ...enhancedCourse,
+                    assigned_standards_details: assignedStandardsDetails
+                },
+                status: true,
             });
         } catch (error) {
             return res.status(500).json({
@@ -380,7 +406,29 @@ class CourseController {
                 .orderBy("course.course_id", "ASC")
                 .getManyAndCount();
 
-            const enhancedCourses = courses.map(course => enhanceCourseData(course));
+            // enhance + add assigned_standards_details for Gateway
+            const enhancedCourses = await Promise.all(
+                courses.map(async (course) => {
+                    const enhancedCourse = enhanceCourseData(course);
+
+                    let assignedStandardsDetails: any[] = [];
+
+                    if (course.course_core_type === 'Gateway' && Array.isArray(course.assigned_standards)) {
+                        const assignedIds = course.assigned_standards.map((id: any) => Number(id)).filter(Boolean);
+
+                        if (assignedIds.length > 0) {
+                            assignedStandardsDetails = await courseRepository.findBy({
+                                course_id: In(assignedIds),
+                            });
+                        }
+                    }
+
+                    return {
+                        ...enhancedCourse,
+                        assigned_standards_details: assignedStandardsDetails,
+                    };
+                })
+            );
 
             return res.status(200).json({
                 message: "Course fetched successfully",
@@ -620,6 +668,110 @@ class CourseController {
             });
         }
     }
+
+    public async submitGatewayAnswers(req: CustomRequest, res: Response) {
+        try {
+            const courseId = parseInt(req.params.courseId);
+            const { learner_id, responses } = req.body; // responses: [{ questionId, answer, file? }]
+
+            if (!learner_id || !Array.isArray(responses)) {
+                return res.status(400).json({ message: 'Missing learner_id or responses', status: false });
+            }
+
+            const userCourseRepo = AppDataSource.getRepository(UserCourse);
+
+            // find the specific user_course record
+            const userCourse = await userCourseRepo.createQueryBuilder('uc')
+                .leftJoinAndSelect('uc.learner_id', 'learner')
+                .where('uc.course->>\'course_id\' = :courseId', { courseId })
+                .andWhere('learner.learner_id = :learner_id', { learner_id })
+                .getOne();
+
+            if (!userCourse) {
+                return res.status(404).json({ message: 'UserCourse not found', status: false });
+            }
+
+            // Make sure the course JSON has questions
+            const courseJson: any = userCourse.course || {};
+            courseJson.questions = courseJson.questions || [];
+
+            // Merge responses: for each response, attach learner_answer and optionally file info
+            const updatedQuestions = courseJson.questions.map((q: any) => {
+                const resp = responses.find((r: any) => String(r.questionId) === String(q.id));
+                return {
+                    ...q,
+                    learner_answer: resp ? resp.answer : q.learner_answer || null,
+                    learner_file: resp ? resp.file || q.learner_file || null : q.learner_file || null,
+                    answered_at: resp ? new Date().toISOString() : q.answered_at || null
+                };
+            });
+
+            // If responses include questionIds not existing, push them (optional)
+            responses.forEach((r: any) => {
+                if (!updatedQuestions.find((uq: any) => String(uq.id) === String(r.questionId))) {
+                    updatedQuestions.push({
+                        id: r.questionId,
+                        question: r.questionText || 'Custom',
+                        type: r.type || 'text',
+                        learner_answer: r.answer || null,
+                        learner_file: r.file || null,
+                        answered_at: new Date().toISOString()
+                    });
+                }
+            });
+
+            courseJson.questions = updatedQuestions;
+            userCourse.course = courseJson;
+
+            await userCourseRepo.save(userCourse);
+
+            res.status(200).json({ message: 'Responses submitted', status: true, data: userCourse });
+        } catch (err) {
+            console.error(err);
+            res.status(500).json({ message: 'Internal Server Error', error: err.message, status: false });
+        }
+    }
+
+    public async reviewGatewayForUserCourse(req: CustomRequest, res: Response) {
+        try {
+            const userCourseId = parseInt(req.params.userCourseId);
+            const { reviewer_user_id, status, trainer_feedback, trainer_signature } = req.body; // status: 'Approved'|'Rejected'|'NeedsWork'
+
+            if (!status) {
+                return res.status(400).json({ message: 'Status required', status: false });
+            }
+
+            const userCourseRepo = AppDataSource.getRepository(UserCourse);
+            const uc = await userCourseRepo.findOne({ where: { user_course_id: userCourseId } });
+            if (!uc) return res.status(404).json({ message: 'UserCourse not found', status: false });
+
+            // Ensure reviewer is authorized
+            // if (req.user.role !== 'Trainer' && req.user.role !== 'IQA') return 403
+
+            const courseJson: any = uc.course || {};
+            courseJson.gateway_review = courseJson.gateway_review || {};
+            courseJson.gateway_review.status = status;
+            courseJson.gateway_review.trainer_feedback = trainer_feedback || courseJson.gateway_review.trainer_feedback || null;
+            courseJson.gateway_review.trainer_signature = trainer_signature || courseJson.gateway_review.trainer_signature || null;
+            courseJson.gateway_review.reviewed_at = new Date().toISOString();
+            courseJson.gateway_review.reviewer_id = reviewer_user_id || req.user.user_id;
+
+            uc.course = courseJson;
+
+            //when Approved, update uc.course_status or mark child courses complete
+            if (status === 'Approved') {
+                uc.course_status = CourseStatus.Completed;
+            }
+
+            const saved = await userCourseRepo.save(uc);
+
+            return res.status(200).json({ message: 'Gateway reviewed', status: true, data: saved });
+        } catch (err) {
+            console.error(err);
+            return res.status(500).json({ message: 'Internal Server Error', error: err.message, status: false });
+        }
+    }
+
 }
 
 export default CourseController;

@@ -77,6 +77,9 @@ export class Course {
     @Column({ type: 'varchar', nullable: true })
     awarding_body: string;
 
+    @Column({ type: 'json', nullable: true, default: '[]' })
+    questions: Object[];
+
     @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
     created_at: Date;
 
