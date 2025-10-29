@@ -27,4 +27,8 @@ CourseRoutes.get('/trainer/:trainer_id', authorizeRoles(), Controller.getCourses
 // Funding band routes for specific course
 CourseRoutes.get('/:course_id/funding-band', authorizeRoles(), FundingBandController.getFundingBandsByCourse);
 
+//Gateway questions
+CourseRoutes.post('/gateway/:courseId/submit-answers', authorizeRoles(), Controller.submitGatewayAnswers);
+CourseRoutes.patch('/gateway-response/:userCourseId/review', authorizeRoles(), Controller.reviewGatewayForUserCourse);
+
 export default CourseRoutes;
