@@ -46,6 +46,17 @@ class CourseController {
                 data.level = 'N/A';
             }
 
+            if (data.questions && !Array.isArray(data.questions)) {
+                return res.status(400).json({ message: 'questions must be an array', status: false });
+            }
+
+            const courseRepository = AppDataSource.getRepository(Course);
+
+            const course = courseRepository.create(data);
+            const savedCourse: any = await courseRepository.save(course);
+
+            const enhancedCourse = enhanceCourseData(savedCourse);
+
             if (data.course_core_type === 'Gateway') {
                 const userCourseRepo = AppDataSource.getRepository(UserCourse);
 
@@ -71,7 +82,7 @@ class CourseController {
                         LIQA_id: learnerUC.LIQA_id ? { user_id: learnerUC.LIQA_id.user_id } : null,
                         EQA_id: learnerUC.EQA_id ? { user_id: learnerUC.EQA_id.user_id } : null,
                         employer_id: learnerUC.employer_id ? { user_id: learnerUC.employer_id.user_id } : null,
-                        course: data,
+                        course: savedCourse,
                         course_status: CourseStatus.Transferred,
                         start_date: data.start_date ? new Date(data.start_date) : new Date(),
                         end_date: data.end_date ? new Date(data.end_date) : null,
@@ -82,17 +93,6 @@ class CourseController {
                     await userCourseRepo.save(newUserCourse);
                 }
             }
-
-            if (data.questions && !Array.isArray(data.questions)) {
-                return res.status(400).json({ message: 'questions must be an array', status: false });
-            }
-
-            const courseRepository = AppDataSource.getRepository(Course);
-
-            const course = courseRepository.create(data);
-            const savedCourse: any = await courseRepository.save(course);
-
-            const enhancedCourse = enhanceCourseData(savedCourse);
 
             res.status(200).json({
                 message: "Course created successfully",
@@ -257,6 +257,15 @@ class CourseController {
 
             // Enhance the updated course data
             const enhancedCourse = enhanceCourseData(updatedCourse);
+
+            const userCourseRepo = AppDataSource.getRepository(UserCourse);
+            const courseJson = JSON.parse(JSON.stringify(updatedCourse));
+            await userCourseRepo
+                .createQueryBuilder()
+                .update(UserCourse)
+                .set({ course: courseJson })
+                .where("course ->> 'course_id' = :courseId", { courseId })
+                .execute();
 
             return res.status(200).json({
                 message: 'Course updated successfully',

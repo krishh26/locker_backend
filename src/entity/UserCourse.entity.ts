@@ -36,10 +36,10 @@ export class UserCourse {
     @Column({ type: 'json', nullable: false })
     course: Object;
 
-    @Column({ type: 'timestamp', nullable: false })
+    @Column({ type: 'timestamp', nullable: true })
     start_date: Date;
 
-    @Column({ type: 'timestamp', nullable: false })
+    @Column({ type: 'timestamp', nullable: true })
     end_date: Date;
 
     // Predicted and final grades for the learner's course
