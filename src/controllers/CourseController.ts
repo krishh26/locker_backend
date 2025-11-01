@@ -718,15 +718,14 @@ class CourseController {
     public async submitGatewayAnswers(req: CustomRequest, res: Response) {
         try {
             const courseId = parseInt(req.params.courseId);
-            const { learner_id, responses } = req.body; // responses: [{ questionId, answer, file? }]
-
+            const { learner_id, responses } = req.body;
+            
             if (!learner_id || !Array.isArray(responses)) {
                 return res.status(400).json({ message: 'Missing learner_id or responses', status: false });
             }
 
             const userCourseRepo = AppDataSource.getRepository(UserCourse);
 
-            // find the specific user_course record
             const userCourse = await userCourseRepo.createQueryBuilder('uc')
                 .leftJoinAndSelect('uc.learner_id', 'learner')
                 .where('uc.course->>\'course_id\' = :courseId', { courseId })
@@ -737,22 +736,44 @@ class CourseController {
                 return res.status(404).json({ message: 'UserCourse not found', status: false });
             }
 
-            // Make sure the course JSON has questions
             const courseJson: any = userCourse.course || {};
             courseJson.questions = courseJson.questions || [];
 
-            // Merge responses: for each response, attach learner_answer and optionally file info
             const updatedQuestions = courseJson.questions.map((q: any) => {
                 const resp = responses.find((r: any) => String(r.questionId) === String(q.id));
+                if (!resp) return q;
+
+                // Initialize files array
+                let learner_files = q.learner_files || [];
+
+                // Handle file additions
+                if (Array.isArray(resp.files) && resp.files.length > 0) {
+                    resp.files.forEach((file: any) => {
+                        if (file?.url) {
+                            learner_files.push({
+                                url: file.url,
+                                uploaded_at: file.uploaded_at || new Date().toISOString()
+                            });
+                        }
+                    });
+                }
+
+                // Handle file deletions
+                if (Array.isArray(resp.deleteFiles) && resp.deleteFiles.length > 0) {
+                    learner_files = learner_files.filter(
+                        (f: any) => !resp.deleteFiles.includes(f.url)
+                    );
+                }
+
                 return {
                     ...q,
-                    learner_answer: resp ? resp.answer : q.learner_answer || null,
-                    learner_file: resp ? resp.file || q.learner_file || null : q.learner_file || null,
-                    answered_at: resp ? new Date().toISOString() : q.answered_at || null
+                    learner_answer: resp.answer ?? q.learner_answer ?? null,
+                    learner_files,
+                    answered_at: new Date().toISOString()
                 };
             });
 
-            // If responses include questionIds not existing, push them (optional)
+            // Handle new questions
             responses.forEach((r: any) => {
                 if (!updatedQuestions.find((uq: any) => String(uq.id) === String(r.questionId))) {
                     updatedQuestions.push({
@@ -760,7 +781,10 @@ class CourseController {
                         question: r.questionText || 'Custom',
                         type: r.type || 'text',
                         learner_answer: r.answer || null,
-                        learner_file: r.file || null,
+                        learner_files: (r.files || []).map((f: any) => ({
+                            url: f.url,
+                            uploaded_at: f.uploaded_at || new Date().toISOString()
+                        })),
                         answered_at: new Date().toISOString()
                     });
                 }
@@ -771,10 +795,10 @@ class CourseController {
 
             await userCourseRepo.save(userCourse);
 
-            res.status(200).json({ message: 'Responses submitted', status: true, data: userCourse });
+            return res.status(200).json({ message: 'Responses submitted', status: true, data: userCourse });
         } catch (err) {
             console.error(err);
-            res.status(500).json({ message: 'Internal Server Error', error: err.message, status: false });
+            return res.status(500).json({ message: 'Internal Server Error', error: err.message, status: false });
         }
     }
 
