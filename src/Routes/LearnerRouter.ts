@@ -12,6 +12,7 @@ const Controller = new LearnerController();
 learnerRoutes.post("/create", authorizeRoles(UserRole.Admin), singleFileUpload("avatar"), Controller.CreateLearner);
 learnerRoutes.post("/create-multiple", authorizeRoles(UserRole.Admin), Controller.CreateMultipleLearners);
 learnerRoutes.get("/list", authorizeRoles(), paginationMiddleware, Controller.getLearnerList);
+learnerRoutes.get("/list-with-count", authorizeRoles(), Controller.getLearnerListWithCount);
 learnerRoutes.get("/get/:id", authorizeRoles(), Controller.getLearner);
 learnerRoutes.get("/get", authorizeRoles(UserRole.Learner), Controller.getLearnerByToken);
 learnerRoutes.get("/excel", authorizeRoles(), Controller.getLearnerExcel);

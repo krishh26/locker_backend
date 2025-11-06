@@ -769,7 +769,8 @@ class CourseController {
                     ...q,
                     learner_answer: resp.answer ?? q.learner_answer ?? null,
                     learner_files,
-                    answered_at: new Date().toISOString()
+                    answered_at: new Date().toISOString(),
+                    assignmentIds: resp.assignmentIds || q.assignmentIds || []
                 };
             });
 
