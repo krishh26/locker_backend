@@ -13,6 +13,8 @@ import { TimeLog } from "../entity/TimeLog.entity";
 import { Session } from "../entity/Session.entity";
 import { FundingBand } from "../entity/FundingBand.entity";
 import { LearnerPlan, LearnerPlanType } from "../entity/LearnerPlan.entity";
+import { SessionLearnerAction } from "../entity/SessionLearnerAction.entity";
+import { Course } from "../entity/Course.entity";
 
 
 class LearnerController {
@@ -1585,6 +1587,117 @@ class LearnerController {
         }
     }
 
+    public async getLearnerListWithCount(req: CustomRequest, res: Response) { 
+        try{
+        const learnerRepository = AppDataSource.getRepository(Learner);
+        const userCourseRepository = AppDataSource.getRepository(UserCourse);
+        const assignmentRepository = AppDataSource.getRepository(Assignment);
+        const learnerPlanRepository = AppDataSource.getRepository(LearnerPlan);
+        const SessionLearnerActionRepository = AppDataSource.getRepository(SessionLearnerAction);
+        const courseRepository = AppDataSource.getRepository(Course);
+        const total_learners = await learnerRepository.createQueryBuilder("learner")
+            .leftJoinAndSelect('learner.user_id', "user_id")
+            .where("user_id.status = 'Active'").getCount();
+
+       const learners_suspended = await userCourseRepository.createQueryBuilder("user_course")
+            .leftJoinAndSelect('user_course.learner_id', "learner_id")
+            .leftJoinAndSelect('learner_id.user_id', "user_id")
+            .where("user_course.course_status = 'Training Suspended'").distinctOn(["learner_id.learner_id"]).getMany();
+        // const learners = await learnerRepository.createQueryBuilder("learner")
+        //     .leftJoinAndSelect('learner.user_id', "user_id")
+        //     .where("user_id.status = 'Active'").getMany();
+
+           const assignmentsWithoutMapped = await assignmentRepository
+                .createQueryBuilder("assignment")
+                .where("assignment.units IS NOT NULL")
+                .andWhere(`
+                            NOT EXISTS (
+                              SELECT 1
+                              FROM jsonb_array_elements(assignment.units::jsonb) AS unit,
+                                   jsonb_array_elements(unit->'subUnit') AS sub
+                              WHERE (sub->>'trainerMap')::boolean = true
+                            )
+                        `)
+                        .getMany();
+
+        const learnersOverDue = await userCourseRepository.createQueryBuilder("user_course")
+            .leftJoinAndSelect('user_course.learner_id', "learner_id")
+            .leftJoinAndSelect('learner_id.user_id', "user_id")
+            .where("user_course.end_date < :currentDate", { currentDate: new Date() })
+            .distinctOn(["learner_id.learner_id"]).getMany();
+
+        //count of learners who's course due in next 30 days
+        const learnersCourseDueInNext30Days = await userCourseRepository.createQueryBuilder("user_course")
+            .leftJoinAndSelect('user_course.learner_id', "learner_id")
+            .leftJoinAndSelect('learner_id.user_id', "user_id")
+            .where("user_course.end_date BETWEEN NOW() AND NOW() + INTERVAL '30 days'")
+            .distinctOn(["learner_id.learner_id"]).getMany();
+        // total count of course
+        const totalCourses = await courseRepository.createQueryBuilder("course").getCount();
+        // count of all learner plan which are due and due in next 7 days sepearte
+        const learnerPlanDue = await learnerPlanRepository.createQueryBuilder("learner_plan")
+            .leftJoinAndSelect('learner_plan.learners', "learner")
+            .leftJoinAndSelect('learner.user_id', "user_id")
+            .where("learner_plan.startDate < :currentDate", { currentDate: new Date() }).getMany();
+            const learnerPlanDueInNext7Days = await learnerPlanRepository
+                .createQueryBuilder("learner_plan")
+                .leftJoinAndSelect("learner_plan.learners", "learner")
+                .leftJoinAndSelect("learner.user_id", "user_id")
+                .where("learner_plan.startDate BETWEEN NOW() AND NOW() + INTERVAL '7 days'")
+                .orderBy("learner_plan.startDate", "ASC")
+                .getMany();
+        
+        // count of all session learner action which are due, overdue and due in next 7 days sepearte
+            const sessionLearnerActionDue = await SessionLearnerActionRepository.createQueryBuilder("session_learner_action")
+                .leftJoinAndSelect("session_learner_action.learner_plan", "learner_plan")
+                .leftJoinAndSelect("learner_plan.learners", "learner")
+                .leftJoinAndSelect("learner.user_id", "user_id")
+                .where("DATE(session_learner_action.target_date) = CURRENT_DATE")
+                .orderBy("session_learner_action.target_date", "ASC")
+                .getMany();
+
+        const sessionLearnerActionDueInNext7Days = await SessionLearnerActionRepository.createQueryBuilder("session_learner_action")
+            .leftJoinAndSelect("session_learner_action.learner_plan", "learner_plan")
+            .leftJoinAndSelect("learner_plan.learners", "learner")
+            .leftJoinAndSelect("learner.user_id", "user_id")
+            .where("session_learner_action.target_date BETWEEN NOW() AND NOW() + INTERVAL '7 days'")
+            .orderBy("session_learner_action.target_date", "ASC")
+            .getMany();
+            const sessionLearnerActionOverdue = await SessionLearnerActionRepository.createQueryBuilder("session_learner_action")
+            .leftJoinAndSelect("session_learner_action.learner_plan", "learner_plan")
+            .leftJoinAndSelect("learner_plan.learners", "learner")
+            .leftJoinAndSelect("learner.user_id", "user_id")
+            .where("session_learner_action.target_date < NOW()")
+            .orderBy("session_learner_action.target_date", "ASC")
+            .getMany();
+          
+        const data = {
+            total_learners,
+            learners_suspended: learners_suspended.length,
+            assignmentsWithoutMapped: assignmentsWithoutMapped.length,
+            learnersOverDue: learnersOverDue.length,
+            learnerPlanDue: learnerPlanDue.length,
+            learnerPlanDueInNext7Days: learnerPlanDueInNext7Days.length,
+            sessionLearnerActionDue: sessionLearnerActionDue.length,
+            sessionLearnerActionDueInNext7Days: sessionLearnerActionDueInNext7Days.length,
+            sessionLearnerActionOverdue: sessionLearnerActionOverdue.length,
+            learnersCourseDueInNext30Days: learnersCourseDueInNext30Days.length,
+            totalCourses: totalCourses
+        }
+        return res.status(200).json({
+            message: "Dashboard data fetched successfully",
+            status: true,
+            data
+        })
+        } catch (error) {
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                error: error.message,
+                status: false,
+            });
+        }
+        
+    }
 }
 
 export default LearnerController;
