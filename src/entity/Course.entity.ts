@@ -1,6 +1,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, OneToMany, JoinTable, ManyToMany, ManyToOne } from 'typeorm';
 import { Resource } from './Resource.entity';
 import { CourseType, CourseCoretype } from '../util/constants';
+import { SamplingPlan } from "./samplingPlan.entity";
 
 @Entity('course')
 export class Course {
@@ -79,6 +80,9 @@ export class Course {
 
     @Column({ type: 'json', nullable: true, default: '[]' })
     questions: Object[];
+
+    @OneToMany(() => SamplingPlan, (plan) => plan.course)
+    samplingPlans: SamplingPlan[];
 
     @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
     created_at: Date;
