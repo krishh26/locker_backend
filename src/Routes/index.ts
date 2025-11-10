@@ -33,6 +33,10 @@ import safeguardingContactRoutes from './SafeguardingContactRouter';
 import acknowledgementRoutes from './AcknowledgementRouter';
 import defaultReviewSettingRoutes from './DefaultReviewSettingRouter';
 import SamplingPlanRoutes from './SamplingPlanRouter';
+import SamplingActionRoutes from './samplingPlanAction.routes';
+import SamplingDocRoutes from './samplingPlanDocument.routes';
+import SamplingFormsRoutes from './samplingPlanForm.routes';
+import SamplingQuestionRoutes from './samplingPlanQuestion.routes';
 
 const fileController = new FileController;
 const Routes = express.Router();
@@ -67,6 +71,11 @@ Routes.use("/safeguarding-contact", safeguardingContactRoutes)
 Routes.use("/acknowledgement", acknowledgementRoutes)
 Routes.use("/review-setting", defaultReviewSettingRoutes)
 Routes.use('/sample-plan', SamplingPlanRoutes)
+Routes.use("/sample-action", SamplingActionRoutes)
+Routes.use("/sample-doc", SamplingDocRoutes)
+Routes.use("/sample-form", SamplingFormsRoutes)
+Routes.use("/sample-question", SamplingQuestionRoutes)
+
 
 // API routes
 Routes.get("/file", fileController.getFile)

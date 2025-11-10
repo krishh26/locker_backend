@@ -1,7 +1,11 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, CreateDateColumn, UpdateDateColumn } from "typeorm";
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, CreateDateColumn, UpdateDateColumn, OneToMany } from "typeorm";
 import { SamplingPlan } from "./samplingPlan.entity";
 import { Learner } from "./Learner.entity";
 import { User } from "./User.entity";
+import { SamplingPlanAction } from "./SamplingPlanAction.entity";
+import { SamplingPlanDocument } from "./SamplingPlanDocument.entity";
+import { SamplingPlanForm } from "./SamplingPlanForm.entity";
+import { SamplingPlanQuestion } from "./SamplingPlanQuestion.entity";
 
 @Entity()
 export class SamplingPlanDetail {
@@ -42,6 +46,18 @@ export class SamplingPlanDetail {
     unit_name?: string;
     completed?: boolean;
   }>;
+
+  @OneToMany(() => SamplingPlanAction, (action) => action.plan_detail, { cascade: true })
+  actions: SamplingPlanAction[];
+
+  @OneToMany(() => SamplingPlanDocument, (doc) => doc.plan_detail, { cascade: true })
+  documents: SamplingPlanDocument[];
+
+  @OneToMany(() => SamplingPlanForm, (form) => form.plan_detail, { cascade: true })
+  forms: SamplingPlanForm[];
+
+  @OneToMany(() => SamplingPlanQuestion, (q) => q.plan_detail, { cascade: true })
+  questions: SamplingPlanQuestion[];
 
   @CreateDateColumn()
   createdAt: Date;
