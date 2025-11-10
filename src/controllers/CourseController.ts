@@ -9,6 +9,7 @@ import { Learner } from "../entity/Learner.entity";
 import { SendNotification } from "../util/socket/notification";
 import { UserCourse } from "../entity/UserCourse.entity";
 import { RiskRating } from "../entity/RiskRating.entity";
+import { SamplingPlan } from "../entity/samplingPlan.entity";
 import { NotificationType, SocketDomain, UserRole, CourseType, CourseStatus } from "../util/constants";
 import { convertDataToJson } from "../util/convertDataToJson";
 import { EnhancedUnit, LearningOutcome, AssessmentCriterion } from "../types/courseBuilder.types";
@@ -288,7 +289,7 @@ class CourseController {
             const learnerRepository = AppDataSource.getRepository(Learner);
             const courseRepository = AppDataSource.getRepository(Course);
             const userCourseRepository = AppDataSource.getRepository(UserCourse);
-
+            const samplingPlanRepository = AppDataSource.getRepository(SamplingPlan);
             if (!learner_id || !course_id || !trainer_id || !IQA_id || !LIQA_id || !EQA_id || !start_date || !end_date) {
                 return res.status(400).json({
                     message: "Please pass all Field",
@@ -349,7 +350,30 @@ class CourseController {
                 })
             }
             await userCourseRepository.save(userCourseRepository.create({ learner_id, trainer_id, IQA_id, LIQA_id, EQA_id, employer_id, course: courseData, start_date, end_date, is_main_course }))
+            if (IQA_id) {
+                const existingPlan = await samplingPlanRepository
+                    .createQueryBuilder("plan")
+                    .where("plan.course = :course_id", { course_id })
+                    .andWhere("plan.iqa = :iqa_id", { iqa_id: IQA_id })
+                    .getOne();
 
+                if (!existingPlan) {
+                    const totalLearners = await userCourseRepository
+                        .createQueryBuilder("uc")
+                        .where("uc.course ->> 'course_id' = :course_id", { course_id })
+                        .getCount();
+
+                    const newPlan = samplingPlanRepository.create({
+                        course,
+                        iqa: { user_id: IQA_id },
+                        totalLearners,
+                        totalSampled: 0,
+                        status: "Pending",
+                    });
+
+                    await samplingPlanRepository.save(newPlan);
+                }
+            }
             const userRepository = AppDataSource.getRepository(User);
             const admin = await userRepository.findOne({ where: { user_id: req.user.user_id } });
             const data = {

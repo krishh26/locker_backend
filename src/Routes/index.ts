@@ -32,7 +32,7 @@ import iqaQuestionRoutes from './IQAQuestionRouter';
 import safeguardingContactRoutes from './SafeguardingContactRouter';
 import acknowledgementRoutes from './AcknowledgementRouter';
 import defaultReviewSettingRoutes from './DefaultReviewSettingRouter';
-
+import SamplingPlanRoutes from './SamplingPlanRouter';
 
 const fileController = new FileController;
 const Routes = express.Router();
@@ -66,6 +66,7 @@ Routes.use("/iqa-questions", iqaQuestionRoutes)
 Routes.use("/safeguarding-contact", safeguardingContactRoutes)
 Routes.use("/acknowledgement", acknowledgementRoutes)
 Routes.use("/review-setting", defaultReviewSettingRoutes)
+Routes.use('/sample-plan', SamplingPlanRoutes)
 
 // API routes
 Routes.get("/file", fileController.getFile)
