@@ -365,6 +365,7 @@ class CourseController {
 
                     const newPlan = samplingPlanRepository.create({
                         course,
+                        planName: course.course_name,
                         iqa: { user_id: IQA_id },
                         totalLearners,
                         totalSampled: 0,

@@ -168,246 +168,313 @@ import { Learner } from "../entity/Learner.entity";
 
 export class SamplingPlanController {
   public async getSamplingPlans(req: Request, res: Response) {
-    try {
-      const { iqa_id } = req.query as any;
+  try {
+    const { iqa_id, course_id } = req.query as any;
 
-      if (!iqa_id) {
-        return res.status(400).json({
-          message: "IQA ID is required",
-          status: false,
-        });
-      }
-
-      const samplingPlanRepo = AppDataSource.getRepository(SamplingPlan);
-
-      const plans = await samplingPlanRepo
-        .createQueryBuilder("plan")
-        .leftJoinAndSelect("plan.course", "course")
-        .leftJoinAndSelect("plan.iqa", "iqa")
-        .where("iqa.user_id = :iqa_id", { iqa_id })
-        .orderBy("plan.createdAt", "DESC")
-        .getMany();
-
-      return res.status(200).json({
-        message: "Sampling plans fetched successfully",
-        data: plans,
-        status: true,
-      });
-    } catch (error) {
-      console.error("Error fetching sampling plans:", error);
-      return res.status(500).json({
-        message: "Internal Server Error",
-        error: error.message,
+    if (!iqa_id) {
+      return res.status(400).json({
+        message: "IQA ID is required",
         status: false,
       });
     }
+
+    const samplingPlanRepo = AppDataSource.getRepository(SamplingPlan);
+
+    const query = samplingPlanRepo
+      .createQueryBuilder("plan")
+      .leftJoinAndSelect("plan.course", "course")
+      .leftJoinAndSelect("plan.iqa", "iqa") // renamed to match actual field
+      .where("iqa.user_id = :iqa_id", { iqa_id });
+
+    // ✅ Optional course filter
+    if (course_id) {
+      query.andWhere("course.course_id = :course_id", { course_id });
+    }
+
+    const plans = await query.orderBy("plan.createdAt", "DESC").getOne();
+
+    return res.status(200).json({
+      message: "Sampling plans fetched successfully",
+      data: plans,
+      status: true,
+    });
+  } catch (error) {
+    console.error("Error fetching sampling plans:", error);
+    return res.status(500).json({
+      message: "Internal Server Error",
+      error: error.message,
+      status: false,
+    });
   }
-  public async getLearnersByPlan(req: Request, res: Response) {
-    try {
-      const { plan_id } = req.params;
+}
 
-      if (!plan_id) {
-        return res.status(400).json({
-          message: "Sampling Plan ID is required",
-          status: false,
-        });
-      }
+public async getLearnersByPlan(req: Request, res: Response) {
+  try {
+    const { plan_id } = req.params;
 
-      const samplingPlanRepo = AppDataSource.getRepository(SamplingPlan);
-      const userCourseRepo = AppDataSource.getRepository(UserCourse);
-      const riskRepo = AppDataSource.getRepository(RiskRating);
+    if (!plan_id) {
+      return res.status(400).json({
+        message: "Sampling Plan ID is required",
+        status: false,
+      });
+    }
 
-      // 🔹 Fetch Sampling Plan and related course
-      const plan = await samplingPlanRepo
-        .createQueryBuilder("plan")
-        .leftJoinAndSelect("plan.course", "course")
-        .where("plan.id = :plan_id", { plan_id })
-        .getOne();
+    const samplingPlanRepo = AppDataSource.getRepository(SamplingPlan);
+    const userCourseRepo = AppDataSource.getRepository(UserCourse);
+    const detailRepo = AppDataSource.getRepository(SamplingPlanDetail);
+    const riskRepo = AppDataSource.getRepository(RiskRating);
 
-      if (!plan) {
-        return res.status(404).json({
-          message: "Sampling Plan not found",
-          status: false,
-        });
-      }
+    // 🔹 Fetch plan with course and IQA
+    const plan = await samplingPlanRepo.findOne({
+      where: { id: Number(plan_id) },
+      relations: ["course", "iqa"],
+    });
 
-      // 🔹 Fetch all learners enrolled in that course
-      const learners = await userCourseRepo
-        .createQueryBuilder("uc")
-        .leftJoinAndSelect("uc.learner_id", "learner")
-        .leftJoinAndSelect("learner.user_id", "user")
-        .leftJoinAndSelect("uc.trainer_id", "trainer")
-        .where("uc.course ->> 'course_id' = :course_id", { course_id: plan.course.course_id })
-        .getMany();
+    if (!plan) {
+      return res.status(404).json({
+        message: "Sampling Plan not found",
+        status: false,
+      });
+    }
 
-      // 🔹 Prepare response data
-      const responseData = [];
+    // 🔹 Fetch learners enrolled in that course
+    const learners = await userCourseRepo
+      .createQueryBuilder("uc")
+      .leftJoinAndSelect("uc.learner_id", "learner")
+      .leftJoinAndSelect("learner.user_id", "user")
+      .leftJoinAndSelect("uc.trainer_id", "trainer")
+      .where("uc.course ->> 'course_id' = :course_id", {
+        course_id: plan.course.course_id,
+      })
+      .getMany();
 
-      for (const uc of learners) {
-        const learner = uc.learner_id;
-        const trainer = uc.trainer_id;
-        let riskLevel = "Not Set";
+    const responseData = [];
 
-        // 🔸 Check risk rating for that course (trainer-based)
-        if (trainer) {
-          const risk = await riskRepo
-            .createQueryBuilder("rr")
-            .where("rr.trainer = :trainerId", { trainerId: trainer.user_id })
-            .getOne();
+    for (const uc of learners) {
+      const learner = uc.learner_id;
+      const trainer = uc.trainer_id;
 
-          if (risk?.courses?.length) {
-            const courseRisk = risk.courses.find(
-              (c: any) => c.course_id === plan.course.course_id
-            );
-            if (courseRisk?.overall_risk_level) {
-              riskLevel = courseRisk.overall_risk_level;
-            }
+      // 1️⃣ Assessor Risk
+      let riskLevel = "Not Set";
+      if (trainer) {
+        const risk = await riskRepo
+          .createQueryBuilder("rr")
+          .where("rr.trainer = :trainerId", { trainerId: trainer.user_id })
+          .getOne();
+
+        if (risk?.courses?.length) {
+          const courseRisk = risk.courses.find(
+            (c: any) => c.course_id === plan.course.course_id
+          );
+          if (courseRisk?.overall_risk_level) {
+            riskLevel = courseRisk.overall_risk_level;
           }
         }
-
-        // 🔸 Get unit completion info from course JSON
-        const courseData: any = uc.course;
-        const units = Array.isArray(courseData?.units)
-          ? courseData.units.map((unit: any) => ({
-            unit_name: unit.unit_name || unit.title || "Untitled Unit",
-            completed: !!unit.completed,
-          }))
-          : [];
-
-        responseData.push({
-          learner_id: learner?.learner_id,
-          learner_name: learner?.user_id
-            ? `${learner.user_id.first_name} ${learner.user_id.last_name}`
-            : "N/A",
-          course_status: uc.course_status,
-          risk_level: riskLevel,
-          units,
-        });
       }
 
-      return res.status(200).json({
-        message: "Learners with risk rating and units fetched successfully",
-        status: true,
-        data: {
-          plan_id,
-          course_name: plan.course.course_name,
-          learners: responseData,
+      // 2️⃣ Check if learner already in SamplingPlanDetail
+      const sampleDetail = await detailRepo.findOne({
+        where: {
+          samplingPlan: { id: Number(plan_id) },
+          learner: { learner_id: learner.learner_id },
         },
       });
-    } catch (error) {
-      console.error("Error fetching learners for plan:", error);
-      return res.status(500).json({
-        message: "Internal Server Error",
-        error: error.message,
+
+      // 3️⃣ Extract total & selected units
+      // 3️⃣ Extract total & selected units
+const courseData: any = uc.course || {};
+const courseUnits = Array.isArray(courseData.units) ? courseData.units : [];
+const selectedUnits = sampleDetail?.sampledUnits || [];
+
+// Mark whether each course unit is selected in the sampling plan
+const unitsWithSelection = courseUnits.map((unit: any) => {
+  const isSelected = selectedUnits.some(
+    (su: any) =>
+      su.unit_code === unit.id ||
+      su.unit_name === unit.unit_ref ||
+      su.unit_name === unit.title
+  );
+  return {
+    unit_code: unit.id || null,
+    unit_name: unit.unit_ref || unit.title || "Unnamed",
+    is_selected: isSelected,
+  };
+});
+
+
+      // 5️⃣ Add final response entry
+      responseData.push({
+  assessor_name: trainer
+    ? `${trainer.first_name} ${trainer.last_name}`
+    : "Unassigned",
+  risk_level: riskLevel,
+  qa_approved: sampleDetail?.status === "Reviewed",
+  learner_name: learner?.user_id
+    ? `${learner.user_id.first_name} ${learner.user_id.last_name}`
+    : "N/A",
+  sample_type: sampleDetail?.sampleType || "Interim",
+  planned_date: sampleDetail?.plannedDate || null,
+  status: sampleDetail?.status || "Planned",
+  units: unitsWithSelection, // ✅ all course units with is_selected flag
+});
+
+    }
+
+    return res.status(200).json({
+      message: "Assessor-wise learners fetched successfully",
+      status: true,
+      data: {
+        plan_id,
+        course_name: plan.course.course_name,
+        learners: responseData,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching learners for plan:", error);
+    return res.status(500).json({
+      message: "Internal Server Error",
+      error: error.message,
+      status: false,
+    });
+  }
+}
+
+
+public async addSampledLearners(req: Request, res: Response) {
+  try {
+    const { plan_id, learners, sample_type, created_by, assessment_methods } = req.body;
+
+    /**
+     * Example Body:
+     * {
+     *   "plan_id": 1,
+     *   "sample_type": "Interim",
+     *   "created_by": 12,
+     *   "assessment_methods": { "DO": true, "PD": false, "QA": true },
+     *   "learners": [
+     *     {
+     *       "learner_id": 101,
+     *       "plannedDate": "2025-11-18",
+     *       "units": [
+     *         { "id": "U1", "unit_ref": "promote and support continuing Professional" }
+     *       ]
+     *     }
+     *   ]
+     * }
+     */
+
+    if (!plan_id || !Array.isArray(learners) || learners.length === 0) {
+      return res.status(400).json({
+        message: "plan_id and learners array are required",
         status: false,
       });
     }
-  }
-  public async addSampledLearners(req: Request, res: Response) {
-    try {
-      const { plan_id, learner_ids, sample_type, created_by } = req.body;
 
-      if (!plan_id || !Array.isArray(learner_ids) || learner_ids.length === 0) {
-        return res.status(400).json({
-          message: "plan_id and learner_ids are required",
-          status: false,
-        });
-      }
+    const samplingPlanRepo = AppDataSource.getRepository(SamplingPlan);
+    const detailRepo = AppDataSource.getRepository(SamplingPlanDetail);
+    const learnerRepo = AppDataSource.getRepository(Learner);
+    const userRepo = AppDataSource.getRepository(User);
 
-      const samplingPlanRepo = AppDataSource.getRepository(SamplingPlan);
-      const detailRepo = AppDataSource.getRepository(SamplingPlanDetail);
-      const learnerRepo = AppDataSource.getRepository(Learner);
-      const userRepo = AppDataSource.getRepository(User);
+    // ✅ Find the plan
+    const plan = await samplingPlanRepo.findOne({
+      where: { id: plan_id },
+      relations: ["course", "iqa"],
+    });
 
-      const plan = await samplingPlanRepo.findOne({
-        where: { id: plan_id },
-        relations: ["iqa"],
-      });
-
-      if (!plan) {
-        return res.status(404).json({
-          message: "Sampling Plan not found",
-          status: false,
-        });
-      }
-
-      const iqaUser = await userRepo.findOne({ where: { user_id: created_by } });
-      if (!iqaUser) {
-        return res.status(404).json({
-          message: "IQA user not found",
-          status: false,
-        });
-      }
-
-      // Avoid duplicate learner entries
-      const existingDetails = await detailRepo
-        .createQueryBuilder("detail")
-        .leftJoin("detail.samplingPlan", "plan")
-        .leftJoin("detail.learner", "learner")
-        .where("plan.id = :plan_id", { plan_id })
-        .andWhere("learner.learner_id IN (:...learner_ids)", { learner_ids })
-        .getMany();
-
-      const alreadySampledIds = existingDetails.map((d) => d.learner.learner_id);
-
-      const newLearnerIds = learner_ids.filter(
-        (id) => !alreadySampledIds.includes(id)
-      );
-
-      if (newLearnerIds.length === 0) {
-        return res.status(400).json({
-          message: "These learners are already sampled for this plan",
-          status: false,
-        });
-      }
-
-      // Create new detail records
-      const newDetails = [];
-      for (const id of newLearnerIds) {
-        const learner = await learnerRepo.findOne({
-          where: { learner_id: id },
-        });
-        if (learner) {
-          const detail = detailRepo.create({
-            samplingPlan: plan,
-            learner,
-            createdBy: iqaUser,
-            sampleType: sample_type || "Interim",
-            status: "Planned",
-          });
-          newDetails.push(detail);
-        }
-      }
-
-      await detailRepo.save(newDetails);
-
-      // Update plan stats
-      const totalSampled = await detailRepo.count({
-        where: { samplingPlan: { id: plan_id } },
-      });
-
-      plan.totalSampled = totalSampled;
-      plan.status = "In Progress";
-      await samplingPlanRepo.save(plan);
-
-      return res.status(200).json({
-        message: "Sampled learners added successfully",
-        status: true,
-        data: {
-          plan_id: plan.id,
-          totalSampled,
-          addedLearners: newLearnerIds.length,
-        },
-      });
-    } catch (error) {
-      console.error("Error adding sampled learners:", error);
-      return res.status(500).json({
-        message: "Internal Server Error",
-        error: error.message,
+    if (!plan) {
+      return res.status(404).json({
+        message: "Sampling Plan not found",
         status: false,
       });
     }
+
+    // ✅ Validate IQA user
+    const iqaUser = await userRepo.findOne({ where: { user_id: created_by } });
+    if (!iqaUser) {
+      return res.status(404).json({
+        message: "IQA user not found",
+        status: false,
+      });
+    }
+
+    // ✅ Check for existing learner samples
+    const learner_ids = learners.map((l) => l.learner_id);
+    const existingDetails = await detailRepo
+      .createQueryBuilder("detail")
+      .leftJoin("detail.samplingPlan", "plan")
+      .leftJoin("detail.learner", "learner")
+      .where("plan.id = :plan_id", { plan_id })
+      .andWhere("learner.learner_id IN (:...learner_ids)", { learner_ids })
+      .getMany();
+
+    const alreadySampledIds = existingDetails.map((d) => d.learner.learner_id);
+    const newLearners = learners.filter((l) => !alreadySampledIds.includes(l.learner_id));
+
+    if (newLearners.length === 0) {
+      return res.status(400).json({
+        message: "All learners already sampled for this plan",
+        status: false,
+      });
+    }
+
+    // ✅ Create SamplingPlanDetail entries with plannedDate
+    const newDetails = [];
+    for (const item of newLearners) {
+      const learner = await learnerRepo.findOne({ where: { learner_id: item.learner_id } });
+      if (learner) {
+        const detail = detailRepo.create({
+          samplingPlan: plan,
+          learner,
+          createdBy: iqaUser,
+          sampleType: sample_type || "Interim",
+          status: "Planned",
+          plannedDate: item.plannedDate ? new Date(item.plannedDate) : null, // ✅ stored here
+          sampledUnits:
+            item.units?.map((u) => ({
+              unit_code: u.id,
+              unit_name: u.unit_ref,
+              completed: false,
+            })) || [],
+          assessment_methods: assessment_methods || {},
+        });
+        newDetails.push(detail);
+      }
+    }
+    console.log(newDetails)
+    await detailRepo.save(newDetails);
+
+    // ✅ Update plan stats
+    const totalSampled = await detailRepo.count({
+      where: { samplingPlan: { id: plan_id } },
+    });
+
+    plan.totalSampled = totalSampled;
+    plan.status = "In Progress";
+    await samplingPlanRepo.save(plan);
+
+    return res.status(200).json({
+      message: "Sampled learners added successfully with individual planned dates",
+      status: true,
+      data: {
+        plan_id: plan.id,
+        totalSampled,
+        addedLearners: newDetails.length,
+      },
+    });
+  } catch (error) {
+    console.error("Error adding sampled learners:", error);
+    return res.status(500).json({
+      message: "Internal Server Error",
+      error: error.message,
+      status: false,
+    });
   }
+}
+
+
+
+
+
   public async reviewSampledLearner(req: Request, res: Response) {
     try {
       const { detail_id, outcome, feedback, status } = req.body;
@@ -632,203 +699,117 @@ export class SamplingPlanController {
     }
   }
   public async applySamplingPlan(req: Request, res: Response) {
-    try {
-      const { plan_id, created_by } = req.body;
+  try {
+    const { plan_id, iqa_id } = req.body;
 
-      if (!plan_id) {
-        return res.status(400).json({ message: "plan_id is required", status: false });
-      }
-
-      const planRepo = AppDataSource.getRepository(SamplingPlan);
-      const detailRepo = AppDataSource.getRepository(SamplingPlanDetail);
-      const userCourseRepo = AppDataSource.getRepository(UserCourse);
-      const riskRepo = AppDataSource.getRepository(RiskRating);
-      const learnerRepo = AppDataSource.getRepository(Learner);
-      const userRepo = AppDataSource.getRepository(User);
-
-      const plan = await planRepo.findOne({
-        where: { id: plan_id },
-        relations: ["course", "iqa"],
-      });
-
-      if (!plan) {
-        return res.status(404).json({ message: "Sampling Plan not found", status: false });
-      }
-
-      // ensure caller exists (IQA)
-      const iqaUser = await userRepo.findOne({ where: { user_id: created_by } });
-      if (!iqaUser) {
-        return res.status(404).json({ message: "IQA user not found", status: false });
-      }
-
-      // 1) fetch all user_course rows for this course, with trainer and course JSON
-      const userCourses = await userCourseRepo
-        .createQueryBuilder("uc")
-        .leftJoinAndSelect("uc.learner_id", "learner")
-        .leftJoinAndSelect("learner.user_id", "user")
-        .leftJoinAndSelect("uc.trainer_id", "trainer")
-        .where("uc.course ->> 'course_id' = :courseId", { courseId: plan.course.course_id })
-        .getMany();
-
-      if (!userCourses.length) {
-        return res.status(404).json({ message: "No learners found for this course", status: false });
-      }
-
-      // helper: pick N random items from array
-      const pickRandom = (arr: any[], count: number) => {
-        if (!arr || arr.length === 0) return [];
-        if (count >= arr.length) return [...arr];
-        const copy = [...arr];
-        // Fisher-Yates shuffle
-        for (let i = copy.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [copy[i], copy[j]] = [copy[j], copy[i]];
-        }
-        return copy.slice(0, count);
-      };
-
-      // 2) group learners by risk level (High/Medium/Low)
-      const groups: Record<string, any[]> = { High: [], Medium: [], Low: [] };
-
-      // We'll also collect trainerIds used (for risk percentages fallback)
-      const trainerIds = new Set<number>();
-
-      for (const uc of userCourses) {
-        const trainer = uc.trainer_id;
-        if (trainer && trainer.user_id) trainerIds.add(trainer.user_id);
-
-        // determine learner risk level from trainer's RiskRating record (if exists)
-        let riskLevel = "Low";
-        if (trainer && trainer.user_id) {
-          const rr = await riskRepo
-            .createQueryBuilder("rr")
-            .where("rr.trainer = :trainerId", { trainerId: trainer.user_id })
-            .getOne();
-
-          if (rr?.courses?.length) {
-            const courseRisk = rr.courses.find((c: any) => c.course_id === plan.course.course_id);
-            if (courseRisk?.overall_risk_level) {
-              riskLevel = courseRisk.overall_risk_level;
-            }
-          }
-        }
-        // default mapping safety
-        if (!["High", "Medium", "Low"].includes(riskLevel)) riskLevel = "Low";
-
-        groups[riskLevel].push(uc);
-      }
-
-      // 3) fetch a representative RiskRating to read %s
-      // try to pick any trainer's risk record (prefer plan.iqa? fallback to first trainer)
-      let riskSetting = null;
-      if (plan.iqa && plan.iqa.user_id) {
-        // if IQA has their own risk config, prefer it
-        riskSetting = await riskRepo.findOne({ where: { trainer: { user_id: plan.iqa.user_id } } });
-      }
-      if (!riskSetting && trainerIds.size > 0) {
-        const firstTrainerId = Array.from(trainerIds)[0];
-        riskSetting = await riskRepo.findOne({ where: { trainer: { user_id: firstTrainerId } } });
-      }
-
-      const highPct = Number(riskSetting?.high_percentage ?? 50);
-      const medPct = Number(riskSetting?.medium_percentage ?? 30);
-      const lowPct = Number(riskSetting?.low_percentage ?? 10);
-
-      // 4) compute counts to pick
-      const needCount = (arrLen: number, pct: number) => Math.ceil((arrLen * pct) / 100);
-
-      const highCount = needCount(groups.High.length, highPct);
-      const medCount = needCount(groups.Medium.length, medPct);
-      const lowCount = needCount(groups.Low.length, lowPct);
-
-      // 5) pick random learners for each group
-      const selectedUCs: any[] = [
-        ...pickRandom(groups.High, highCount),
-        ...pickRandom(groups.Medium, medCount),
-        ...pickRandom(groups.Low, lowCount),
-      ];
-
-      // avoid duplicates & avoid already sampled learners in this plan
-      const existingDetailLearnerIds = (await detailRepo
-        .createQueryBuilder("d")
-        .leftJoin("d.samplingPlan", "plan")
-        .leftJoin("d.learner", "learner")
-        .where("plan.id = :planId", { planId: plan.id })
-        .getMany()
-      ).map((d: any) => d.learner.learner_id);
-
-      const uniqueSelected = selectedUCs.filter((uc) => !existingDetailLearnerIds.includes(uc.learner_id.learner_id));
-
-      if (!uniqueSelected.length) {
-        return res.status(400).json({ message: "No new learners selected (maybe already sampled).", status: false });
-      }
-
-      // 6) For each selected userCourse (uc) pick 1-2 units to sample:
-      // - prefer units not completed
-      // - if all completed, pick any 1 unit
-      const createUnitSelection = (courseJson: any) => {
-        const unitsArr = Array.isArray(courseJson?.units) ? courseJson.units : [];
-        if (!unitsArr.length) return [];
-        // pick units where completed is false
-        const notCompleted = unitsArr.filter((u: any) => !u.completed);
-        const candidates = notCompleted.length ? notCompleted : unitsArr;
-        // choose 1 or 2 units (prefer 1 for short courses)
-        const pickCount = Math.min(2, Math.max(1, Math.round(candidates.length >= 2 ? 2 : 1)));
-        const chosen = pickRandom(candidates, pickCount);
-        return chosen.map((u: any) => ({
-          unit_code: u.unit_code ?? u.code ?? null,
-          unit_name: u.unit_name ?? u.title ?? u.name ?? "Untitled Unit",
-          completed: !!u.completed,
-        }));
-      };
-
-      // 7) create SamplingPlanDetail records
-      const newDetails: SamplingPlanDetail[] = [];
-      for (const uc of uniqueSelected) {
-        const learnerId = uc.learner_id.learner_id;
-        const learner = await learnerRepo.findOne({ where: { learner_id: learnerId } });
-        if (!learner) continue;
-
-        const sampledUnits = createUnitSelection(uc.course);
-
-        const detail = detailRepo.create({
-          samplingPlan: plan,
-          learner,
-          createdBy: iqaUser,
-          sampleType: "Interim",
-          status: "Planned",
-          sampledUnits,
-        });
-        newDetails.push(detail);
-      }
-
-      await detailRepo.save(newDetails);
-
-      // 8) update plan totals and status
-      const totalSampled = await detailRepo.count({ where: { samplingPlan: { id: plan.id } } });
-      plan.totalSampled = totalSampled;
-      plan.totalLearners = userCourses.length;
-      plan.status = totalSampled > 0 ? "In Progress" : plan.status;
-      await planRepo.save(plan);
-
-      return res.status(200).json({
-        message: "Sampling Plan applied successfully",
-        status: true,
-        data: {
-          plan_id: plan.id,
-          totalSampled: plan.totalSampled,
-          sampledLearners: newDetails.length,
-        },
-      });
-    } catch (error) {
-      console.error("Error applying sampling plan:", error);
-      return res.status(500).json({
-        message: "Internal Server Error",
-        error: error.message,
+    if (!plan_id || !iqa_id) {
+      return res.status(400).json({
+        message: "plan_id and iqa_id are required",
         status: false,
       });
     }
+
+    const planRepo = AppDataSource.getRepository(SamplingPlan);
+    const detailRepo = AppDataSource.getRepository(SamplingPlanDetail);
+    const courseRepo = AppDataSource.getRepository(Course);
+    const riskRepo = AppDataSource.getRepository(RiskRating);
+
+    const plan = await planRepo.findOne({
+      where: { id: plan_id },
+      relations: ["course"],
+    });
+    if (!plan) {
+      return res.status(404).json({
+        message: "Sampling Plan not found",
+        status: false,
+      });
+    }
+
+    const course: any = plan.course;
+    if (!course?.units?.length) {
+      return res.status(400).json({
+        message: "Course has no units defined",
+        status: false,
+      });
+    }
+
+    // Fetch all sampled learners for this plan
+    const details = await detailRepo.find({
+      where: { samplingPlan: { id: plan_id } },
+      relations: ["learner"],
+    });
+
+    if (!details.length) {
+      return res.status(400).json({
+        message: "No learners found in this plan",
+        status: false,
+      });
+    }
+
+    let updatedCount = 0;
+    const userCourseRepo = AppDataSource.getRepository(UserCourse);
+    for (const detail of details) {
+
+  const learnerCourse = await userCourseRepo
+    .createQueryBuilder("uc")
+    .leftJoinAndSelect("uc.trainer_id", "trainer")
+    .where("uc.learner_id = :learnerId", { learnerId: detail.learner.learner_id })
+    .andWhere("uc.course ->> 'course_id' = :courseId", { courseId: course.course_id })
+    .getOne();
+
+  const trainerId = learnerCourse?.trainer_id?.user_id;
+
+  const risk = trainerId
+    ? await riskRepo
+        .createQueryBuilder("risk")
+        .leftJoin("risk.trainer", "trainer")
+        .where("trainer.user_id = :trainerId", { trainerId })
+        .getOne()
+    : null;
+
+  const courseRisk =
+    risk?.courses?.find((c) => c.course_id === course.course_id)?.overall_risk_level ||
+    "Medium";
+
+  // Risk-level % logic
+  let percentage = 20;
+  if (courseRisk === "High") percentage = 50;
+  else if (courseRisk === "Low") percentage = 10;
+
+  const totalUnits = course.units.length;
+  const numToSelect = Math.max(1, Math.round((totalUnits * percentage) / 100));
+
+  // Random unit selection
+  const shuffled = [...course.units].sort(() => 0.5 - Math.random());
+  const selectedUnits = shuffled.slice(0, numToSelect).map((u: any) => ({
+  unit_code: u.id,       // your course.units[id]
+  unit_name: u.unit_ref, // readable unit reference
+  completed: false
+}));
+
+
+  detail.sampledUnits = selectedUnits;
+  detail.assessment_methods = req.body.assessment_methods || {};
+  await detailRepo.save(detail);
+  updatedCount++;
+}
+
+
+    return res.status(200).json({
+      message: "Random sampling applied successfully",
+      status: true,
+      data: { updatedCount, totalLearners: details.length },
+    });
+  } catch (error) {
+    console.error("Error in applyRandomSampling:", error);
+    return res.status(500).json({
+      message: "Internal Server Error",
+      error: error.message,
+      status: false,
+    });
   }
+}
+
   public async assignIQAtoPlan(req: Request, res: Response) {
     try {
       const { plan_id, assignedIQAs } = req.body;
