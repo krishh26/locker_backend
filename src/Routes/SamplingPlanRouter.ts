@@ -7,7 +7,7 @@ import { UserRole } from '../util/constants';
 const SamplingPlanRoutes = express.Router();
 
 // GET /api/v1/sampling-plan → list all sampling plans
-SamplingPlanRoutes.get('/', authorizeRoles(UserRole.Admin, UserRole.IQA), paginationMiddleware,SamplingPlanController.getSamplingPlans);
+SamplingPlanRoutes.get('/list', authorizeRoles(UserRole.Admin, UserRole.IQA), paginationMiddleware,SamplingPlanController.getSamplingPlans);
 
 SamplingPlanRoutes.get("/:plan_id/learners", authorizeRoles(), SamplingPlanController.getLearnersByPlan);
 

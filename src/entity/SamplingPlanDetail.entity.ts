@@ -47,6 +47,22 @@ export class SamplingPlanDetail {
     completed?: boolean;
   }>;
 
+  // Assessment methods used in the sample (IQA selection)
+  @Column({ type: "json", nullable: true })
+  assessment_methods: {
+    DO?: boolean;  // Direct Observation
+    WT?: boolean;  // Witness Testimony
+    PD?: boolean;  // Professional Discussion
+    QA?: boolean;  // Question & Answer
+    OT?: boolean;  // Other Test
+    RA?: boolean;  // Reflective Account
+    ET?: boolean;  // Exam/Test
+    PS?: boolean;  // Product Sample
+    DI?: boolean;  // Diary/Log
+    SI?: boolean;  // Simulation
+    APL_RPL?: boolean; // APL/RPL (Accredited Prior Learning)
+  };
+
   @OneToMany(() => SamplingPlanAction, (action) => action.plan_detail, { cascade: true })
   actions: SamplingPlanAction[];
 

@@ -8,7 +8,7 @@ export class SamplingPlan {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column()
+  @Column({ type: "text", nullable: true })
   planName: string;
 
   @ManyToOne(() => Course, (course) => course.samplingPlans, { eager: true })
