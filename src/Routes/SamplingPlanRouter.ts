@@ -29,6 +29,7 @@ SamplingPlanRoutes.post("/apply", SamplingPlanController.applySamplingPlan);
 SamplingPlanRoutes.post("/assign-iqas", SamplingPlanController.assignIQAtoPlan);
 SamplingPlanRoutes.post("/transfer", SamplingPlanController.transferPlanToAnotherIQA);
 SamplingPlanRoutes.get("/allocation-view", SamplingPlanController.getPlanAllocationView);
+SamplingPlanRoutes.put("/learner-signoff", SamplingPlanController.signOffLearner);
 
 
 // GET /api/v1/sampling-plan/course/:course_id → get sampling plans by course
