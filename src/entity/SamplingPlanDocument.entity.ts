@@ -17,10 +17,6 @@ export class SamplingPlanDocument {
   @Column({ type: "varchar", length: 500 })
   file_path: string;
 
-  @ManyToOne(() => User, { eager: true })
-  @JoinColumn({ name: "uploaded_by_id", referencedColumnName: "user_id" })
-  uploaded_by: User;
-
   @CreateDateColumn({ type: "timestamp", default: () => "CURRENT_TIMESTAMP" })
   uploaded_at: Date;
 }
