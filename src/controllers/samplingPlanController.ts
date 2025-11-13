@@ -312,6 +312,7 @@ export class SamplingPlanController {
           learner_name: learner?.user_id
             ? `${learner.user_id.first_name} ${learner.user_id.last_name}`
             : "N/A",
+          learner_id: learner?.learner_id,
           sample_type: sampleDetail?.sampleType || "Interim",
           planned_date: sampleDetail?.plannedDate || null,
           status: sampleDetail?.status || "Planned",
@@ -1021,6 +1022,53 @@ export class SamplingPlanController {
         message: "Internal Server Error",
         error: error.message,
         status: false,
+      });
+    }
+  }
+
+  public async updateSamplingPlanDetail(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const {
+        completedDate,
+        feedback,
+        iqa_conclusion,
+        status,
+        assessment_methods,
+        assessor_decision_correct,
+        sample_type,
+        plannedDate
+      } = req.body;
+
+      const repo = AppDataSource.getRepository(SamplingPlanDetail);
+      const detail = await repo.findOne({ where: { id: parseInt(id) } });
+
+      if (!detail) {
+        return res.status(404).json({ message: "Sampling Plan Detail not found", status: false });
+      }
+
+      // Update fields
+      detail.completedDate = completedDate ? new Date(completedDate) : detail.completedDate;
+      detail.feedback = feedback ?? detail.feedback;
+      detail.status = status ?? detail.status;
+      detail.assessment_methods = assessment_methods ?? detail.assessment_methods;
+      detail.assessor_decision_correct = assessor_decision_correct ?? detail.assessor_decision_correct;
+      detail.iqa_conclusion = iqa_conclusion ?? detail.iqa_conclusion;
+      detail.sampleType = sample_type ?? detail.sampleType;
+      detail.plannedDate = plannedDate ?? detail.plannedDate
+
+      const updated = await repo.save(detail);
+
+      return res.status(200).json({
+        message: "Sampling Plan Detail updated successfully",
+        status: true,
+        data: updated
+      });
+    } catch (error) {
+      return res.status(500).json({
+        message: "Internal Server Error",
+        error: error.message,
+        status: false
       });
     }
   }

@@ -39,12 +39,8 @@ SamplingPlanRoutes.put("/learner-signoff", SamplingPlanController.signOffLearner
 //   SamplingPlanController.getSamplingPlansByCourse
 // );
 
-// // PATCH /api/v1/sampling-plan/:id → update sampling plan
-// SamplingPlanRoutes.patch(
-//   '/:id',
-//   authorizeRoles(UserRole.Admin, UserRole.IQA),
-//   SamplingPlanController.updateSamplingPlan
-// );
+// PATCH /api/v1/sampling-plan/:id → update sampling plan
+SamplingPlanRoutes.patch('/deatil/:id', authorizeRoles(UserRole.Admin, UserRole.IQA), SamplingPlanController.updateSamplingPlanDetail );
 
 
 export default SamplingPlanRoutes;
