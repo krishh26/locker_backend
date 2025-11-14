@@ -21,7 +21,7 @@ export class SamplingPlanDetail {
   @ManyToOne(() => User, { eager: true })
   createdBy: User; // IQA who added this learner
 
-  @Column({ type: "enum", enum: ["Interim", "Final"], default: "Interim" })
+  @Column({ type: "enum", enum: ["Portfolio", "Final", "ObserveAssessor", "LearnerInterview", "EmployerInterview"] })
   sampleType: string;
 
   @Column({ type: "enum", enum: ["Planned", "Reviewed", "Closed"], default: "Planned" })
@@ -74,6 +74,18 @@ export class SamplingPlanDetail {
 
   @OneToMany(() => SamplingPlanQuestion, (q) => q.plan_detail, { cascade: true })
   questions: SamplingPlanQuestion[];
+
+  @Column({ type: "boolean", nullable: true })
+  assessor_decision_correct: boolean;
+
+  @Column({ type: "json", nullable: true })
+  iqa_conclusion: {
+    Valid?: boolean;
+    Authentic?: boolean;
+    Sufficient?: boolean;
+    Relevant?: boolean;
+    Current?: boolean;
+  };
 
   @CreateDateColumn()
   createdAt: Date;
