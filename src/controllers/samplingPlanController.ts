@@ -165,6 +165,7 @@ import { Course } from '../entity/Course.entity';
 import { User } from '../entity/User.entity';
 import { SamplingPlanDetail } from "../entity/SamplingPlanDetail.entity";
 import { Learner } from "../entity/Learner.entity";
+import { In } from "typeorm";
 
 export class SamplingPlanController {
   public async getSamplingPlans(req: Request, res: Response) {
@@ -380,19 +381,17 @@ export class SamplingPlanController {
         });
       }
 
-      // ✅ Check for existing learner samples
       const learner_ids = learners.map((l) => l.learner_id);
-      const existingDetails = await detailRepo
-        .createQueryBuilder("detail")
-        .leftJoin("detail.samplingPlan", "plan")
-        .leftJoin("detail.learner", "learner")
-        .where("plan.id = :plan_id", { plan_id })
-        .andWhere("learner.learner_id IN (:...learner_ids)", { learner_ids })
-        .getMany();
+      const existingDetails = await detailRepo.find({
+        where: {
+          samplingPlan: { id: plan_id },
+          learner: { learner_id: In(learner_ids) }
+        },
+        relations: ["learner", "samplingPlan"]
+      });
 
       const alreadySampledIds = existingDetails.map((d) => d.learner.learner_id);
       const newLearners = learners.filter((l) => !alreadySampledIds.includes(l.learner_id));
-
       if (newLearners.length === 0) {
         return res.status(400).json({
           message: "All learners already sampled for this plan",

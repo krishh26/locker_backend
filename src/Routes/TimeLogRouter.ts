@@ -10,9 +10,9 @@ const Controller = new TimeLogController();
 TimeLogRoutes.post('/create', authorizeRoles(), Controller.createTimeLog);
 TimeLogRoutes.get('/get/:id', authorizeRoles(), Controller.getTimeLog);
 TimeLogRoutes.get('/spend', authorizeRoles(), Controller.getTimeLogSpendData);
-TimeLogRoutes.get('/list', authorizeRoles(), paginationMiddleware, Controller.getTimeLogs);
+TimeLogRoutes.get('/list', paginationMiddleware, Controller.getTimeLogs);
 TimeLogRoutes.patch('/update/:id', authorizeRoles(), Controller.updateTimeLog);
 TimeLogRoutes.delete('/delete/:id', authorizeRoles(), Controller.deleteTimeLog);
-
+TimeLogRoutes.get('/otj-summary/:learnerId', authorizeRoles(), Controller.getOTJSummaryHandler);
 
 export default TimeLogRoutes;

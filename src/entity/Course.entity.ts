@@ -84,6 +84,9 @@ export class Course {
     @OneToMany(() => SamplingPlan, (plan) => plan.course)
     samplingPlans: SamplingPlan[];
 
+    @Column({ type: 'boolean', default: false })
+    exclude_from_otj: boolean;
+
     @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
     created_at: Date;
 
