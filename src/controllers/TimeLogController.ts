@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { CustomRequest } from '../util/Interface/expressInterface';
 import { AppDataSource } from '../data-source';
 import { TimeLog } from '../entity/TimeLog.entity';
+import { getOTJSummary } from '../util/services/otj.service';
 
 class TimeLogController {
     public async createTimeLog(req: CustomRequest, res: Response): Promise<Response> {
@@ -284,6 +285,27 @@ class TimeLogController {
                 status: false,
                 error: error.message
             });
+        }
+    }
+
+    public async getOTJSummaryHandler(req: any, res: Response) {
+        try {
+            const learnerId = Number(req.params.learnerId);
+            if (!learnerId || isNaN(learnerId)) {
+                return res.status(400).json({ status: false, message: 'Invalid learnerId' });
+            }
+
+            const courseId = req.query.courseId ? Number(req.query.courseId) : undefined;
+
+            // new toggle
+            const includeUnverified = req.query.includeUnverified === 'true';
+
+            const summary = await getOTJSummary(learnerId, courseId, includeUnverified);
+            return res.json({ status: true, data: summary });
+
+        } catch (err: any) {
+            console.error('getOTJSummaryHandler error:', err);
+            return res.status(500).json({ status: false, message: err.message || 'Server error' });
         }
     }
 

@@ -253,6 +253,9 @@ export class Learner {
   @Column({ type: 'numeric', nullable: true })
   expected_off_the_job_hours: number;
 
+  @Column({ type: 'numeric', nullable: true })
+  weekly_working_hours: number; 
+
   @ManyToMany(() => Session, session => session.learners)
   sessions: Session[];
 
