@@ -258,7 +258,7 @@ export async function getOTJSummary(
     // --- Extra warnings ---
     const missingEnd = userCourses.filter(uc => !uc.end_date).map(uc => (uc.course as any)?.course_name);
     if (missingEnd.length) {
-        warnings.push(`Courses missing end_date: ${missingEnd.join(', ')}`);
+        warnings.push(`The following Courses don't have valid end_date: ${missingEnd.join(', ')}`);
     }
 
     const excludedCourses = [];
