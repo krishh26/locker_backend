@@ -1598,6 +1598,7 @@ class LearnerController {
             const SessionLearnerActionRepository = AppDataSource.getRepository(SessionLearnerAction);
             const courseRepository = AppDataSource.getRepository(Course);
             if (type) {
+                console.log(type)
                 if (type === 'active_learners') {
                     const active_learners = await learnerRepository.createQueryBuilder("learner")
                         .leftJoinAndSelect('learner.user_id', "user_id")
