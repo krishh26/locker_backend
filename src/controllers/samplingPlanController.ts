@@ -244,6 +244,7 @@ export class SamplingPlanController {
         .leftJoinAndSelect("uc.learner_id", "learner")
         .leftJoinAndSelect("learner.user_id", "user")
         .leftJoinAndSelect("uc.trainer_id", "trainer")
+        .leftJoinAndSelect("uc.employer_id", "employer")
         .where("uc.course ->> 'course_id' = :course_id", {
           course_id: plan.course.course_id,
         })
@@ -254,9 +255,11 @@ export class SamplingPlanController {
       for (const uc of learners) {
         const learner = uc.learner_id;
         const trainer = uc.trainer_id;
-
+        const employer = uc.employer_id;
         // 1️⃣ Assessor Risk
         let riskLevel = "Not Set";
+        let riskPercentage = null;
+
         if (trainer) {
           const risk = await riskRepo
             .createQueryBuilder("rr")
@@ -269,6 +272,11 @@ export class SamplingPlanController {
             );
             if (courseRisk?.overall_risk_level) {
               riskLevel = courseRisk.overall_risk_level;
+
+              // pick % based on risk level
+              if (riskLevel === "High") riskPercentage = risk.high_percentage || null;
+              else if (riskLevel === "Medium") riskPercentage = risk.medium_percentage || null;
+              else if (riskLevel === "Low") riskPercentage = risk.low_percentage || null;
             }
           }
         }
@@ -309,11 +317,13 @@ export class SamplingPlanController {
             ? `${trainer.first_name} ${trainer.last_name}`
             : "Unassigned",
           risk_level: riskLevel,
+          risk_percentage: riskPercentage,
           qa_approved: sampleDetail?.status === "Reviewed",
           learner_name: learner?.user_id
             ? `${learner.user_id.first_name} ${learner.user_id.last_name}`
             : "N/A",
           learner_id: learner?.learner_id,
+          employer: employer,
           sample_type: sampleDetail?.sampleType || "Interim",
           planned_date: sampleDetail?.plannedDate || null,
           status: sampleDetail?.status || "Planned",
@@ -392,12 +402,12 @@ export class SamplingPlanController {
 
       const alreadySampledIds = existingDetails.map((d) => d.learner.learner_id);
       const newLearners = learners.filter((l) => !alreadySampledIds.includes(l.learner_id));
-      if (newLearners.length === 0) {
-        return res.status(400).json({
-          message: "All learners already sampled for this plan",
-          status: false,
-        });
-      }
+      // if (newLearners.length === 0) {
+      //   return res.status(400).json({
+      //     message: "All learners already sampled for this plan",
+      //     status: false,
+      //   });
+      // }
 
       // ✅ Create SamplingPlanDetail entries with plannedDate
       const newDetails = [];
@@ -435,7 +445,7 @@ export class SamplingPlanController {
       await samplingPlanRepo.save(plan);
 
       return res.status(200).json({
-        message: "Sampled learners added successfully with individual planned dates",
+        message: "Sampled learners added successfully",
         status: true,
         data: {
           plan_id: plan.id,
