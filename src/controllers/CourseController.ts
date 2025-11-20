@@ -672,6 +672,9 @@ class CourseController {
                     risk_rating_info: {
                         id: riskRating?.id || null,
                         assessment_methods: riskRating?.assessment_methods || {},
+                        high_percentage: riskRating?.high_percentage || null,
+                        medium_percentage: riskRating?.medium_percentage || null,
+                        low_percentage: riskRating?.low_percentage || null,
                         is_active: riskRating?.is_active || true,
                         created_at: riskRating?.created_at || null,
                         updated_at: riskRating?.updated_at || null
