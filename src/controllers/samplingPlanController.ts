@@ -146,14 +146,16 @@ export class SamplingPlanController {
         .getMany();
 
       const response = [];
+      const units = learners.flatMap((uc) => {
+        const course = uc.course as { units?: any[] }; // Explicitly define the type of uc.course
+        const courseUnits = Array.isArray(course?.units) ? course.units : [];
 
-      // Global unit list (from course)
-      const courseUnits = Array.isArray(plan.course.units) ? plan.course.units : [];
-
-      const units = courseUnits.map((unit: any) => ({
-        unit_code: unit.id,
-        unit_name: unit.unit_ref || unit.title || "Unnamed"
-      }));
+        return courseUnits.map((unit: any) => ({
+          unit_code: unit.id,
+          unit_name: unit.unit_ref || unit.title || "Unnamed",
+          completed: unit.completed || false
+        }));
+      });
 
       for (const uc of learners) {
         const learner = uc.learner_id;
