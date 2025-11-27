@@ -1,6 +1,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDateColumn, UpdateDateColumn } from "typeorm";
 import { SamplingPlanDetail } from "./SamplingPlanDetail.entity";
 import { User } from "./User.entity";
+import { IQAQuestion } from "./IQAQuestion.entity";
 
 @Entity("sampling_plan_questions")
 export class SamplingPlanQuestion {
@@ -11,7 +12,7 @@ export class SamplingPlanQuestion {
   @JoinColumn({ name: "plan_detail_id" })
   plan_detail: SamplingPlanDetail;
 
-  @Column({ type: "text" })
+  @Column({ type: "text", nullable: true })
   question_text: string;
 
   @Column({ type: "enum", enum: ["Yes", "No", "NA"], default: "NA" })
@@ -19,6 +20,10 @@ export class SamplingPlanQuestion {
 
   @Column({ type: "text", nullable: true })
   comment: string;
+
+  @ManyToOne(() => IQAQuestion, { eager: true })
+  @JoinColumn({ name: "question_id" })
+  question: IQAQuestion;
 
   @ManyToOne(() => User, { eager: true })
   @JoinColumn({ name: "answered_by_id", referencedColumnName: "user_id" })

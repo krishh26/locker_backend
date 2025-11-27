@@ -1,161 +1,3 @@
-// import { Response } from 'express';
-// import { AppDataSource } from '../data-source';
-// import { CustomRequest } from '../util/Interface/expressInterface';
-
-
-// class SamplingPlanController {
-
-//     public async getSamplingPlans(req: CustomRequest, res: Response) {
-//         try {
-//             const { page = 1, limit = 10, course_id, iqa_id, is_active } = req.query;
-
-//             const samplingPlanRepository = AppDataSource.getRepository(SamplingPlan);
-//             const queryBuilder = samplingPlanRepository
-//                 .createQueryBuilder('sampling_plan')
-//                 .leftJoin('sampling_plan.course', 'course')
-//                 .leftJoin('sampling_plan.iqa', 'iqa')
-//                 .addSelect([
-//                     'course.id',
-//                     'course.courseName',
-//                     'course.description',
-//                     'iqa.id',
-//                     'iqa.first_name',
-//                     'iqa.last_name',
-//                     'iqa.email'
-//                 ])
-//                 .orderBy('sampling_plan.created_at', 'DESC');
-
-//             // 🔹 Apply filters
-//             if (course_id) {
-//                 queryBuilder.andWhere('sampling_plan.course_id = :course_id', { course_id });
-//             }
-
-//             if (iqa_id) {
-//                 queryBuilder.andWhere('sampling_plan.iqa_id = :iqa_id', { iqa_id });
-//             }
-
-//             if (is_active !== undefined) {
-//                 queryBuilder.andWhere('sampling_plan.is_active = :is_active', { is_active: is_active === 'true' });
-//             }
-
-//             // 🔹 Pagination
-//             const pageNumber = parseInt(page as string);
-//             const limitNumber = parseInt(limit as string);
-//             const skip = (pageNumber - 1) * limitNumber;
-
-//             queryBuilder.skip(skip).take(limitNumber);
-
-//             // 🔹 Execute query
-//             const [samplingPlans, total] = await queryBuilder.getManyAndCount();
-//             const totalPages = Math.ceil(total / limitNumber);
-
-//             // 🔹 Response
-//             return res.status(200).json({
-//                 message: 'Sampling plans fetched successfully',
-//                 status: true,
-//                 data: samplingPlans,
-//                 meta_data: {
-//                     page: pageNumber,
-//                     items: samplingPlans.length,
-//                     page_size: limitNumber,
-//                     pages: totalPages,
-//                     total,
-//                 },
-//             });
-//         } catch (error: any) {
-//             return res.status(500).json({
-//                 message: 'Internal Server Error',
-//                 status: false,
-//                 error: error.message,
-//             });
-//         }
-//     }
-
-
-//     public async updateSamplingPlan(req: CustomRequest, res: Response) {
-//         try {
-//             const { planId } = req.params;
-//             const { title, is_active, iqaId } = req.body;
-
-//             const samplingPlanRepo = AppDataSource.getRepository(SamplingPlan);
-//             const userRepo = AppDataSource.getRepository(User);
-
-//             const plan = await samplingPlanRepo.findOne({
-//                 where: { id: Number(planId) },
-//                 relations: ['iqa'],
-//             });
-
-//             if (!plan) {
-//                 return res.status(404).json({ message: 'Sampling plan not found', status: false });
-//             }
-
-//             // if (iqaId) {
-//             //   const iqa = await userRepo.findOne({
-//             //     where: { user_id: iqaId }, // change to "user_id" if needed
-//             //   });
-//             //   if (!iqa) {
-//             //     return res.status(404).json({ message: 'IQA not found', status: false });
-//             //   }
-//             //   plan.iqa = iqa;
-//             // }
-
-//             // if (title !== undefined) plan.title = title;
-//             // if (is_active !== undefined) plan.is_active = is_active;
-
-//             await samplingPlanRepo.save(plan);
-
-//             return res.json({ message: 'Sampling plan updated successfully', data: plan, status: true });
-//         } catch (error) {
-//             console.error('Error updating sampling plan:', error);
-//             return res.status(500).json({ message: 'Internal Server Error', status: false });
-//         }
-//     };
-//     public async getSamplingPlansByCourse(req: CustomRequest, res: Response) {
-//         try {
-//             const { course_id } = req.params;
-
-//             if (!course_id) {
-//                 return res.status(400).json({
-//                     message: "Course ID is required",
-//                     status: false,
-//                 });
-//             }
-
-//             const samplingPlanRepo = AppDataSource.getRepository(SamplingPlan);
-
-//             const plans = await samplingPlanRepo
-//                 .createQueryBuilder("sampling_plan")
-//                 .leftJoinAndSelect("sampling_plan.course", "course")
-//                 .leftJoinAndSelect("sampling_plan.iqa", "iqa")
-//                 .where("sampling_plan.course_id = :course_id", { course_id })
-//                 .orderBy("sampling_plan.created_at", "DESC")
-//                 .getMany();
-
-//             if (plans.length === 0) {
-//                 return res.status(404).json({
-//                     message: "No sampling plans found for this course",
-//                     status: false,
-//                 });
-//             }
-
-//             return res.status(200).json({
-//                 message: "Sampling plans fetched successfully",
-//                 status: true,
-//                 data: plans,
-//             });
-//         } catch (error: any) {
-//             return res.status(500).json({
-//                 message: "Internal Server Error",
-//                 status: false,
-//                 error: error.message,
-//             });
-//         }
-//     }
-
-// }
-
-// 
-
 import { Request, Response } from "express";
 import { AppDataSource } from "../data-source";
 import { SamplingPlan } from "../entity/samplingPlan.entity";
@@ -165,7 +7,54 @@ import { Course } from '../entity/Course.entity';
 import { User } from '../entity/User.entity';
 import { SamplingPlanDetail } from "../entity/SamplingPlanDetail.entity";
 import { Learner } from "../entity/Learner.entity";
-import { In } from "typeorm";
+import { In, Repository } from "typeorm";
+import { IQAQuestion, IQAQuestionType } from "../entity/IQAQuestion.entity";
+import { SamplingPlanQuestion } from "../entity/SamplingPlanQuestion.entity";
+
+const mapSampleTypeToIQAType = (sampleType: string): IQAQuestionType => {
+  switch (sampleType) {
+    case "ObserveAssessor":
+      return IQAQuestionType.OBSERVE_ASSESSOR;
+    case "LearnerInterview":
+      return IQAQuestionType.LEARNER_INTERVIEW;
+    case "EmployerInterview":
+      return IQAQuestionType.EMPLOYER_INTERVIEW;
+    case "Final":
+    case "Portfolio":
+    default:
+      return IQAQuestionType.FINAL_CHECK;
+  }
+};
+const seedIQAQuestionsForDetails = async (
+  details: SamplingPlanDetail[],
+  questionRepo: Repository<IQAQuestion>,
+  planQuestionRepo: Repository<SamplingPlanQuestion>
+) => {
+
+  for (const detail of details) {
+    const iqaType = mapSampleTypeToIQAType(detail.sampleType);
+    console.log(iqaType)
+    const questions = await questionRepo.find({
+      where: {
+        questionType: iqaType,
+        isActive: true
+      }
+    });
+    console.log(questionRepo)
+    if (!questions.length) continue;
+
+    const planQuestions = questions.map(q =>
+      planQuestionRepo.create({
+        plan_detail: detail,
+        question_text: q.question,
+        answer: "NA",
+        comment: ""
+      })
+    );
+    console.log(planQuestions)
+    await planQuestionRepo.save(planQuestions);
+  }
+};
 
 export class SamplingPlanController {
   public async getSamplingPlans(req: Request, res: Response) {
@@ -258,6 +147,14 @@ export class SamplingPlanController {
 
       const response = [];
 
+      // Global unit list (from course)
+      const courseUnits = Array.isArray(plan.course.units) ? plan.course.units : [];
+
+      const units = courseUnits.map((unit: any) => ({
+        unit_code: unit.id,
+        unit_name: unit.unit_ref || unit.title || "Unnamed"
+      }));
+
       for (const uc of learners) {
         const learner = uc.learner_id;
         const trainer = uc.trainer_id;
@@ -338,6 +235,7 @@ export class SamplingPlanController {
         status: true,
         data: {
           plan_id,
+          units,
           course_name: plan.course.course_name,
           learners: response
         },
@@ -370,8 +268,9 @@ export class SamplingPlanController {
       const detailRepo = AppDataSource.getRepository(SamplingPlanDetail);
       const learnerRepo = AppDataSource.getRepository(Learner);
       const userRepo = AppDataSource.getRepository(User);
-
-      // ✅ Find the plan
+      const questionRepo = AppDataSource.getRepository(IQAQuestion);
+      const planQuestionRepo = AppDataSource.getRepository(SamplingPlanQuestion);
+      // Find the plan
       const plan = await samplingPlanRepo.findOne({
         where: { id: plan_id },
         relations: ["course", "iqa"],
@@ -417,7 +316,8 @@ export class SamplingPlanController {
         newDetails.push(detail);
       }
 
-      await detailRepo.save(newDetails);
+      const savedDetails = await detailRepo.save(newDetails);
+      await seedIQAQuestionsForDetails(savedDetails, questionRepo, planQuestionRepo);
 
       // Update total samples count
       const totalSampled = await detailRepo.count({
@@ -426,7 +326,7 @@ export class SamplingPlanController {
 
       plan.totalSampled = totalSampled;
       plan.status = "In Progress";
-      await samplingPlanRepo.save(plan);
+     await samplingPlanRepo.save(plan);
 
       return res.status(200).json({
         message: "Sampled learners added successfully",
