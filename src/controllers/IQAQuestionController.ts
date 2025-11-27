@@ -11,17 +11,17 @@ export class IQAQuestionController {
             const { question, questionType } = req.body as any;
 
             if (!question || !questionType) {
-                return res.status(400).json({ 
-                    message: 'question and questionType are required', 
-                    status: false 
+                return res.status(400).json({
+                    message: 'question and questionType are required',
+                    status: false
                 });
             }
 
             // Validate question type
             if (!Object.values(IQAQuestionType).includes(questionType)) {
-                return res.status(400).json({ 
-                    message: 'Invalid questionType. Must be one of: Observe Assessor, Learner Interview, Employer Interview, Final Check', 
-                    status: false 
+                return res.status(400).json({
+                    message: 'Invalid questionType. Must be one of: Observe Assessor, Learner Interview, Employer Interview, Final Check',
+                    status: false
                 });
             }
 
@@ -36,17 +36,17 @@ export class IQAQuestionController {
             });
 
             const saved = await repo.save(entity);
-            return res.status(201).json({ 
-                message: 'IQA Question created successfully', 
-                status: true, 
-                data: saved 
+            return res.status(201).json({
+                message: 'IQA Question created successfully',
+                status: true,
+                data: saved
             });
 
         } catch (error: any) {
-            return res.status(500).json({ 
-                message: 'Internal Server Error', 
-                status: false, 
-                error: error.message 
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                status: false,
+                error: error.message
             });
         }
     }
@@ -59,24 +59,24 @@ export class IQAQuestionController {
 
             const repo = AppDataSource.getRepository(IQAQuestion);
             const existing = await repo.findOne({ where: { id } });
-            
+
             if (!existing) {
-                return res.status(404).json({ 
-                    message: 'IQA Question not found', 
-                    status: false 
+                return res.status(404).json({
+                    message: 'IQA Question not found',
+                    status: false
                 });
             }
 
             // Validate question type if provided
             if (questionType && !Object.values(IQAQuestionType).includes(questionType)) {
-                return res.status(400).json({ 
-                    message: 'Invalid questionType. Must be one of: Observe Assessor, Learner Interview, Employer Interview, Final Check', 
-                    status: false 
+                return res.status(400).json({
+                    message: 'Invalid questionType. Must be one of: Observe Assessor, Learner Interview, Employer Interview, Final Check',
+                    status: false
                 });
             }
 
-            const parsedIsActive = typeof isActive === 'string' ? 
-                isActive.toLowerCase() === 'true' : 
+            const parsedIsActive = typeof isActive === 'string' ?
+                isActive.toLowerCase() === 'true' :
                 (typeof isActive === 'boolean' ? isActive : existing.isActive);
 
             repo.merge(existing, {
@@ -87,17 +87,17 @@ export class IQAQuestionController {
             });
 
             const saved = await repo.save(existing);
-            return res.status(200).json({ 
-                message: 'IQA Question updated successfully', 
-                status: true, 
-                data: saved 
+            return res.status(200).json({
+                message: 'IQA Question updated successfully',
+                status: true,
+                data: saved
             });
 
         } catch (error: any) {
-            return res.status(500).json({ 
-                message: 'Internal Server Error', 
-                status: false, 
-                error: error.message 
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                status: false,
+                error: error.message
             });
         }
     }
@@ -117,9 +117,9 @@ export class IQAQuestionController {
             // Filter by question type if provided
             if (questionType) {
                 if (!Object.values(IQAQuestionType).includes(questionType)) {
-                    return res.status(400).json({ 
-                        message: 'Invalid questionType. Must be one of: Observe Assessor, Learner Interview, Employer Interview, Final Check', 
-                        status: false 
+                    return res.status(400).json({
+                        message: 'Invalid questionType. Must be one of: Observe Assessor, Learner Interview, Employer Interview, Final Check',
+                        status: false
                     });
                 }
                 qb.where('q.questionType = :questionType', { questionType });
@@ -152,17 +152,17 @@ export class IQAQuestionController {
                 updatedBy: q.updatedBy
             }));
 
-            return res.status(200).json({ 
-                message: 'IQA Questions retrieved successfully', 
-                status: true, 
-                data: formattedQuestions 
+            return res.status(200).json({
+                message: 'IQA Questions retrieved successfully',
+                status: true,
+                data: formattedQuestions
             });
 
         } catch (error: any) {
-            return res.status(500).json({ 
-                message: 'Internal Server Error', 
-                status: false, 
-                error: error.message 
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                status: false,
+                error: error.message
             });
         }
     }
@@ -182,23 +182,23 @@ export class IQAQuestionController {
                 .getOne();
 
             if (!question) {
-                return res.status(404).json({ 
-                    message: 'IQA Question not found', 
-                    status: false 
+                return res.status(404).json({
+                    message: 'IQA Question not found',
+                    status: false
                 });
             }
 
-            return res.status(200).json({ 
-                message: 'IQA Question retrieved successfully', 
-                status: true, 
-                data: question 
+            return res.status(200).json({
+                message: 'IQA Question retrieved successfully',
+                status: true,
+                data: question
             });
 
         } catch (error: any) {
-            return res.status(500).json({ 
-                message: 'Internal Server Error', 
-                status: false, 
-                error: error.message 
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                status: false,
+                error: error.message
             });
         }
     }
@@ -208,34 +208,34 @@ export class IQAQuestionController {
         try {
             const id = parseInt(req.params.id);
             const repo = AppDataSource.getRepository(IQAQuestion);
-            
+
             const question = await repo.findOne({ where: { id } });
             if (!question) {
-                return res.status(404).json({ 
-                    message: 'IQA Question not found', 
-                    status: false 
+                return res.status(404).json({
+                    message: 'IQA Question not found',
+                    status: false
                 });
             }
 
             question.isActive = !question.isActive;
             question.updatedBy = String(req.user.user_id);
-            
+
             await repo.save(question);
-            
-            return res.status(200).json({ 
-                message: 'IQA Question status toggled successfully', 
-                status: true, 
-                data: { 
-                    id: question.id, 
-                    isActive: question.isActive 
-                } 
+
+            return res.status(200).json({
+                message: 'IQA Question status toggled successfully',
+                status: true,
+                data: {
+                    id: question.id,
+                    isActive: question.isActive
+                }
             });
 
         } catch (error: any) {
-            return res.status(500).json({ 
-                message: 'Internal Server Error', 
-                status: false, 
-                error: error.message 
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                status: false,
+                error: error.message
             });
         }
     }
@@ -245,33 +245,30 @@ export class IQAQuestionController {
         try {
             const id = parseInt(req.params.id);
             const repo = AppDataSource.getRepository(IQAQuestion);
-            
-            const question = await repo.findOne({ where: { id } });
-            if (!question) {
-                return res.status(404).json({ 
-                    message: 'IQA Question not found', 
-                    status: false 
+
+            const result = await repo.delete(id);
+
+            if (result.affected === 0) {
+                return res.status(404).json({
+                    message: 'IQA Question not found',
+                    status: false
                 });
             }
 
-            question.isActive = false;
-            question.updatedBy = String(req.user.user_id);
-            
-            await repo.save(question);
-            
-            return res.status(200).json({ 
-                message: 'IQA Question deleted successfully', 
-                status: true 
+            return res.status(200).json({
+                message: 'IQA Question deleted successfully',
+                status: true
             });
 
         } catch (error: any) {
-            return res.status(500).json({ 
-                message: 'Internal Server Error', 
-                status: false, 
-                error: error.message 
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                status: false,
+                error: error.message
             });
         }
     }
+
 
     // Get questions by type
     public async getQuestionsByType(req: CustomRequest, res: Response) {
@@ -280,9 +277,9 @@ export class IQAQuestionController {
             const { isActive } = req.query as any;
 
             if (!Object.values(IQAQuestionType).includes(type as IQAQuestionType)) {
-                return res.status(400).json({ 
-                    message: 'Invalid question type. Must be one of: Observe Assessor, Learner Interview, Employer Interview, Final Check', 
-                    status: false 
+                return res.status(400).json({
+                    message: 'Invalid question type. Must be one of: Observe Assessor, Learner Interview, Employer Interview, Final Check',
+                    status: false
                 });
             }
 
@@ -302,17 +299,17 @@ export class IQAQuestionController {
                 .orderBy('q.createdAt', 'DESC')
                 .getMany();
 
-            return res.status(200).json({ 
-                message: `IQA Questions of type '${type}' retrieved successfully`, 
-                status: true, 
-                data: questions 
+            return res.status(200).json({
+                message: `IQA Questions of type '${type}' retrieved successfully`,
+                status: true,
+                data: questions
             });
 
         } catch (error: any) {
-            return res.status(500).json({ 
-                message: 'Internal Server Error', 
-                status: false, 
-                error: error.message 
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                status: false,
+                error: error.message
             });
         }
     }
@@ -323,17 +320,17 @@ export class IQAQuestionController {
             const { questionType, questions } = req.body as any;
 
             if (!questionType || !questions || !Array.isArray(questions)) {
-                return res.status(400).json({ 
-                    message: 'questionType and questions array are required', 
-                    status: false 
+                return res.status(400).json({
+                    message: 'questionType and questions array are required',
+                    status: false
                 });
             }
 
             // Validate question type
             if (!Object.values(IQAQuestionType).includes(questionType)) {
-                return res.status(400).json({ 
-                    message: 'Invalid questionType. Must be one of: Observe Assessor, Learner Interview, Employer Interview, Final Check', 
-                    status: false 
+                return res.status(400).json({
+                    message: 'Invalid questionType. Must be one of: Observe Assessor, Learner Interview, Employer Interview, Final Check',
+                    status: false
                 });
             }
 
@@ -352,7 +349,7 @@ export class IQAQuestionController {
                 // Then create/update questions
                 for (let i = 0; i < questions.length; i++) {
                     const questionData = questions[i];
-                    
+
                     if (!questionData.question || questionData.question.trim() === '') {
                         continue; // Skip empty questions
                     }
@@ -391,17 +388,17 @@ export class IQAQuestionController {
                 order: { createdAt: 'ASC' }
             });
 
-            return res.status(200).json({ 
-                message: `Bulk save completed for ${questionType} questions`, 
-                status: true, 
-                data: updatedQuestions 
+            return res.status(200).json({
+                message: `Bulk save completed for ${questionType} questions`,
+                status: true,
+                data: updatedQuestions
             });
 
         } catch (error: any) {
-            return res.status(500).json({ 
-                message: 'Internal Server Error', 
-                status: false, 
-                error: error.message 
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                status: false,
+                error: error.message
             });
         }
     }
@@ -412,14 +409,14 @@ export class IQAQuestionController {
             const { type } = req.params;
 
             if (!Object.values(IQAQuestionType).includes(type as IQAQuestionType)) {
-                return res.status(400).json({ 
-                    message: 'Invalid question type. Must be one of: Observe Assessor, Learner Interview, Employer Interview, Final Check', 
-                    status: false 
+                return res.status(400).json({
+                    message: 'Invalid question type. Must be one of: Observe Assessor, Learner Interview, Employer Interview, Final Check',
+                    status: false
                 });
             }
 
             const repo = AppDataSource.getRepository(IQAQuestion);
-            
+
             // Get all active questions of this type, ordered by creation date
             const questions = await repo.find({
                 where: { questionType: type as IQAQuestionType, isActive: true },
@@ -439,7 +436,7 @@ export class IQAQuestionController {
             // Add empty slots up to 30 questions (Smart Assessor limit reference)
             const maxQuestions = 30;
             const emptySlots = [];
-            
+
             for (let i = questions.length + 1; i <= maxQuestions; i++) {
                 emptySlots.push({
                     id: null,
@@ -453,9 +450,9 @@ export class IQAQuestionController {
 
             const allQuestions = [...formattedQuestions, ...emptySlots];
 
-            return res.status(200).json({ 
-                message: `Questions for bulk edit - ${type}`, 
-                status: true, 
+            return res.status(200).json({
+                message: `Questions for bulk edit - ${type}`,
+                status: true,
                 data: {
                     questionType: type,
                     questions: allQuestions,
@@ -465,10 +462,10 @@ export class IQAQuestionController {
             });
 
         } catch (error: any) {
-            return res.status(500).json({ 
-                message: 'Internal Server Error', 
-                status: false, 
-                error: error.message 
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                status: false,
+                error: error.message
             });
         }
     }
