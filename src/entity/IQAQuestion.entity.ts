@@ -24,6 +24,9 @@ export class IQAQuestion {
     @Column({ type: 'boolean', default: true })
     isActive: boolean;
 
+    @Column({ type: 'int', default: 0 })
+    order: number;
+
     @Column({ type: 'varchar' })
     createdBy: string;
 
