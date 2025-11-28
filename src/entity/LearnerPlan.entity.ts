@@ -103,12 +103,8 @@ export class LearnerPlan {
     @Column({ type: "varchar" })
     Duration: string;
 
-    @Column({
-        type: 'enum',
-        enum: LearnerPlanType,
-        default: LearnerPlanType.InitialSession
-    })
-    type: LearnerPlanType;
+    @Column({ type: 'varchar', default: "Initial Session" })
+    type: string;
 
     @Column({
         type: 'enum',
