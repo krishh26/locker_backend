@@ -114,10 +114,10 @@ export class SamplingPlanController {
       const userCourseRepo = AppDataSource.getRepository(UserCourse);
       const riskRepo = AppDataSource.getRepository(RiskRating);
 
-      // 1️⃣ Fetch plan
+      // Fetch plan + course
       const plan = await samplingPlanRepo.findOne({
         where: { id: Number(plan_id) },
-        relations: ["course"],
+        relations: ["course"]
       });
 
       if (!plan) {
@@ -127,76 +127,77 @@ export class SamplingPlanController {
         });
       }
 
-      // 2️⃣ Fetch all SamplingPlanDetails for this plan (multiple records per learner allowed)
+      const courseId = plan.course.course_id;
+
+      // Fetch all sampled details for plan
       const allDetails = await detailRepo.find({
         where: { samplingPlan: { id: Number(plan_id) } },
-        relations: ["learner", "learner.user_id"],
+        relations: ["learner", "learner.user_id"]
       });
 
-      // 3️⃣ Fetch all enrolled learners
+      // Map learner_id → its sampling records (fast lookup)
+      const detailsMap = new Map<number, SamplingPlanDetail[]>();
+      for (const d of allDetails) {
+        const lid = d.learner.learner_id;
+        if (!detailsMap.has(lid)) detailsMap.set(lid, []);
+        detailsMap.get(lid)!.push(d);
+      }
+
+      // Fetch learner + trainer + employer in single query
       const learners = await userCourseRepo
         .createQueryBuilder("uc")
         .leftJoinAndSelect("uc.learner_id", "learner")
         .leftJoinAndSelect("learner.user_id", "user")
         .leftJoinAndSelect("uc.trainer_id", "trainer")
         .leftJoinAndSelect("uc.employer_id", "employer")
-        .where("uc.course ->> 'course_id' = :course_id", {
-          course_id: plan.course.course_id,
-        })
+        .where("uc.course ->> 'course_id' = :courseId", { courseId })
         .getMany();
 
-      const response = [];
-      const units = learners.flatMap((uc) => {
-        const course = uc.course as { units?: any[] }; // Explicitly define the type of uc.course
-        const courseUnits = Array.isArray(course?.units) ? course.units : [];
+      console.log("???")
+      // Fetch all trainer risk ratings in one go
+      const trainerIds = learners
+        .map((l) => l.trainer_id?.user_id || null)
+        .filter((id) => id !== null);
 
-        return courseUnits.map((unit: any) => ({
-          unit_code: unit.id,
-          unit_name: unit.unit_ref || unit.title || "Unnamed",
-          completed: unit.completed || false
-        }));
-      });
+
+      const risks = trainerIds.length
+        ? await riskRepo
+          .createQueryBuilder("rr")
+          .where("rr.trainer IN (:...trainerIds)", { trainerIds })
+          .getMany()
+        : [];
+
+      const riskMap = new Map<number, RiskRating>();
+      risks.forEach((r) => riskMap.set(r.trainer?.user_id, r));
+
+      const response: any[] = [];
+      const globalUnits = (learners[0]?.course as any)?.units || [];
 
       for (const uc of learners) {
         const learner = uc.learner_id;
         const trainer = uc.trainer_id;
         const employer = uc.employer_id;
-
-        // 4️⃣ Fetch risk rating of assessor
-        let riskLevel = "Not Set";
-        let riskPercentage: string | null = null;
-
-        if (trainer) {
-          const risk = await riskRepo
-            .createQueryBuilder("rr")
-            .where("rr.trainer = :t", { t: trainer.user_id })
-            .getOne();
-
-          if (risk?.courses?.length) {
-            const courseRisk = risk.courses.find(
-              (c: any) => c.course_id === plan.course.course_id
-            );
-
-            if (courseRisk?.overall_risk_level) {
-              riskLevel = courseRisk.overall_risk_level;
-
-              if (riskLevel === "High") riskPercentage = risk.high_percentage?.toString() || null;
-              if (riskLevel === "Medium") riskPercentage = risk.medium_percentage?.toString() || null;
-              if (riskLevel === "Low") riskPercentage = risk.low_percentage?.toString() || null;
-            }
+        const learnerDetails = detailsMap.get(learner.learner_id) || [];
+        // Get risk for trainer
+        let risk_level = "Not Set";
+        let risk_percentage = null;
+        if (trainer?.user_id && riskMap.has(trainer.user_id)) {
+          const r = riskMap.get(trainer.user_id)!;
+          const courseRisk = r.courses?.find((c: any) => c.course_id === courseId);
+          if (courseRisk?.overall_risk_level) {
+            risk_level = courseRisk.overall_risk_level;
+            risk_percentage =
+              risk_level === "High" ? r.high_percentage :
+                risk_level === "Medium" ? r.medium_percentage :
+                  risk_level === "Low" ? r.low_percentage :
+                    null;
           }
         }
 
-        // 5️⃣ Get all sample detail records for this learner
-        const learnerDetails = allDetails.filter(
-          (d) => d.learner.learner_id === learner.learner_id
-        );
-
-        // 6️⃣ Group all units with their sample history
+        // Build unit sample history (fast)
         const unitsMap: any = {};
-
-        for (const detail of learnerDetails) {
-          for (const unit of detail.sampledUnits || []) {
+        for (const d of learnerDetails) {
+          for (const unit of d.sampledUnits || []) {
             if (!unitsMap[unit.unit_code]) {
               unitsMap[unit.unit_code] = {
                 unit_code: unit.unit_code,
@@ -204,17 +205,23 @@ export class SamplingPlanController {
                 sample_history: []
               };
             }
-
             unitsMap[unit.unit_code].sample_history.push({
-              detail_id: detail.id,
-              sample_type: detail.sampleType,
-              planned_date: detail.plannedDate,
-              completed_date: detail.completedDate,
-              status: detail.status,
-              assessment_methods: detail.assessment_methods || {}
+              detail_id: d.id,
+              sample_type: d.sampleType,
+              planned_date: d.plannedDate,
+              completed_date: d.completedDate,
+              status: d.status,
+              assessment_methods: d.assessment_methods
             });
           }
         }
+
+        // Ensure all course units included
+        const finalUnits = globalUnits.map((u: any) => ({
+          unit_code: u.id,
+          unit_name: u.unit_ref || u.title || "Unnamed",
+          sample_history: unitsMap[u.id]?.sample_history || []
+        }));
 
         response.push({
           learner_id: learner.learner_id,
@@ -224,11 +231,11 @@ export class SamplingPlanController {
           assessor_name: trainer
             ? `${trainer.first_name} ${trainer.last_name}`
             : "Unassigned",
-          employer: employer || null,
-          risk_level: riskLevel,
-          risk_percentage: riskPercentage,
+          employer,
+          risk_level,
+          risk_percentage,
           total_samples: learnerDetails.length,
-          units: Object.values(unitsMap)
+          units: finalUnits
         });
       }
 
@@ -237,13 +244,12 @@ export class SamplingPlanController {
         status: true,
         data: {
           plan_id,
-          units,
           course_name: plan.course.course_name,
           learners: response
-        },
+        }
       });
 
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error fetching learners for plan:", error);
       return res.status(500).json({
         message: "Internal Server Error",
