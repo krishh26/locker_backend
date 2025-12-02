@@ -153,25 +153,24 @@ export class SamplingPlanController {
         .where("uc.course ->> 'course_id' = :courseId", { courseId })
         .getMany();
 
-      console.log("???")
-      // Fetch all trainer risk ratings in one go
-      const trainerIds = learners
-        .map((l) => l.trainer_id?.user_id || null)
-        .filter((id) => id !== null);
+      const courseUnits = (learners[0]?.course as any)?.units || [];
 
+      // 4️⃣ Fetch all trainer risk info (single query)
+      const trainerIds = learners
+        .map((uc) => uc.trainer_id?.user_id)
+        .filter(Boolean);
 
       const risks = trainerIds.length
         ? await riskRepo
-          .createQueryBuilder("rr")
-          .where("rr.trainer IN (:...trainerIds)", { trainerIds })
+          .createQueryBuilder("r")
+          .where("r.trainer IN (:...trainerIds)", { trainerIds })
           .getMany()
         : [];
 
       const riskMap = new Map<number, RiskRating>();
-      risks.forEach((r) => riskMap.set(r.trainer?.user_id, r));
+      risks.forEach(r => riskMap.set(r.trainer?.user_id, r));
 
-      const response: any[] = [];
-      const globalUnits = (learners[0]?.course as any)?.units || [];
+      const response = [];
 
       for (const uc of learners) {
         const learner = uc.learner_id;
@@ -182,46 +181,71 @@ export class SamplingPlanController {
         let risk_level = "Not Set";
         let risk_percentage = null;
         if (trainer?.user_id && riskMap.has(trainer.user_id)) {
-          const r = riskMap.get(trainer.user_id)!;
-          const courseRisk = r.courses?.find((c: any) => c.course_id === courseId);
+          const risk = riskMap.get(trainer.user_id)!;
+          const courseRisk = risk.courses?.find((c: any) => c.course_id === courseId);
           if (courseRisk?.overall_risk_level) {
             risk_level = courseRisk.overall_risk_level;
             risk_percentage =
-              risk_level === "High" ? r.high_percentage :
-                risk_level === "Medium" ? r.medium_percentage :
-                  risk_level === "Low" ? r.low_percentage :
-                    null;
+              risk_level === "High" ? risk.high_percentage :
+                risk_level === "Medium" ? risk.medium_percentage :
+                  risk_level === "Low" ? risk.low_percentage : null;
           }
         }
 
-        // Build unit sample history (fast)
-        const unitsMap: any = {};
-        for (const d of learnerDetails) {
-          for (const unit of d.sampledUnits || []) {
-            if (!unitsMap[unit.unit_code]) {
-              unitsMap[unit.unit_code] = {
-                unit_code: unit.unit_code,
-                unit_name: unit.unit_name,
-                sample_history: []
-              };
+        // 🔍 Unit Completion tracking
+        const fullyCompletedUnits = new Set<string>();
+        const partiallyCompletedUnits = new Set<string>();
+
+        learnerDetails.forEach(detail => {
+          detail.sampledUnits?.forEach(unit => {
+            let hasFull = false;
+            let hasPartial = false;
+
+            const courseUnit = courseUnits.find((cu: any) => cu.id === unit.unit_code);
+            if (courseUnit?.subUnit?.length) {
+              courseUnit.subUnit.forEach((sub: any) => {
+                const learnerDone = Boolean(sub?.learnerMap);
+                const assessorDone = Boolean(sub?.trainerMap);
+
+                if (learnerDone && assessorDone) {
+                  hasFull = true;
+                } else if (learnerDone || assessorDone) {
+                  hasPartial = true;
+                }
+              });
             }
-            unitsMap[unit.unit_code].sample_history.push({
-              detail_id: d.id,
-              sample_type: d.sampleType,
-              planned_date: d.plannedDate,
-              completed_date: d.completedDate,
-              status: d.status,
-              assessment_methods: d.assessment_methods
-            });
-          }
-        }
 
-        // Ensure all course units included
-        const finalUnits = globalUnits.map((u: any) => ({
-          unit_code: u.id,
-          unit_name: u.unit_ref || u.title || "Unnamed",
-          sample_history: unitsMap[u.id]?.sample_history || []
-        }));
+            if (hasFull && !hasPartial) fullyCompletedUnits.add(unit.unit_code);
+            else if (hasFull || hasPartial) partiallyCompletedUnits.add(unit.unit_code);
+          });
+        });
+
+        // 6️⃣ Include all course units always
+        const finalUnits = courseUnits.map((u: any) => {
+          const sampledEntry = learnerDetails
+            .flatMap(d => d.sampledUnits || [])
+            .find(su => su.unit_code === u.id);
+
+          let status = "Not Started";
+          if (fullyCompletedUnits.has(u.id)) status = "Fully Completed";
+          else if (partiallyCompletedUnits.has(u.id)) status = "Partially Completed";
+
+          return {
+            unit_code: u.id,
+            unit_name: u.unit_ref || u.title || "Unnamed",
+            status,
+            sample_history: sampledEntry
+              ? (learnerDetails.map(d => ({
+                detail_id: d.id,
+                sample_type: d.sampleType,
+                planned_date: d.plannedDate,
+                completed_date: d.completedDate,
+                status: d.status,
+                assessment_methods: d.assessment_methods || {}
+              })))
+              : []
+          };
+        });
 
         response.push({
           learner_id: learner.learner_id,
