@@ -42,5 +42,7 @@ SamplingPlanRoutes.put("/learner-signoff", SamplingPlanController.signOffLearner
 // PATCH /api/v1/sampling-plan/:id → update sampling plan
 SamplingPlanRoutes.patch('/deatil/:id', authorizeRoles(UserRole.Admin, UserRole.IQA), SamplingPlanController.updateSamplingPlanDetail );
 
+SamplingPlanRoutes.get('/:detailId/evidence', authorizeRoles(UserRole.Admin, UserRole.IQA), SamplingPlanController.getEvidenceForSamplePlanDetail);
+SamplingPlanRoutes.post("/assignment-review", authorizeRoles(UserRole.Admin, UserRole.IQA), SamplingPlanController.upsertAssignmentReview);
 
 export default SamplingPlanRoutes;

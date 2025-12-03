@@ -6,6 +6,7 @@ import { SamplingPlanAction } from "./SamplingPlanAction.entity";
 import { SamplingPlanDocument } from "./SamplingPlanDocument.entity";
 import { SamplingPlanForm } from "./SamplingPlanForm.entity";
 import { SamplingPlanQuestion } from "./SamplingPlanQuestion.entity";
+import { AssignmentReview } from './AssignmentReview.entity';
 
 @Entity()
 export class SamplingPlanDetail {
@@ -86,6 +87,9 @@ export class SamplingPlanDetail {
     Relevant?: boolean;
     Current?: boolean;
   };
+
+  @OneToMany(() => AssignmentReview, (r) => r.plan_detail)
+  assignmentReviews: AssignmentReview[];
 
   @CreateDateColumn()
   createdAt: Date;

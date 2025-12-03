@@ -10,6 +10,9 @@ import { Learner } from "../entity/Learner.entity";
 import { In, Repository } from "typeorm";
 import { IQAQuestion, IQAQuestionType } from "../entity/IQAQuestion.entity";
 import { SamplingPlanQuestion } from "../entity/SamplingPlanQuestion.entity";
+import { AssignmentReview, ReviewRole } from '../entity/AssignmentReview.entity';
+import { Assignment } from '../entity/Assignment.entity';
+import { UserRole } from "../util/constants";
 
 const mapSampleTypeToIQAType = (sampleType: string): IQAQuestionType => {
   switch (sampleType) {
@@ -173,6 +176,7 @@ export class SamplingPlanController {
       const response = [];
 
       for (const uc of learners) {
+        if (!uc.learner_id) continue;
         const learner = uc.learner_id;
         const trainer = uc.trainer_id;
         const employer = uc.employer_id;
@@ -1002,6 +1006,297 @@ export class SamplingPlanController {
     }
   }
 
+  public async getEvidenceForSamplePlanDetail(req: Request, res: Response) {
+    try {
+      const detailId = parseInt(req.params.detailId);
+      const { unit_code } = req.query as { unit_code?: string };
+
+      if (!detailId || !unit_code) {
+        return res.status(400).json({
+          message: 'detailId param and unit_code query are required',
+          status: false,
+        });
+      }
+
+      const planDetailRepo = AppDataSource.getRepository(SamplingPlanDetail);
+      const assignmentRepo = AppDataSource.getRepository(Assignment);
+      const reviewRepo = AppDataSource.getRepository(AssignmentReview);
+
+      const detail = await planDetailRepo.findOne({
+        where: { id: detailId },
+        relations: ['learner', 'samplingPlan', 'samplingPlan.course'],
+      });
+
+      if (!detail) {
+        return res.status(404).json({
+          message: 'Sample plan detail not found',
+          status: false,
+        });
+      }
+
+      const learnerUser = (detail.learner as any).user;
+      const learnerUserId =  detail.learner.user_id?.user_id;
+      const courseId = (detail.samplingPlan as any).course.course_id;
+
+      // 1. get all assignments for this learner + course
+      const allAssignments = await assignmentRepo.find({
+        where: {
+          user: { user_id: learnerUserId } as any,
+          course_id: courseId,
+        },
+        order: { created_at: 'DESC' },
+      });
+
+      // 2. filter on units + learnerMap
+      const filteredAssignments = allAssignments.filter((a) => {
+        const unitsArr = Array.isArray(a.units) ? (a.units as any[]) : [];
+
+        if (!unitsArr.length) return false;
+
+        const matchedUnit = unitsArr.find(
+          (u) => u.unit_ref === unit_code || u.id === unit_code
+        );
+
+        if (!matchedUnit) return false;
+
+        const subUnits = Array.isArray(matchedUnit.subUnit)
+          ? matchedUnit.subUnit
+          : [];
+
+        // show only if any subUnit has learnerMap === true
+        const hasMapped = subUnits.some((s: any) => s.learnerMap === true);
+        return hasMapped;
+      });
+
+      if (!filteredAssignments.length) {
+        return res.status(200).json({
+          message: 'No mapped evidence found for this unit',
+          status: true,
+          data: [],
+        });
+      }
+
+      const assignmentIds = filteredAssignments.map((a) => a.assignment_id);
+
+      const reviews = await reviewRepo.find({
+        where: {
+          assignment: { assignment_id: In(assignmentIds) } as any,
+          plan_detail: { id: detailId } as any,
+        },
+        relations: ['assignment', 'signed_off_by'],
+      });
+
+      const reviewMap: Record<number, any> = {};
+
+      for (const r of reviews) {
+        const aid = (r.assignment as any).assignment_id;
+
+        if (!reviewMap[aid]) reviewMap[aid] = {};
+
+        reviewMap[aid][r.role] = {
+          completed: r.completed,
+          comment: r.comment,
+          signed_off_at: r.signed_off_at,
+          signed_off_by: r.signed_off_by
+            ? {
+              user_id: r.signed_off_by.user_id,
+              name:
+                (r.signed_off_by as any).first_name +
+                ' ' +
+                (r.signed_off_by as any).last_name,
+            }
+            : null,
+        };
+      }
+
+      const data = filteredAssignments.map((a) => {
+        const unitsArr = Array.isArray(a.units) ? (a.units as any[]) : [];
+        const matchedUnit = unitsArr.find(
+          (u) => u.unit_ref === unit_code || u.id === unit_code
+        );
+
+        const subUnits = matchedUnit?.subUnit || [];
+        const mappedSubUnits = subUnits.filter((s: any) => s.learnerMap === true);
+
+        return {
+          assignment_id: a.assignment_id,
+          title: a.title || (a.file as any)?.name,
+          description: a.description,
+          file: a.file,
+          grade: a.grade,
+          assessment_method: a.assessment_method,
+          created_at: a.created_at,
+          unit: {
+            unit_ref: matchedUnit?.unit_ref || matchedUnit?.id,
+            title: matchedUnit?.title,
+          },
+          mappedSubUnits: mappedSubUnits.map((s: any) => ({
+            id: s.id,
+            subTitle: s.subTitle,
+          })),
+          reviews: reviewMap[a.assignment_id] || {}, // per-role data
+        };
+      });
+
+      return res.status(200).json({
+        message: 'Evidence list loaded',
+        status: true,
+        data,
+      });
+    } catch (error: any) {
+      return res.status(500).json({
+        message: 'Internal Server Error',
+        status: false,
+        error: error.message,
+      });
+    }
+  }
+
+  // helper to update sampledUnits + status (called from saveReview)
+  public static async updateSamplingProgress(
+    detailId: number,
+    unit_code: string
+  ): Promise<void> {
+    const planDetailRepo = AppDataSource.getRepository(SamplingPlanDetail);
+    const reviewRepo = AppDataSource.getRepository(AssignmentReview);
+
+    const detail = await planDetailRepo.findOne({ where: { id: detailId } });
+    if (!detail) return;
+
+    const sampledUnits = Array.isArray(detail.sampledUnits)
+      ? detail.sampledUnits
+      : [];
+
+    // mark this unit completed if ANY IQA review completed = true
+    const iqaReviews = await reviewRepo.find({
+      where: {
+        plan_detail: { id: detailId } as any,
+        role: ReviewRole.IQA,
+      },
+    });
+
+    const anyCompleted = iqaReviews.some((r) => r.completed === true);
+
+    const updatedSampledUnits = sampledUnits.map((u: any) => {
+      if (u.unit_code === unit_code || u.unit_name === unit_code) {
+        return { ...u, completed: anyCompleted };
+      }
+      return u;
+    });
+
+    detail.sampledUnits = updatedSampledUnits;
+
+    // if all sampled units completed → mark detail as Reviewed + set completedDate
+    const allDone =
+      updatedSampledUnits.length > 0 &&
+      updatedSampledUnits.every((u: any) => u.completed === true);
+
+    if (allDone) {
+      detail.status = 'Reviewed';
+      if (!detail.completedDate) {
+        detail.completedDate = new Date();
+      }
+    }
+
+    await planDetailRepo.save(detail);
+  }
+
+  public async upsertAssignmentReview(req: any, res: Response) {
+    try {
+      const {
+        assignment_id,
+        sampling_plan_detail_id,
+        role, // "IQA" typically for now
+        comment, // optional
+        completed, // optional
+        signed_off, // boolean
+        unit_code // required for progress update
+      } = req.body;
+
+      if (!assignment_id || !sampling_plan_detail_id || !role || !unit_code) {
+        return res.status(400).json({
+          message: "assignment_id, sampling_plan_detail_id, role, and unit_code are required",
+          status: false
+        });
+      }
+
+      const assignmentRepo = AppDataSource.getRepository(Assignment);
+      const detailRepo = AppDataSource.getRepository(SamplingPlanDetail);
+      const reviewRepo = AppDataSource.getRepository(AssignmentReview);
+
+      const assignment = await assignmentRepo.findOne({
+        where: { assignment_id }
+      });
+      const detail = await detailRepo.findOne({
+        where: { id: sampling_plan_detail_id }
+      });
+
+      if (!assignment || !detail) {
+        return res.status(404).json({
+          message: "Assignment or Sample plan detail not found",
+          status: false
+        });
+      }
+
+      // Permission: only IQA/EQA/Admin allowed in Examine Evidence
+      const roles = req.user.roles || [req.user.role];
+      const canReview =
+        roles.includes(UserRole.IQA) ||
+        roles.includes(UserRole.Admin) ||
+        roles.includes("EQA"); // adjust if needed
+
+      if (!canReview) {
+        return res.status(403).json({
+          message: "Not authorized to review evidence",
+          status: false
+        });
+      }
+
+      // check if review exists, else create new entry
+      let review = await reviewRepo.findOne({
+        where: {
+          assignment: { assignment_id } as any,
+          plan_detail: { id: sampling_plan_detail_id } as any,
+          role
+        },
+        relations: ["signed_off_by"]
+      });
+
+      if (!review) {
+        review = reviewRepo.create({
+          assignment,
+          plan_detail: detail,
+          role
+        });
+      }
+
+      if (comment !== undefined) review.comment = comment;
+      if (completed !== undefined) review.completed = completed;
+
+      if (signed_off === true) {
+        review.signed_off_by = { user_id: req.user.user_id } as any;
+        review.signed_off_at = new Date();
+      }
+
+      const savedReview = await reviewRepo.save(review);
+
+      // 🔁 auto update sample plan status + completed units
+      await SamplingPlanController.updateSamplingProgress(sampling_plan_detail_id, unit_code);
+
+      return res.status(200).json({
+        message: "Evidence review saved successfully",
+        status: true,
+        data: savedReview
+      });
+
+    } catch (error: any) {
+      return res.status(500).json({
+        message: "Internal Server Error",
+        status: false,
+        error: error.message
+      });
+    }
+  }
 }
 
 
