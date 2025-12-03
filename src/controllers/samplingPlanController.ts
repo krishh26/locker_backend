@@ -10,6 +10,9 @@ import { Learner } from "../entity/Learner.entity";
 import { In, Repository } from "typeorm";
 import { IQAQuestion, IQAQuestionType } from "../entity/IQAQuestion.entity";
 import { SamplingPlanQuestion } from "../entity/SamplingPlanQuestion.entity";
+import { AssignmentReview, ReviewRole } from '../entity/AssignmentReview.entity';
+import { Assignment } from '../entity/Assignment.entity';
+import { UserRole } from "../util/constants";
 
 const mapSampleTypeToIQAType = (sampleType: string): IQAQuestionType => {
   switch (sampleType) {
@@ -153,27 +156,27 @@ export class SamplingPlanController {
         .where("uc.course ->> 'course_id' = :courseId", { courseId })
         .getMany();
 
-      console.log("???")
-      // Fetch all trainer risk ratings in one go
-      const trainerIds = learners
-        .map((l) => l.trainer_id?.user_id || null)
-        .filter((id) => id !== null);
+      const courseUnits = (learners[0]?.course as any)?.units || [];
 
+      // 4️⃣ Fetch all trainer risk info (single query)
+      const trainerIds = learners
+        .map((uc) => uc.trainer_id?.user_id)
+        .filter(Boolean);
 
       const risks = trainerIds.length
         ? await riskRepo
-          .createQueryBuilder("rr")
-          .where("rr.trainer IN (:...trainerIds)", { trainerIds })
+          .createQueryBuilder("r")
+          .where("r.trainer IN (:...trainerIds)", { trainerIds })
           .getMany()
         : [];
 
       const riskMap = new Map<number, RiskRating>();
-      risks.forEach((r) => riskMap.set(r.trainer?.user_id, r));
+      risks.forEach(r => riskMap.set(r.trainer?.user_id, r));
 
-      const response: any[] = [];
-      const globalUnits = (learners[0]?.course as any)?.units || [];
+      const response = [];
 
       for (const uc of learners) {
+        if (!uc.learner_id) continue;
         const learner = uc.learner_id;
         const trainer = uc.trainer_id;
         const employer = uc.employer_id;
@@ -182,46 +185,71 @@ export class SamplingPlanController {
         let risk_level = "Not Set";
         let risk_percentage = null;
         if (trainer?.user_id && riskMap.has(trainer.user_id)) {
-          const r = riskMap.get(trainer.user_id)!;
-          const courseRisk = r.courses?.find((c: any) => c.course_id === courseId);
+          const risk = riskMap.get(trainer.user_id)!;
+          const courseRisk = risk.courses?.find((c: any) => c.course_id === courseId);
           if (courseRisk?.overall_risk_level) {
             risk_level = courseRisk.overall_risk_level;
             risk_percentage =
-              risk_level === "High" ? r.high_percentage :
-                risk_level === "Medium" ? r.medium_percentage :
-                  risk_level === "Low" ? r.low_percentage :
-                    null;
+              risk_level === "High" ? risk.high_percentage :
+                risk_level === "Medium" ? risk.medium_percentage :
+                  risk_level === "Low" ? risk.low_percentage : null;
           }
         }
 
-        // Build unit sample history (fast)
-        const unitsMap: any = {};
-        for (const d of learnerDetails) {
-          for (const unit of d.sampledUnits || []) {
-            if (!unitsMap[unit.unit_code]) {
-              unitsMap[unit.unit_code] = {
-                unit_code: unit.unit_code,
-                unit_name: unit.unit_name,
-                sample_history: []
-              };
+        // 🔍 Unit Completion tracking
+        const fullyCompletedUnits = new Set<string>();
+        const partiallyCompletedUnits = new Set<string>();
+
+        learnerDetails.forEach(detail => {
+          detail.sampledUnits?.forEach(unit => {
+            let hasFull = false;
+            let hasPartial = false;
+
+            const courseUnit = courseUnits.find((cu: any) => cu.id === unit.unit_code);
+            if (courseUnit?.subUnit?.length) {
+              courseUnit.subUnit.forEach((sub: any) => {
+                const learnerDone = Boolean(sub?.learnerMap);
+                const assessorDone = Boolean(sub?.trainerMap);
+
+                if (learnerDone && assessorDone) {
+                  hasFull = true;
+                } else if (learnerDone || assessorDone) {
+                  hasPartial = true;
+                }
+              });
             }
-            unitsMap[unit.unit_code].sample_history.push({
-              detail_id: d.id,
-              sample_type: d.sampleType,
-              planned_date: d.plannedDate,
-              completed_date: d.completedDate,
-              status: d.status,
-              assessment_methods: d.assessment_methods
-            });
-          }
-        }
 
-        // Ensure all course units included
-        const finalUnits = globalUnits.map((u: any) => ({
-          unit_code: u.id,
-          unit_name: u.unit_ref || u.title || "Unnamed",
-          sample_history: unitsMap[u.id]?.sample_history || []
-        }));
+            if (hasFull && !hasPartial) fullyCompletedUnits.add(unit.unit_code);
+            else if (hasFull || hasPartial) partiallyCompletedUnits.add(unit.unit_code);
+          });
+        });
+
+        // 6️⃣ Include all course units always
+        const finalUnits = courseUnits.map((u: any) => {
+          const sampledEntry = learnerDetails
+            .flatMap(d => d.sampledUnits || [])
+            .find(su => su.unit_code === u.id);
+
+          let status = "Not Started";
+          if (fullyCompletedUnits.has(u.id)) status = "Fully Completed";
+          else if (partiallyCompletedUnits.has(u.id)) status = "Partially Completed";
+
+          return {
+            unit_code: u.id,
+            unit_name: u.unit_ref || u.title || "Unnamed",
+            status,
+            sample_history: sampledEntry
+              ? (learnerDetails.map(d => ({
+                detail_id: d.id,
+                sample_type: d.sampleType,
+                planned_date: d.plannedDate,
+                completed_date: d.completedDate,
+                status: d.status,
+                assessment_methods: d.assessment_methods || {}
+              })))
+              : []
+          };
+        });
 
         response.push({
           learner_id: learner.learner_id,
@@ -978,6 +1006,297 @@ export class SamplingPlanController {
     }
   }
 
+  public async getEvidenceForSamplePlanDetail(req: Request, res: Response) {
+    try {
+      const detailId = parseInt(req.params.detailId);
+      const { unit_code } = req.query as { unit_code?: string };
+
+      if (!detailId || !unit_code) {
+        return res.status(400).json({
+          message: 'detailId param and unit_code query are required',
+          status: false,
+        });
+      }
+
+      const planDetailRepo = AppDataSource.getRepository(SamplingPlanDetail);
+      const assignmentRepo = AppDataSource.getRepository(Assignment);
+      const reviewRepo = AppDataSource.getRepository(AssignmentReview);
+
+      const detail = await planDetailRepo.findOne({
+        where: { id: detailId },
+        relations: ['learner', 'samplingPlan', 'samplingPlan.course'],
+      });
+
+      if (!detail) {
+        return res.status(404).json({
+          message: 'Sample plan detail not found',
+          status: false,
+        });
+      }
+
+      const learnerUser = (detail.learner as any).user;
+      const learnerUserId =  detail.learner.user_id?.user_id;
+      const courseId = (detail.samplingPlan as any).course.course_id;
+
+      // 1. get all assignments for this learner + course
+      const allAssignments = await assignmentRepo.find({
+        where: {
+          user: { user_id: learnerUserId } as any,
+          course_id: courseId,
+        },
+        order: { created_at: 'DESC' },
+      });
+
+      // 2. filter on units + learnerMap
+      const filteredAssignments = allAssignments.filter((a) => {
+        const unitsArr = Array.isArray(a.units) ? (a.units as any[]) : [];
+
+        if (!unitsArr.length) return false;
+
+        const matchedUnit = unitsArr.find(
+          (u) => u.unit_ref === unit_code || u.id === unit_code
+        );
+
+        if (!matchedUnit) return false;
+
+        const subUnits = Array.isArray(matchedUnit.subUnit)
+          ? matchedUnit.subUnit
+          : [];
+
+        // show only if any subUnit has learnerMap === true
+        const hasMapped = subUnits.some((s: any) => s.learnerMap === true);
+        return hasMapped;
+      });
+
+      if (!filteredAssignments.length) {
+        return res.status(200).json({
+          message: 'No mapped evidence found for this unit',
+          status: true,
+          data: [],
+        });
+      }
+
+      const assignmentIds = filteredAssignments.map((a) => a.assignment_id);
+
+      const reviews = await reviewRepo.find({
+        where: {
+          assignment: { assignment_id: In(assignmentIds) } as any,
+          plan_detail: { id: detailId } as any,
+        },
+        relations: ['assignment', 'signed_off_by'],
+      });
+
+      const reviewMap: Record<number, any> = {};
+
+      for (const r of reviews) {
+        const aid = (r.assignment as any).assignment_id;
+
+        if (!reviewMap[aid]) reviewMap[aid] = {};
+
+        reviewMap[aid][r.role] = {
+          completed: r.completed,
+          comment: r.comment,
+          signed_off_at: r.signed_off_at,
+          signed_off_by: r.signed_off_by
+            ? {
+              user_id: r.signed_off_by.user_id,
+              name:
+                (r.signed_off_by as any).first_name +
+                ' ' +
+                (r.signed_off_by as any).last_name,
+            }
+            : null,
+        };
+      }
+
+      const data = filteredAssignments.map((a) => {
+        const unitsArr = Array.isArray(a.units) ? (a.units as any[]) : [];
+        const matchedUnit = unitsArr.find(
+          (u) => u.unit_ref === unit_code || u.id === unit_code
+        );
+
+        const subUnits = matchedUnit?.subUnit || [];
+        const mappedSubUnits = subUnits.filter((s: any) => s.learnerMap === true);
+
+        return {
+          assignment_id: a.assignment_id,
+          title: a.title || (a.file as any)?.name,
+          description: a.description,
+          file: a.file,
+          grade: a.grade,
+          assessment_method: a.assessment_method,
+          created_at: a.created_at,
+          unit: {
+            unit_ref: matchedUnit?.unit_ref || matchedUnit?.id,
+            title: matchedUnit?.title,
+          },
+          mappedSubUnits: mappedSubUnits.map((s: any) => ({
+            id: s.id,
+            subTitle: s.subTitle,
+          })),
+          reviews: reviewMap[a.assignment_id] || {}, // per-role data
+        };
+      });
+
+      return res.status(200).json({
+        message: 'Evidence list loaded',
+        status: true,
+        data,
+      });
+    } catch (error: any) {
+      return res.status(500).json({
+        message: 'Internal Server Error',
+        status: false,
+        error: error.message,
+      });
+    }
+  }
+
+  // helper to update sampledUnits + status (called from saveReview)
+  public static async updateSamplingProgress(
+    detailId: number,
+    unit_code: string
+  ): Promise<void> {
+    const planDetailRepo = AppDataSource.getRepository(SamplingPlanDetail);
+    const reviewRepo = AppDataSource.getRepository(AssignmentReview);
+
+    const detail = await planDetailRepo.findOne({ where: { id: detailId } });
+    if (!detail) return;
+
+    const sampledUnits = Array.isArray(detail.sampledUnits)
+      ? detail.sampledUnits
+      : [];
+
+    // mark this unit completed if ANY IQA review completed = true
+    const iqaReviews = await reviewRepo.find({
+      where: {
+        plan_detail: { id: detailId } as any,
+        role: ReviewRole.IQA,
+      },
+    });
+
+    const anyCompleted = iqaReviews.some((r) => r.completed === true);
+
+    const updatedSampledUnits = sampledUnits.map((u: any) => {
+      if (u.unit_code === unit_code || u.unit_name === unit_code) {
+        return { ...u, completed: anyCompleted };
+      }
+      return u;
+    });
+
+    detail.sampledUnits = updatedSampledUnits;
+
+    // if all sampled units completed → mark detail as Reviewed + set completedDate
+    const allDone =
+      updatedSampledUnits.length > 0 &&
+      updatedSampledUnits.every((u: any) => u.completed === true);
+
+    if (allDone) {
+      detail.status = 'Reviewed';
+      if (!detail.completedDate) {
+        detail.completedDate = new Date();
+      }
+    }
+
+    await planDetailRepo.save(detail);
+  }
+
+  public async upsertAssignmentReview(req: any, res: Response) {
+    try {
+      const {
+        assignment_id,
+        sampling_plan_detail_id,
+        role, // "IQA" typically for now
+        comment, // optional
+        completed, // optional
+        signed_off, // boolean
+        unit_code // required for progress update
+      } = req.body;
+
+      if (!assignment_id || !sampling_plan_detail_id || !role || !unit_code) {
+        return res.status(400).json({
+          message: "assignment_id, sampling_plan_detail_id, role, and unit_code are required",
+          status: false
+        });
+      }
+
+      const assignmentRepo = AppDataSource.getRepository(Assignment);
+      const detailRepo = AppDataSource.getRepository(SamplingPlanDetail);
+      const reviewRepo = AppDataSource.getRepository(AssignmentReview);
+
+      const assignment = await assignmentRepo.findOne({
+        where: { assignment_id }
+      });
+      const detail = await detailRepo.findOne({
+        where: { id: sampling_plan_detail_id }
+      });
+
+      if (!assignment || !detail) {
+        return res.status(404).json({
+          message: "Assignment or Sample plan detail not found",
+          status: false
+        });
+      }
+
+      // Permission: only IQA/EQA/Admin allowed in Examine Evidence
+      const roles = req.user.roles || [req.user.role];
+      const canReview =
+        roles.includes(UserRole.IQA) ||
+        roles.includes(UserRole.Admin) ||
+        roles.includes("EQA"); // adjust if needed
+
+      if (!canReview) {
+        return res.status(403).json({
+          message: "Not authorized to review evidence",
+          status: false
+        });
+      }
+
+      // check if review exists, else create new entry
+      let review = await reviewRepo.findOne({
+        where: {
+          assignment: { assignment_id } as any,
+          plan_detail: { id: sampling_plan_detail_id } as any,
+          role
+        },
+        relations: ["signed_off_by"]
+      });
+
+      if (!review) {
+        review = reviewRepo.create({
+          assignment,
+          plan_detail: detail,
+          role
+        });
+      }
+
+      if (comment !== undefined) review.comment = comment;
+      if (completed !== undefined) review.completed = completed;
+
+      if (signed_off === true) {
+        review.signed_off_by = { user_id: req.user.user_id } as any;
+        review.signed_off_at = new Date();
+      }
+
+      const savedReview = await reviewRepo.save(review);
+
+      // 🔁 auto update sample plan status + completed units
+      await SamplingPlanController.updateSamplingProgress(sampling_plan_detail_id, unit_code);
+
+      return res.status(200).json({
+        message: "Evidence review saved successfully",
+        status: true,
+        data: savedReview
+      });
+
+    } catch (error: any) {
+      return res.status(500).json({
+        message: "Internal Server Error",
+        status: false,
+        error: error.message
+      });
+    }
+  }
 }
 
 

@@ -3,6 +3,7 @@ import { User } from './User.entity';
 import { Course } from './Course.entity';
 import { AssessmentMethod, AssessmentStatus } from '../util/constants';
 import { AssignmentSignature } from './AssignmentSignature.entity';
+import { AssignmentReview } from './AssignmentReview.entity';
 
 @Entity('assignment')
 export class Assignment {
@@ -66,6 +67,9 @@ export class Assignment {
 
     @OneToMany(() => AssignmentSignature, sig => sig.assignment)
     signatures: AssignmentSignature[];
+
+    @OneToMany(() => AssignmentReview, (r) => r.assignment)
+    reviews: AssignmentReview[];
 
     @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
     created_at: Date;
