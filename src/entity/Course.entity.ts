@@ -14,22 +14,22 @@ export class Course {
     @Column({ type: 'varchar' })
     course_code: string;
 
-    @Column({ type: 'varchar' })
+    @Column({ type: 'varchar', nullable: true })
     level: string;
 
-    @Column({ type: 'varchar' })
+    @Column({ type: 'varchar', nullable: true })
     sector: string;
 
-    @Column({ type: 'varchar' })
+    @Column({ type: 'varchar', nullable: true })
     recommended_minimum_age: string;
 
-    @Column({ type: 'varchar' })
+    @Column({ type: 'varchar', nullable: true })
     total_credits: string;
 
-    @Column({ type: 'varchar' })
+    @Column({ type: 'varchar', nullable: true })
     operational_start_date: string;
 
-    @Column({ type: 'varchar' })
+    @Column({ type: 'varchar', nullable: true })
     guided_learning_hours: string;
 
     @Column({
@@ -86,6 +86,24 @@ export class Course {
 
     @Column({ type: 'boolean', default: false })
     exclude_from_otj: boolean;
+
+    @Column({ type: 'boolean', default: true })
+    active: boolean;
+
+    @Column({ type: 'varchar', nullable: true })
+    duration_value: string;
+
+    @Column({ type: 'varchar', nullable: true })
+    duration_period: string;
+
+    @Column({ type: 'boolean', default: false })
+    included_in_off_the_job: boolean;
+    
+    @Column({ type: 'varchar', nullable: true })
+    assessment_plan_link: string;
+
+    @Column({ type: 'varchar', nullable: true })
+    two_page_standard_link: string;
 
     @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
     created_at: Date;
