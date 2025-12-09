@@ -237,7 +237,7 @@ export class SamplingPlanController {
 
           return {
             unit_code: u.id,
-            unit_name: u.unit_ref || u.title || "Unnamed",
+            unit_name: u.title || "Unnamed",
             status,
             sample_history: sampledEntry
               ? (learnerDetails.map(d => ({
@@ -344,7 +344,7 @@ export class SamplingPlanController {
           plannedDate: item.plannedDate ? new Date(item.plannedDate) : null,
           sampledUnits: (item.units || []).map((u) => ({
             unit_code: u.id,
-            unit_name: u.unit_ref,
+            unit_name: u.title,
             completed: false,
           })),
           assessment_methods: assessment_methods || {},
@@ -700,7 +700,7 @@ export class SamplingPlanController {
         const shuffled = [...course.units].sort(() => 0.5 - Math.random());
         const selectedUnits = shuffled.slice(0, numToSelect).map((u: any) => ({
           unit_code: u.id,       // your course.units[id]
-          unit_name: u.unit_ref, // readable unit reference
+          unit_name: u.title, // readable unit reference
           completed: false
         }));
 
@@ -1024,10 +1024,15 @@ export class SamplingPlanController {
       const reviewRepo = AppDataSource.getRepository(AssignmentReview);
       const pcReviewRepo = AppDataSource.getRepository(AssignmentPCReview);
 
-      const detail = await planDetailRepo.findOne({
-        where: { id: detailId },
-        relations: ['learner', 'samplingPlan', 'samplingPlan.course'],
-      });
+      const detail = await planDetailRepo
+        .createQueryBuilder("spd")
+        .leftJoinAndSelect("spd.learner", "learner")
+        .leftJoinAndSelect("learner.user_id", "learnerUser")
+        .leftJoinAndSelect("spd.samplingPlan", "plan")
+        .leftJoinAndSelect("plan.course", "course")
+        .where("spd.id = :id", { id: detailId })
+        .getOne();
+
 
       if (!detail) {
         return res.status(404).json({
@@ -1037,7 +1042,8 @@ export class SamplingPlanController {
       }
 
       // learnerUserId
-      const learnerUserId = detail.learner.user_id.user_id;
+      const learnerUser = (detail.learner as any).user;
+      const learnerUserId =  detail.learner.user_id?.user_id;
       const courseId = (detail.samplingPlan as any).course.course_id;
 
       // 1. get all assignments for this learner + course
@@ -1056,7 +1062,7 @@ export class SamplingPlanController {
         if (!unitsArr.length) return false;
 
         const matchedUnit = unitsArr.find(
-          (u) => u.unit_ref === unit_code || u.id === unit_code,
+          (u) => u.unit_ref == unit_code || u.id == unit_code,
         );
 
         if (!matchedUnit) return false;
@@ -1117,7 +1123,7 @@ export class SamplingPlanController {
       const pcReviews = await pcReviewRepo.find({
         where: {
           assignment: { assignment_id: In(assignmentIds) } as any,
-          unit_code: unit_code as string,
+          unit_code: unit_code as any,
         },
         relations: ['assignment', 'signed_by'],
       });
@@ -1148,7 +1154,7 @@ export class SamplingPlanController {
       const data = filteredAssignments.map((a) => {
         const unitsArr = Array.isArray(a.units) ? (a.units as any[]) : [];
         const matchedUnit = unitsArr.find(
-          (u) => u.unit_ref === unit_code || u.id === unit_code,
+          (u) => u.unit_ref == unit_code || u.id == unit_code,
         );
 
         const subUnits = matchedUnit?.subUnit || [];
@@ -1163,6 +1169,7 @@ export class SamplingPlanController {
           assessment_method: a.assessment_method,
           created_at: a.created_at,
           unit: {
+            unit_code: matchedUnit?.id,
             unit_ref: matchedUnit?.unit_ref || matchedUnit?.id,
             title: matchedUnit?.title,
           },
@@ -1171,8 +1178,8 @@ export class SamplingPlanController {
             const pcId = String(s.id);
             const review = pcReviewMap[a.assignment_id]?.[pcId] || null;
             return {
-              id: pcId,
-              subTitle: s.subTitle,
+              id: String(s.id),
+              subTitle: s.title,
               learnerMapped: s.learnerMap === true, // orange tick
               review, // for blue tick + who signed
             };
@@ -1345,7 +1352,7 @@ export class SamplingPlanController {
       const {
         assignment_id,
         unit_code,
-        pc_id,       // subTopic id
+        pc_id,       // subUnit id
         signed_off,  // boolean
       } = req.body;
 
