@@ -14,6 +14,7 @@ import { AssignmentReview, ReviewRole } from '../entity/AssignmentReview.entity'
 import { Assignment } from '../entity/Assignment.entity';
 import { UserRole } from "../util/constants";
 import { AssignmentPCReview } from "../entity/AssignmentPCReview.entity";
+import { getUnitCompletionStatus } from '../util/unitCompletion';
 
 const mapSampleTypeToIQAType = (sampleType: string): IQAQuestionType => {
   switch (sampleType) {
@@ -203,25 +204,17 @@ export class SamplingPlanController {
 
         learnerDetails.forEach(detail => {
           detail.sampledUnits?.forEach(unit => {
-            let hasFull = false;
-            let hasPartial = false;
 
             const courseUnit = courseUnits.find((cu: any) => cu.id === unit.unit_code);
-            if (courseUnit?.subUnit?.length) {
-              courseUnit.subUnit.forEach((sub: any) => {
-                const learnerDone = Boolean(sub?.learnerMap);
-                const assessorDone = Boolean(sub?.trainerMap);
+            if (!courseUnit) return;
 
-                if (learnerDone && assessorDone) {
-                  hasFull = true;
-                } else if (learnerDone || assessorDone) {
-                  hasPartial = true;
-                }
-              });
+            const status = getUnitCompletionStatus(courseUnit);
+
+            if (status.fullyCompleted) {
+              fullyCompletedUnits.add(unit.unit_code);
+            } else if (status.partiallyCompleted) {
+              partiallyCompletedUnits.add(unit.unit_code);
             }
-
-            if (hasFull && !hasPartial) fullyCompletedUnits.add(unit.unit_code);
-            else if (hasFull || hasPartial) partiallyCompletedUnits.add(unit.unit_code);
           });
         });
 
@@ -1060,20 +1053,16 @@ export class SamplingPlanController {
         const unitsArr = Array.isArray(a.units) ? (a.units as any[]) : [];
 
         if (!unitsArr.length) return false;
-
+        //console.log(unitsArr)
         const matchedUnit = unitsArr.find(
           (u) => u.unit_ref == unit_code || u.id == unit_code,
         );
 
         if (!matchedUnit) return false;
 
-        const subUnits = Array.isArray(matchedUnit.subUnit)
-          ? matchedUnit.subUnit
-          : [];
-
         // show only if any subUnit has learnerMap === true
-        const hasMapped = subUnits.some((s: any) => s.learnerMap === true);
-        return hasMapped;
+        const status = getUnitCompletionStatus(matchedUnit);
+        return status.learnerDone;
       });
 
       if (!filteredAssignments.length) {

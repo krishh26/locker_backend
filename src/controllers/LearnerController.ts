@@ -15,7 +15,7 @@ import { FundingBand } from "../entity/FundingBand.entity";
 import { LearnerPlan, LearnerPlanType } from "../entity/LearnerPlan.entity";
 import { SessionLearnerAction } from "../entity/SessionLearnerAction.entity";
 import { Course } from "../entity/Course.entity";
-
+import { getUnitCompletionStatus } from '../util/unitCompletion';
 
 class LearnerController {
 
@@ -469,45 +469,12 @@ class LearnerController {
                         if (unitfound !== -1) {
                             userCourse.course.units[unitfound] = unit;
                         }
-                        
-                        // Track unit completion status
-                        let unitHasPartialSubUnits = false;
-                        let unitHasCompletedSubUnits = false;
-                        let unitHasStartedSubUnits = false;
-                        
-                        unit.subUnit?.forEach(subunit => {
-                            if (fullyCompleted.has(subunit.id)) {
-                                return;
-                            }
-                            else if (partiallyCompleted.has(subunit)) {
-                                if (subunit?.learnerMap && subunit?.trainerMap) {
-                                    fullyCompleted.add(subunit.id)
-                                    partiallyCompleted.delete(subunit.id)
-                                }
-                            }
-                            else if (subunit?.learnerMap && subunit?.trainerMap) {
-                                fullyCompleted.add(subunit.id)
-                            }
-                            else if (subunit?.learnerMap || subunit?.trainerMap) {
-                                partiallyCompleted.add(subunit.id)
-                            }
-                            
-                            // Check subunit status for unit completion tracking
-                            if (subunit?.learnerMap && subunit?.trainerMap) {
-                                unitHasCompletedSubUnits = true;
-                            } else if (subunit?.learnerMap || subunit?.trainerMap) {
-                                unitHasPartialSubUnits = true;
-                            } else {
-                                unitHasStartedSubUnits = true;
-                            }
-                        });
-                        
-                        // Determine unit completion status
-                        if (unitHasCompletedSubUnits && !unitHasPartialSubUnits && !unitHasStartedSubUnits) {
-                            // All subunits are completed
+
+                        const status = getUnitCompletionStatus(unit);
+
+                        if (status.fullyCompleted) {
                             fullyCompletedUnits.add(unit.id);
-                        } else if (unitHasCompletedSubUnits || unitHasPartialSubUnits || unitHasStartedSubUnits) {
-                            // Some subunits are started/completed
+                        } else if (status.partiallyCompleted) {
                             partiallyCompletedUnits.add(unit.id);
                         }
                     });
@@ -1850,44 +1817,12 @@ const getCourseData = async (courses: any[], user_id: string) => {
 
             courseAssignments?.forEach((assignment) => {
                 assignment.units?.forEach(unit => {
-                    // Track unit completion status
-                    let unitHasPartialSubUnits = false;
-                    let unitHasCompletedSubUnits = false;
-                    let unitHasStartedSubUnits = false;
                     
-                    unit.subUnit?.forEach(subunit => {
-                        if (fullyCompleted.has(subunit.id)) {
-                            return;
-                        }
-                        else if (partiallyCompleted.has(subunit)) {
-                            if (subunit?.learnerMap && subunit?.trainerMap) {
-                                fullyCompleted.add(subunit.id)
-                                partiallyCompleted.delete(subunit.id)
-                            }
-                        }
-                        else if (subunit?.learnerMap && subunit?.trainerMap) {
-                            fullyCompleted.add(subunit.id)
-                        }
-                        else if (subunit?.learnerMap || subunit?.trainerMap) {
-                            partiallyCompleted.add(subunit.id)
-                        }
-                        
-                        // Check subunit status for unit completion tracking
-                        if (subunit?.learnerMap && subunit?.trainerMap) {
-                            unitHasCompletedSubUnits = true;
-                        } else if (subunit?.learnerMap || subunit?.trainerMap) {
-                            unitHasPartialSubUnits = true;
-                        } else {
-                            unitHasStartedSubUnits = true;
-                        }
-                    });
-                    
-                    // Determine unit completion status
-                    if (unitHasCompletedSubUnits && !unitHasPartialSubUnits && !unitHasStartedSubUnits) {
-                        // All subunits are completed
+                    const status = getUnitCompletionStatus(unit);
+
+                    if (status.fullyCompleted) {
                         fullyCompletedUnits.add(unit.id);
-                    } else if (unitHasCompletedSubUnits || unitHasPartialSubUnits || unitHasStartedSubUnits) {
-                        // Some subunits are started/completed
+                    } else if (status.partiallyCompleted) {
                         partiallyCompletedUnits.add(unit.id);
                     }
                 });
