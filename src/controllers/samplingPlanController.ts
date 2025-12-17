@@ -1177,6 +1177,7 @@ export class SamplingPlanController {
             code: matchedUnit?.code,
             unit_ref: matchedUnit?.unit_ref || matchedUnit?.id,
             title: matchedUnit?.title,
+            type: matchedUnit?.type || ""
           },
           // for PC row (orange/blue ticks)
           mappedSubUnits: mappedSubUnits.map((s: any) => {
