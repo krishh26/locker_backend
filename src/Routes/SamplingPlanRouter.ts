@@ -3,6 +3,7 @@ import { authorizeRoles } from '../middleware/verifyToken';
 import SamplingPlanController from '../controllers/samplingPlanController';
 import { paginationMiddleware } from '../middleware/pagination';
 import { UserRole } from '../util/constants';
+import { singleFileUpload } from '../util/multer';
 
 const SamplingPlanRoutes = express.Router();
 
@@ -43,7 +44,8 @@ SamplingPlanRoutes.put("/learner-signoff", SamplingPlanController.signOffLearner
 SamplingPlanRoutes.patch('/deatil/:id', authorizeRoles(UserRole.Admin, UserRole.IQA), SamplingPlanController.updateSamplingPlanDetail );
 
 SamplingPlanRoutes.get('/:detailId/evidence', authorizeRoles(UserRole.Admin, UserRole.IQA), SamplingPlanController.getEvidenceForSamplePlanDetail);
-SamplingPlanRoutes.post("/assignment-review", authorizeRoles(UserRole.Admin, UserRole.IQA), SamplingPlanController.upsertAssignmentReview);
+SamplingPlanRoutes.post("/assignment-review", singleFileUpload('file'), authorizeRoles(UserRole.Admin, UserRole.IQA), SamplingPlanController.upsertAssignmentReview);
 SamplingPlanRoutes.post("/assignment-pc-review", authorizeRoles(UserRole.Admin, UserRole.IQA), SamplingPlanController.upsertAssignmentPCReview);
 SamplingPlanRoutes.get("/:detailId/unit-mapping", authorizeRoles(), SamplingPlanController.getUnitMappingByPlanDetail);
+SamplingPlanRoutes.delete('/assignment-review/file', authorizeRoles(), SamplingPlanController.deleteAssignmentReviewFile);
 export default SamplingPlanRoutes;
