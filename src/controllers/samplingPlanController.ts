@@ -15,6 +15,7 @@ import { Assignment } from '../entity/Assignment.entity';
 import { UserRole } from "../util/constants";
 import { AssignmentPCReview } from "../entity/AssignmentPCReview.entity";
 import { getUnitCompletionStatus } from '../util/unitCompletion';
+import {  deleteFromS3, uploadToS3 } from '../util/aws';
 
 const mapSampleTypeToIQAType = (sampleType: string): IQAQuestionType => {
   switch (sampleType) {
@@ -1094,8 +1095,10 @@ export class SamplingPlanController {
         if (!reviewMap[aid]) reviewMap[aid] = {};
 
         reviewMap[aid][r.role] = {
+          id: r.id,
           completed: r.completed,
           comment: r.comment,
+          file: r.file,
           signed_off_at: r.signed_off_at,
           signed_off_by: r.signed_off_by
             ? {
@@ -1325,9 +1328,25 @@ export class SamplingPlanController {
       if (comment !== undefined) review.comment = comment;
       if (completed !== undefined) review.completed = completed;
 
-      if (signed_off === true) {
-        review.signed_off_by = { user_id: req.user.user_id } as any;
-        review.signed_off_at = new Date();
+      if (signed_off !== undefined) {
+        if (signed_off === true) {
+          review.signed_off_by = { user_id: req.user.user_id } as any;
+          review.signed_off_at = new Date();
+        } else {
+          review.signed_off_by = null;
+          review.signed_off_at = null;
+        }
+      }
+
+      if (req.file) {
+        const uploaded = await uploadToS3(req.file, "assignment-review");
+
+        review.file = {
+          name: req.file.originalname,
+          size: req.file.size,
+          url: uploaded.url,
+          key: uploaded.key,
+        };
       }
 
       const savedReview = await reviewRepo.save(review);
@@ -1599,6 +1618,7 @@ export class SamplingPlanController {
             ? unit.subUnit.map((su: any) => ({
               id: su.id,
               title: su.title,
+              code: su.code,
             learnerMapped: false,
             trainerMapped: false,
           }))
@@ -1656,6 +1676,58 @@ export class SamplingPlanController {
       return res.status(500).json({
         status: false,
         message: 'Internal Server Error',
+        error: error.message,
+      });
+    }
+  }
+
+  public async deleteAssignmentReviewFile(req: any, res: Response) {
+    try {
+      const { assignment_review_id } = req.body;
+
+      if (!assignment_review_id) {
+        return res.status(400).json({
+          message: "assignment_review_id is required",
+          status: false,
+        });
+      }
+
+      const reviewRepo = AppDataSource.getRepository(AssignmentReview);
+
+      const review = await reviewRepo.findOne({
+        where: { id: assignment_review_id },
+      });
+
+      if (!review) {
+        return res.status(404).json({
+          message: "Assignment review not found",
+          status: false,
+        });
+      }
+
+      if (!review.file || !review.file.key) {
+        return res.status(400).json({
+          message: "No file attached to this review",
+          status: false,
+        });
+      }
+
+      // delete from S3
+      await deleteFromS3(review.file);
+
+      // remove file reference from DB
+      review.file = null;
+      await reviewRepo.save(review);
+
+      return res.status(200).json({
+        message: "File deleted successfully",
+        status: true,
+      });
+
+    } catch (error: any) {
+      return res.status(500).json({
+        message: "Internal Server Error",
+        status: false,
         error: error.message,
       });
     }

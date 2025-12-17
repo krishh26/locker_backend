@@ -59,7 +59,12 @@ export class AssignmentReview {
 
   // if you later attach file to comment
   @Column({ type: 'json', nullable: true })
-  file: object;
+  file?: {
+    name: string;
+    size: number;
+    url: string;
+    key?: string;
+  };
 
   @CreateDateColumn()
   created_at: Date;
