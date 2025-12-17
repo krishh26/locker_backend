@@ -232,6 +232,7 @@ export class SamplingPlanController {
             unit_code: u.id,
             unit_name: u.title || "Unnamed",
             status,
+            type: u.type ? u.type : "",
             sample_history: sampledEntry
               ? (learnerDetails.map(d => ({
                 detail_id: d.id,
@@ -1146,8 +1147,21 @@ export class SamplingPlanController {
           (u) => u.unit_ref == unit_code || u.id == unit_code,
         );
 
-        const subUnits = matchedUnit?.subUnit || [];
-        const mappedSubUnits = subUnits.filter((s: any) => s.learnerMap === true);
+        const subUnits = Array.isArray(matchedUnit?.subUnit) ? matchedUnit.subUnit : [];
+        const mappedSubUnits = subUnits.length
+          ? subUnits
+            .map((s: any) => ({
+              id: String(s.id),
+              subTitle: s.title,
+              learnerMapped: s.learnerMap === true,
+              trainerMapped: s.trainerMap === true,
+            }))
+          : [{
+            id: String(matchedUnit.id),
+            subTitle: matchedUnit.title,
+            learnerMapped: matchedUnit.learnerMap === true,
+            trainerMapped: matchedUnit.trainerMap === true,
+          }];
 
         return {
           assignment_id: a.assignment_id,
@@ -1157,20 +1171,21 @@ export class SamplingPlanController {
           grade: a.grade,
           assessment_method: a.assessment_method,
           created_at: a.created_at,
+          course_type: (detail.samplingPlan as any).course?.course_core_type,
           unit: {
             unit_code: matchedUnit?.id,
+            code: matchedUnit?.code,
             unit_ref: matchedUnit?.unit_ref || matchedUnit?.id,
             title: matchedUnit?.title,
+            type: matchedUnit?.type || ""
           },
           // for PC row (orange/blue ticks)
           mappedSubUnits: mappedSubUnits.map((s: any) => {
-            const pcId = String(s.id);
+            const pcId = s.id;
             const review = pcReviewMap[a.assignment_id]?.[pcId] || null;
             return {
-              id: String(s.id),
-              subTitle: s.title,
-              learnerMapped: s.learnerMap === true, // orange tick
-              review, // for blue tick + who signed
+              ...s,
+              review,
             };
           }),
           // for bottom sign table
@@ -1513,6 +1528,134 @@ export class SamplingPlanController {
       return res.status(500).json({
         message: 'Internal Server Error',
         status: false,
+        error: error.message,
+      });
+    }
+  }
+
+  public async getUnitMappingByPlanDetail(req: Request, res: Response) {
+    try {
+      const detailId = Number(req.params.detailId);
+      const { type } = req.query as { type?: string };
+
+      if (!detailId) {
+        return res.status(400).json({
+          status: false,
+          message: 'detailId is required',
+        });
+      }
+
+      const planDetailRepo = AppDataSource.getRepository(SamplingPlanDetail);
+      const assignmentRepo = AppDataSource.getRepository(Assignment);
+
+      // 1️⃣ Fetch plan detail + course + learner
+      const detail = await planDetailRepo
+        .createQueryBuilder("spd")
+        .leftJoinAndSelect("spd.learner", "learner")
+        .leftJoinAndSelect("learner.user_id", "learnerUser")
+        .leftJoinAndSelect("spd.samplingPlan", "plan")
+        .leftJoinAndSelect("plan.course", "course")
+        .where("spd.id = :id", { id: detailId })
+        .getOne();
+
+
+      if (!detail) {
+        return res.status(404).json({
+          status: false,
+          message: 'Sample plan detail not found',
+        });
+      }
+
+      const learnerUserId = detail.learner?.user_id?.user_id;
+      const courseId = (detail.samplingPlan as any)?.course?.course_id;
+      const courseUnits = (detail.samplingPlan as any)?.course?.units || [];
+
+      if (!learnerUserId || !courseId) {
+        return res.status(200).json({
+          status: true,
+          data: [],
+        });
+      }
+
+      // 2️⃣ Fetch all assignments for learner + course
+      const assignments = await assignmentRepo.find({
+        where: {
+          user: { user_id: learnerUserId } as any,
+          course_id: courseId,
+        },
+      });
+
+      // 3️⃣ Build unit → subUnit mapping
+      const result = courseUnits
+        .filter((unit: any) => {
+          if (!type) return true;
+          return unit.type === type;
+        }).map((unit: any) => {
+          let learnerMapped = false;
+          let trainerMapped = false;
+          console.log(unit)
+          // clone subUnits from course structure
+          let subUnits = Array.isArray(unit.subUnit)
+            ? unit.subUnit.map((su: any) => ({
+              id: su.id,
+              title: su.title,
+            learnerMapped: false,
+            trainerMapped: false,
+          }))
+          : [];
+        // console.log('Assignments count:', assignments.length);
+        // console.log('Course units:', courseUnits.length);
+        // console.log('Sample assignment units:', assignments[0]?.units);
+
+        assignments.forEach((assignment) => {
+          Array.isArray(assignment.units) && assignment.units.forEach((aUnit: any) => {
+            if (aUnit.id !== unit.id) return;
+
+            // 🔹 unit-only course
+            if (!Array.isArray(aUnit.subUnit) || !aUnit.subUnit.length) {
+              if (aUnit.learnerMap) learnerMapped = true;
+              if (aUnit.trainerMap) trainerMapped = true;
+            }
+
+            // 🔹 subUnit-based course
+            if (Array.isArray(aUnit.subUnit)) {
+              aUnit.subUnit.forEach((asu: any) => {
+                const matchedSub = subUnits.find(s => s.id === asu.id);
+                if (!matchedSub) return;
+
+                if (asu.learnerMap) {
+                  matchedSub.learnerMapped = true;
+                  learnerMapped = true;
+                }
+                if (asu.trainerMap) {
+                  matchedSub.trainerMapped = true;
+                  trainerMapped = true;
+                }
+              });
+            }
+          });
+        });
+
+        return {
+          unit_code: unit.id,
+          code: unit.code,
+          unit_title: unit.title,
+          type: unit.type,
+          learnerMapped,
+          trainerMapped,
+          subUnits,
+        };
+      });
+
+      return res.status(200).json({
+        status: true,
+        data: result,
+      });
+
+    } catch (error: any) {
+      return res.status(500).json({
+        status: false,
+        message: 'Internal Server Error',
         error: error.message,
       });
     }

@@ -45,5 +45,5 @@ SamplingPlanRoutes.patch('/deatil/:id', authorizeRoles(UserRole.Admin, UserRole.
 SamplingPlanRoutes.get('/:detailId/evidence', authorizeRoles(UserRole.Admin, UserRole.IQA), SamplingPlanController.getEvidenceForSamplePlanDetail);
 SamplingPlanRoutes.post("/assignment-review", authorizeRoles(UserRole.Admin, UserRole.IQA), SamplingPlanController.upsertAssignmentReview);
 SamplingPlanRoutes.post("/assignment-pc-review", authorizeRoles(UserRole.Admin, UserRole.IQA), SamplingPlanController.upsertAssignmentPCReview);
-
+SamplingPlanRoutes.get("/:detailId/unit-mapping", authorizeRoles(), SamplingPlanController.getUnitMappingByPlanDetail);
 export default SamplingPlanRoutes;
