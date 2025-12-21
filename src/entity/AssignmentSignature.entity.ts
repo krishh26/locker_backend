@@ -1,15 +1,16 @@
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 import { Assignment } from './Assignment.entity';
 import { User } from './User.entity';
+import { AssignmentMapping } from './AssignmentMapping.entity';
 
 @Entity('assignment_signature')
 export class AssignmentSignature {
     @PrimaryGeneratedColumn()
     id: number;
 
-    @ManyToOne(() => Assignment)
-    @JoinColumn({ name: 'assignment_id', referencedColumnName: 'assignment_id' })
-    assignment: Assignment;
+    @ManyToOne(() => AssignmentMapping)
+    @JoinColumn({ name: 'mapping_id' })
+    mapping: AssignmentMapping;
 
     // Role label to sign as (e.g., Primary Trainer, Secondary Trainer, Learner, Employer, IQA)
     @Column({ type: 'varchar' })

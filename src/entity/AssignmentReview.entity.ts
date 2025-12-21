@@ -1,16 +1,8 @@
-// src/entity/AssignmentReview.entity.ts
-import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  ManyToOne,
-  JoinColumn,
-  CreateDateColumn,
-  UpdateDateColumn,
-} from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 import { Assignment } from './Assignment.entity';
 import { SamplingPlanDetail } from './SamplingPlanDetail.entity';
 import { User } from './User.entity';
+import { AssignmentMapping } from './AssignmentMapping.entity';
 
 export enum ReviewRole {
   Learner = 'Learner',
@@ -26,9 +18,9 @@ export class AssignmentReview {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @ManyToOne(() => Assignment, (a) => a.reviews, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'assignment_id' })
-  assignment: Assignment;
+  @ManyToOne(() => AssignmentMapping)
+  @JoinColumn({ name: 'mapping_id' })
+  mapping: AssignmentMapping;
 
   @ManyToOne(() => SamplingPlanDetail, (d) => d.assignmentReviews, {
     onDelete: 'CASCADE',

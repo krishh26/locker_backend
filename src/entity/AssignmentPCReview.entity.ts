@@ -1,23 +1,16 @@
-import {
-  Entity,
-  PrimaryGeneratedColumn,
-  ManyToOne,
-  JoinColumn,
-  Column,
-  CreateDateColumn,
-  UpdateDateColumn,
-} from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, ManyToOne, JoinColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 import { Assignment } from './Assignment.entity';
 import { User } from './User.entity';
+import { AssignmentMapping } from './AssignmentMapping.entity';
 
 @Entity('assignment_pc_review')
 export class AssignmentPCReview {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @ManyToOne(() => Assignment, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'assignment_id' })
-  assignment: Assignment;
+  @ManyToOne(() => AssignmentMapping)
+  @JoinColumn({ name: 'mapping_id' })
+  mapping: AssignmentMapping;
 
   // Unit code / ref (e.g. "Y/617/2029")
   @Column({ type: 'varchar' })
