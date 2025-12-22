@@ -8,9 +8,9 @@ import { UserRole } from "../util/constants";
 import { AssignmentSignature } from "../entity/AssignmentSignature.entity";
 import { Learner } from "../entity/Learner.entity";
 import { User } from "../entity/User.entity";
-
+import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
+import { AssessmentStatus } from "../util/constants";
 class AssignmentController {
-
     /**
      * Check if user is authorized to access an assignment
      * Users can access assignments if:
@@ -56,11 +56,12 @@ class AssignmentController {
         try {
             const { assessor_id, learner_name, search, page = 1, limit = 10 } = req.query as any;
 
-            const qb = AppDataSource.getRepository(Assignment)
-                .createQueryBuilder('a')
-                .leftJoinAndSelect('a.course_id', 'course')
-                .leftJoinAndSelect('a.user', 'learnerUser') // learner
-                .leftJoinAndSelect('a.signatures', 'sig')
+            const qb = AppDataSource.getRepository(AssignmentMapping)
+                .createQueryBuilder('am')
+                .leftJoinAndSelect('am.assignment', 'a')
+                .leftJoinAndSelect('a.user', 'learnerUser')
+                .leftJoinAndSelect('am.course', 'course')
+                .leftJoinAndSelect('am.signatures', 'sig')
                 .leftJoinAndSelect('sig.user', 'sigUser')
                 .leftJoinAndSelect('sig.requested_by', 'requestedBy')
                 .leftJoin(UserCourse, 'uc', 'uc.learner_id = learnerUser.user_id')
@@ -69,29 +70,38 @@ class AssignmentController {
                 .where('sig.is_requested = true');
 
             // Filters
-            if (assessor_id) qb.andWhere('trainer.user_id = :assessor_id', { assessor_id });
+            if (assessor_id) {
+                qb.andWhere('trainer.user_id = :assessor_id', { assessor_id });
+            }
+
             if (learner_name) {
                 qb.andWhere(
                     "LOWER(learnerUser.first_name || ' ' || learnerUser.last_name) LIKE :learner_name",
                     { learner_name: `%${learner_name.toLowerCase()}%` }
                 );
             }
+
             if (search) {
-                qb.andWhere("LOWER(a.file->>'name') LIKE :search", { search: `%${search.toLowerCase()}%` });
+                qb.andWhere(
+                    "LOWER(a.file->>'name') LIKE :search",
+                    { search: `%${search.toLowerCase()}%` }
+                );
             }
 
-            //Pagination
+            // Pagination
             const take = Number(limit);
             const skip = (Number(page) - 1) * take;
 
             qb.skip(skip).take(take);
             qb.orderBy('a.created_at', 'DESC');
 
-            const [assignments, total] = await qb.getManyAndCount();
+            const [rows, total] = await qb.getManyAndCount();
 
-            const result = assignments.map((a: any) => {
+            const result = rows.map((am: any) => {
+                const a = am.assignment;
+
                 const roleSig: any = {};
-                (a.signatures || []).forEach((s: any) => {
+                (am.signatures || []).forEach((s: any) => {
                     roleSig[s.role] = {
                         id: s.id,
                         user_id: s.user?.user_id || null,
@@ -108,19 +118,24 @@ class AssignmentController {
 
                 return {
                     assignment_id: a.assignment_id,
+                    mapping_id: am.mapping_id,
                     learner: {
                         id: a.user?.user_id || null,
                         name: a.user ? `${a.user.first_name} ${a.user.last_name}`.trim() : null,
                     },
                     course: {
-                        id: a.course_id?.course_id || null,
-                        name: a.course_id?.course_name || null,
-                        code: a.course_id?.course_code || null,
+                        id: am.course?.course_id || null,
+                        name: am.course?.course_name || null,
+                        code: am.course?.course_code || null,
                     },
-                    employer_name: a?.employer ? `${a.employer.first_name} ${a.employer.last_name}`.trim() : null,
-                    trainer_name: a?.trainer ? `${a.trainer.first_name} ${a.trainer.last_name}`.trim() : null,
+                    employer_name: a.employer
+                        ? `${a.employer.first_name} ${a.employer.last_name}`.trim()
+                        : null,
+                    trainer_name: a.trainer
+                        ? `${a.trainer.first_name} ${a.trainer.last_name}`.trim()
+                        : null,
                     file_type: 'Evidence',
-                    file_name: (a.file as any)?.name || null,
+                    file_name: a.file?.name || null,
                     file_description: a.description || null,
                     uploaded_at: a.created_at,
                     signatures: {
@@ -137,9 +152,10 @@ class AssignmentController {
                 status: true,
                 page: Number(page),
                 limit: Number(limit),
-                total,              
+                total,
                 data: result,
             });
+
         } catch (error: any) {
             return res.status(500).json({
                 message: 'Internal Server Error',
@@ -174,7 +190,8 @@ class AssignmentController {
                 title,
                 description,
                 declaration,
-                evidence_time_log: evidence_time_log || false
+                evidence_time_log: evidence_time_log || false,
+                status: AssessmentStatus.NotStarted
             })
 
             const savedAssignment = await assignmentRepository.save(assignment);
@@ -196,11 +213,41 @@ class AssignmentController {
 
     public async updateAssignment(req: CustomRequest, res: Response) {
         try {
-            const AssignmentId = parseInt(req.params.id);
-            const { file, declaration, description, trainer_feedback, external_feedback, learner_comments, points_for_improvement, assessment_method, session, grade, title, units, status, evidence_time_log, user_id } = req.body;
-            if (!file && !declaration && !description && !trainer_feedback && !external_feedback && !learner_comments && !points_for_improvement && !assessment_method && !session && !grade && !title && !units && !status && evidence_time_log === undefined) {
+            const AssignmentId = Number(req.params.id);
+            const {
+                file,
+                declaration,
+                description,
+                trainer_feedback,
+                external_feedback,
+                learner_comments,
+                points_for_improvement,
+                assessment_method,
+                session,
+                grade,
+                title,
+                status,
+                evidence_time_log,
+                user_id,
+            } = req.body;
+
+            if (
+                !file &&
+                declaration === undefined &&
+                !description &&
+                !trainer_feedback &&
+                !external_feedback &&
+                !learner_comments &&
+                !points_for_improvement &&
+                !assessment_method &&
+                !session &&
+                !grade &&
+                !title &&
+                !status &&
+                evidence_time_log === undefined
+            ) {
                 return res.status(400).json({
-                    message: 'At least one field required',
+                    message: "At least one field required",
                     status: false,
                 });
             }
@@ -209,50 +256,68 @@ class AssignmentController {
 
             const assignment = await assignmentRepository.findOne({
                 where: { assignment_id: AssignmentId },
-                relations: ['course_id', 'user']
+                relations: ["user"], // course removed
             });
 
             if (!assignment) {
                 return res.status(404).json({
-                    message: 'assignment not found',
+                    message: "Assignment not found",
                     status: false,
                 });
             }
 
-            // Check authorization
+            // Authorization (unchanged)
             const userRoles = req.user.roles || [req.user.role];
-            const isAuthorized = await AssignmentController.isUserAuthorizedForAssignment(
-                req.user.user_id,
-                userRoles,
-                assignment
-            );
+            const isAuthorized =
+                await AssignmentController.isUserAuthorizedForAssignment(
+                    req.user.user_id,
+                    userRoles,
+                    assignment
+                );
 
             if (!isAuthorized) {
                 return res.status(403).json({
                     message: "You are not authorized to update this assignment",
-                    status: false
+                    status: false,
                 });
             }
 
-            let userId = user_id ? user_id : req.user.user_id;
-            assignment.user = userId;
-
+            // ✅ Update evidence-level fields
+            assignment.user = user_id ? user_id : assignment.user;
             assignment.file = file || assignment.file;
-            assignment.declaration = declaration || assignment.declaration;
+            assignment.declaration =
+                declaration !== undefined ? declaration : assignment.declaration;
             assignment.description = description || assignment.description;
             assignment.title = title || assignment.title;
-            assignment.evidence_time_log = evidence_time_log !== undefined ? evidence_time_log : assignment.evidence_time_log;
+            assignment.evidence_time_log =
+                evidence_time_log !== undefined
+                    ? evidence_time_log
+                    : assignment.evidence_time_log;
+
+            assignment.trainer_feedback =
+                trainer_feedback ?? assignment.trainer_feedback;
+            assignment.external_feedback =
+                external_feedback ?? assignment.external_feedback;
+            assignment.learner_comments =
+                learner_comments ?? assignment.learner_comments;
+            assignment.points_for_improvement =
+                points_for_improvement ?? assignment.points_for_improvement;
+            assignment.assessment_method =
+                assessment_method ?? assignment.assessment_method;
+            assignment.session = session ?? assignment.session;
+            assignment.grade = grade ?? assignment.grade;
+            assignment.status = status ?? assignment.status;
 
             const updatedAssignment = await assignmentRepository.save(assignment);
 
             return res.status(200).json({
-                message: 'Assignment updated successfully',
+                message: "Assignment updated successfully",
                 status: true,
                 data: updatedAssignment,
             });
-        } catch (error) {
+        } catch (error: any) {
             return res.status(500).json({
-                message: 'Internal Server Error',
+                message: "Internal Server Error",
                 status: false,
                 error: error.message,
             });
@@ -262,66 +327,101 @@ class AssignmentController {
     public async getAssignmentBycourse(req: CustomRequest, res: Response) {
         try {
             const { user_id, course_id, search } = req.query as any;
-            const assignmentRepository = AppDataSource.getRepository(Assignment);
-            const userCourseRepository = AppDataSource.getRepository(UserCourse);
 
-            // Check if the requesting user is authorized to view assignments for this course
+            const assignmentRepo = AppDataSource.getRepository(Assignment);
+            const mappingRepo = AppDataSource.getRepository(AssignmentMapping);
+            const userCourseRepo = AppDataSource.getRepository(UserCourse);
+
             const requestingUserId = req.user.user_id;
             const requestingUserRoles = req.user.roles || [req.user.role];
 
+            // 🔐 Authorization (UNCHANGED)
             if (course_id && !requestingUserRoles.includes(UserRole.Admin)) {
-            const userCourseInvolvement = await userCourseRepository.createQueryBuilder('user_course')
-                .leftJoin('user_course.learner_id', 'learner')
-                .leftJoin('learner.user_id', 'learner_user')
-                .leftJoin('user_course.trainer_id', 'trainer')
-                .leftJoin('user_course.IQA_id', 'IQA')
-                .leftJoin('user_course.LIQA_id', 'LIQA')
-                .leftJoin('user_course.EQA_id', 'EQA')
-                .leftJoin('user_course.employer_id', 'employer')
-                .where('(learner_user.user_id = :requestingUserId OR trainer.user_id = :requestingUserId OR IQA.user_id = :requestingUserId OR LIQA.user_id = :requestingUserId OR EQA.user_id = :requestingUserId OR employer.user_id = :requestingUserId)', { requestingUserId })
-                .getOne();
+                const userCourseInvolvement = await userCourseRepo
+                    .createQueryBuilder("user_course")
+                    .leftJoin("user_course.learner_id", "learner")
+                    .leftJoin("learner.user_id", "learner_user")
+                    .leftJoin("user_course.trainer_id", "trainer")
+                    .leftJoin("user_course.IQA_id", "IQA")
+                    .leftJoin("user_course.LIQA_id", "LIQA")
+                    .leftJoin("user_course.EQA_id", "EQA")
+                    .leftJoin("user_course.employer_id", "employer")
+                    .where(
+                        `(learner_user.user_id = :uid 
+            OR trainer.user_id = :uid 
+            OR IQA.user_id = :uid 
+            OR LIQA.user_id = :uid 
+            OR EQA.user_id = :uid 
+            OR employer.user_id = :uid)`,
+                        { uid: requestingUserId }
+                    )
+                    .getOne();
 
-            if (!userCourseInvolvement) {
-                return res.status(403).json({
-                    message: "You are not authorized to view assignments for this course",
-                    status: false
+                if (!userCourseInvolvement) {
+                    return res.status(403).json({
+                        status: false,
+                        message: "You are not authorized to view assignments for this course",
+                    });
+                }
+            }
+
+            // 🔹 Step 1: get assignment_ids from mapping
+            const mappings = await mappingRepo.find({
+                where: {
+                    course: { course_id: Number(course_id) } as any,
+                },
+                relations: ["assignment"],
+            });
+
+            const assignmentIds = mappings.map(
+                (m) => m.assignment.assignment_id
+            );
+
+            if (!assignmentIds.length) {
+                return res.status(200).json({
+                    status: true,
+                    data: [],
                 });
             }
-        }
 
-            const qb = assignmentRepository
+            // 🔹 Step 2: fetch assignments (evidence)
+            const qb = assignmentRepo
                 .createQueryBuilder("assignment")
-                .leftJoinAndSelect("assignment.course_id", "course")
                 .leftJoinAndSelect("assignment.user", "user")
-                .where("user.user_id = :user_id", { user_id })
+                .where("assignment.assignment_id IN (:...ids)", {
+                    ids: assignmentIds,
+                })
+                .andWhere("user.user_id = :user_id", { user_id })
                 .orderBy("assignment.created_at", "DESC")
                 .skip(req.pagination.skip)
                 .take(Number(req.pagination.limit));
 
             if (search) {
-                qb.andWhere("(assignment.title ILIKE :search OR assignment.description ILIKE :search)", { search: `%${search}%` })
+                qb.andWhere(
+                    "(assignment.title ILIKE :search OR assignment.description ILIKE :search)",
+                    { search: `%${search}%` }
+                );
             }
 
             const [assignments, count] = await qb.getManyAndCount();
 
-
             return res.status(200).json({
-                message: 'Assignment retrieved successfully',
                 status: true,
+                message: "Assignment retrieved successfully",
                 data: assignments,
                 ...(req.query.meta === "true" && {
                     meta_data: {
                         page: req.pagination.page,
                         items: count,
                         page_size: req.pagination.limit,
-                        pages: Math.ceil(count / req.pagination.limit)
-                    }
-                })
+                        pages: Math.ceil(count / req.pagination.limit),
+                    },
+                }),
             });
-        } catch (error) {
+        } catch (error: any) {
             return res.status(500).json({
-                message: 'Internal Server Error',
                 status: false,
+                message: "Internal Server Error",
                 error: error.message,
             });
         }
@@ -334,7 +434,7 @@ class AssignmentController {
             const assignmentSignatureRepository = AppDataSource.getRepository(AssignmentSignature);
             const assignment = await assignmentRepository.findOne({
                 where: { assignment_id: assignmentId },
-                relations: ['course_id', 'user']
+                relations: ['user']
             });
 
             if (!assignment) {
@@ -369,54 +469,71 @@ class AssignmentController {
     // Request a signature for an assignment for a role/user
     public async requestSignature(req: CustomRequest, res: Response) {
         try {
-            const { mapping_id, role, user_id, is_requested } = req.body;
+            const { mapping_id, roles, user_id, is_requested } = req.body;
+
+            if (!Array.isArray(roles) || roles.length === 0) {
+                return res.status(400).json({
+                    status: false,
+                    message: "roles array is required",
+                });
+            }
 
             if (is_requested === undefined) {
                 return res.status(400).json({
                     status: false,
-                    message: "is_requested is required"
+                    message: "is_requested is required",
                 });
             }
 
             const repo = AppDataSource.getRepository(AssignmentSignature);
 
-            let sig = await repo.findOne({
-                where: {
-                    mapping: { mapping_id } as any,
-                    role
-                }
-            });
+            const results = [];
 
-            // create row if not exists
-            if (!sig) {
-                sig = repo.create({
-                    mapping: { mapping_id } as any,
-                    role
+            for (const role of roles) {
+                let sig = await repo.findOne({
+                    where: {
+                        mapping: { mapping_id } as any,
+                        role,
+                    },
                 });
+
+                // create row if not exists
+                if (!sig) {
+                    sig = repo.create({
+                        mapping: { mapping_id } as any,
+                        role,
+                    });
+                }
+
+                sig.is_requested = is_requested;
+
+                if (is_requested) {
+                    sig.requested_at = new Date();
+                    sig.requested_by = { user_id: req.user.user_id } as any;
+                    if (user_id) sig.user = { user_id } as any;
+                } else {
+                    // cancel request
+                    sig.requested_at = null;
+                    sig.requested_by = null;
+                }
+
+                const saved = await repo.save(sig);
+                results.push(saved);
             }
-
-            sig.is_requested = is_requested;
-
-            if (is_requested) {
-                sig.requested_at = new Date();
-                sig.requested_by = { user_id: req.user.user_id } as any;
-                if (user_id) sig.user = { user_id } as any;
-            } else {
-                // cancel request
-                sig.requested_at = null;
-                sig.requested_by = null;
-            }
-
-
-            let result = await repo.save(sig);
 
             return res.status(200).json({
-                message: is_requested ? "Signature requested" : "Signature request cancelled",
+                message: is_requested
+                    ? "Signature requested"
+                    : "Signature request cancelled",
                 status: true,
-                data: result
+                data: results,
             });
-        } catch (error) {
-            return res.status(500).json({ message: 'Internal Server Error', status: false, error: error.message });
+        } catch (error: any) {
+            return res.status(500).json({
+                message: "Internal Server Error",
+                status: false,
+                error: error.message,
+            });
         }
     }
 
@@ -524,40 +641,64 @@ class AssignmentController {
             const assignmentRepository = AppDataSource.getRepository(Assignment);
 
             const assignment = await assignmentRepository.findOne({
-                where: { assignment_id: id },
-                relations: ['course_id', 'user']
+                where: { assignment_id: Number(id) },
+                relations: ['user'], // evidence owner only
             });
 
             if (!assignment) {
                 return res.status(404).json({
                     message: "Assignment not Found",
-                    status: false
+                    status: false,
                 });
             }
 
-            // Check authorization
+            // Authorization (unchanged)
             const userRoles = req.user.roles || [req.user.role];
-            const isAuthorized = await AssignmentController.isUserAuthorizedForAssignment(
-                req.user.user_id,
-                userRoles,
-                assignment
-            );
+            const isAuthorized =
+                await AssignmentController.isUserAuthorizedForAssignment(
+                    req.user.user_id,
+                    userRoles,
+                    assignment
+                );
 
             if (!isAuthorized) {
                 return res.status(403).json({
                     message: "You are not authorized to view this assignment",
-                    status: false
+                    status: false,
                 });
             }
 
+            // ✅ Return FULL evidence object
             return res.status(200).json({
-                message: 'Assignment retrieved successfully',
+                message: "Assignment retrieved successfully",
                 status: true,
-                data: assignment,
+                data: {
+                    assignment_id: assignment.assignment_id,
+                    user: assignment.user,
+
+                    // file + basic info
+                    file: assignment.file,
+                    title: assignment.title,
+                    description: assignment.description,
+                    declaration: assignment.declaration,
+
+                    // 🔑 Smart Assessor evidence-level fields
+                    trainer_feedback: assignment.trainer_feedback,
+                    external_feedback: assignment.external_feedback,
+                    learner_comments: assignment.learner_comments,
+                    points_for_improvement: assignment.points_for_improvement,
+                    assessment_method: assignment.assessment_method,
+                    session: assignment.session,
+                    grade: assignment.grade,
+                    status: assignment.status,
+
+                    created_at: assignment.created_at,
+                    updated_at: assignment.updated_at,
+                },
             });
-        } catch (error) {
+        } catch (error: any) {
             return res.status(500).json({
-                message: 'Internal Server Error',
+                message: "Internal Server Error",
                 status: false,
                 error: error.message,
             });
@@ -566,35 +707,45 @@ class AssignmentController {
 
     public async reuploadAssignmentFile(req: CustomRequest, res: Response) {
         try {
-            const assignmentId = parseInt(req.params.id);
+            const assignmentId = Number(req.params.id);
+
             if (!req.file) {
                 return res.status(400).json({
-                    message: 'File is required',
+                    message: "File is required",
                     status: false,
                 });
             }
 
             const assignmentRepository = AppDataSource.getRepository(Assignment);
+
             const assignment = await assignmentRepository.findOne({
                 where: { assignment_id: assignmentId },
-                relations: ['user']
+                relations: ["user"],
             });
 
             if (!assignment) {
                 return res.status(404).json({
-                    message: 'Assignment not found',
+                    message: "Assignment not found",
                     status: false,
                 });
             }
 
-            // Check authorization
-            if (assignment.user.user_id !== req.user.user_id &&
-                !req.user.roles.includes(UserRole.Admin)) {
-                return res.status(403).json({ message: "Not authorized", status: false });
+            // 🔐 Authorization
+            if (
+                assignment.user.user_id !== req.user.user_id &&
+                !req.user.roles?.includes(UserRole.Admin)
+            ) {
+                return res.status(403).json({
+                    message: "Not authorized",
+                    status: false,
+                });
             }
-            const fileKey = assignment.file;
 
-            const fileUpload = await uploadToS3(req.file, 'Assignment');
+            // 🔹 store old key
+            const oldKey = (assignment.file as any)?.key;
+
+            // 🔹 upload new file
+            const fileUpload = await uploadToS3(req.file, "Assignment");
 
             assignment.file = {
                 name: req.file.originalname,
@@ -603,23 +754,22 @@ class AssignmentController {
             };
 
             const updated = await assignmentRepository.save(assignment);
-            console.log(updated)
-            if (fileKey) {
-                let d = await deleteFromS3(fileKey);
-                console.log(d)
+
+            // 🔹 delete old file (if exists)
+            if (oldKey) {
+                await deleteFromS3(oldKey);
             }
 
             return res.status(200).json({
-                message: 'File reuploaded successfully',
+                message: "File reuploaded successfully",
                 status: true,
                 data: updated,
             });
-
-        } catch (error) {
+        } catch (error: any) {
             return res.status(500).json({
-                message: 'Internal Server Error',
-                error: error.message,
+                message: "Internal Server Error",
                 status: false,
+                error: error.message,
             });
         }
     }

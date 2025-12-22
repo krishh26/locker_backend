@@ -5,7 +5,7 @@ import { AssessmentMethod, AssessmentStatus } from '../util/constants';
 import { AssignmentSignature } from './AssignmentSignature.entity';
 import { AssignmentReview } from './AssignmentReview.entity';
 
-@Entity('evidence')
+@Entity('assignment')
 export class Assignment {
 
     @PrimaryGeneratedColumn()
@@ -32,6 +32,35 @@ export class Assignment {
 
     @Column({ type: 'boolean', nullable: true })
     declaration: boolean;
+    
+    @Column({ type: 'varchar', nullable: true })
+    trainer_feedback: string;
+
+    @Column({ type: 'json', nullable: true })
+    external_feedback: object;
+
+    @Column({ type: 'varchar', nullable: true })
+    learner_comments: string;
+
+    @Column({ type: 'varchar', nullable: true })
+    points_for_improvement: string;
+
+    @Column({
+        type: 'enum',
+        enum: AssessmentMethod,
+        array: true,
+        nullable: true
+    })
+    assessment_method: AssessmentMethod[];
+
+    @Column({ type: 'json', nullable: true })
+    session: object;
+
+    @Column({ type: 'varchar', nullable: true })
+    grade: string;
+
+    @Column({ type: 'enum', enum: AssessmentStatus, default: AssessmentStatus.NotStarted })
+    status: AssessmentStatus;
     
     @Column({ type: 'boolean', default: false })
     evidence_time_log: boolean;

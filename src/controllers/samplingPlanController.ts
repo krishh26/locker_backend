@@ -16,6 +16,7 @@ import { UserRole } from "../util/constants";
 import { AssignmentPCReview } from "../entity/AssignmentPCReview.entity";
 import { getUnitCompletionStatus } from '../util/unitCompletion';
 import {  deleteFromS3, uploadToS3 } from '../util/aws';
+import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
 
 const mapSampleTypeToIQAType = (sampleType: string): IQAQuestionType => {
   switch (sampleType) {
@@ -1009,16 +1010,17 @@ export class SamplingPlanController {
 
       if (!detailId || !unit_code) {
         return res.status(400).json({
-          message: 'detailId param and unit_code query are required',
           status: false,
+          message: "detailId and unit_code are required",
         });
       }
 
       const planDetailRepo = AppDataSource.getRepository(SamplingPlanDetail);
-      const assignmentRepo = AppDataSource.getRepository(Assignment);
+      const mappingRepo = AppDataSource.getRepository(AssignmentMapping);
       const reviewRepo = AppDataSource.getRepository(AssignmentReview);
       const pcReviewRepo = AppDataSource.getRepository(AssignmentPCReview);
 
+      // 1️⃣ Load sampling plan detail
       const detail = await planDetailRepo
         .createQueryBuilder("spd")
         .leftJoinAndSelect("spd.learner", "learner")
@@ -1028,220 +1030,197 @@ export class SamplingPlanController {
         .where("spd.id = :id", { id: detailId })
         .getOne();
 
-
       if (!detail) {
         return res.status(404).json({
-          message: 'Sample plan detail not found',
           status: false,
+          message: "Sample plan detail not found",
         });
       }
 
-      // learnerUserId
-      const learnerUser = (detail.learner as any).user;
-      const learnerUserId =  detail.learner.user_id?.user_id;
-      const courseId = (detail.samplingPlan as any).course.course_id;
+      const learnerUserId = detail.learner?.user_id?.user_id;
+      const courseId = (detail.samplingPlan as any).course?.course_id;
 
-      // 1. get all assignments for this learner + course
-      const allAssignments = await assignmentRepo.find({
+      if (!learnerUserId || !courseId) {
+        return res.status(200).json({ status: true, data: [] });
+      }
+
+      // 2️⃣ Fetch assignment mappings (learner-mapped only)
+      const mappings = await mappingRepo.find({
         where: {
-          user: { user_id: learnerUserId } as any,
-          course_id: courseId,
+          course: { course_id: courseId } as any,
+          unit_code: unit_code,
+          learnerMap: true,
         },
-        order: { created_at: 'DESC' },
+        relations: ["assignment"],
+        order: { created_at: "DESC" },
       });
 
-      // 2. filter on units + learnerMap
-      const filteredAssignments = allAssignments.filter((a) => {
-        const unitsArr = Array.isArray(a.units) ? (a.units as any[]) : [];
-
-        if (!unitsArr.length) return false;
-        //console.log(unitsArr)
-        const matchedUnit = unitsArr.find(
-          (u) => u.unit_ref == unit_code || u.id == unit_code,
-        );
-
-        if (!matchedUnit) return false;
-
-        // show only if any subUnit has learnerMap === true
-        const status = getUnitCompletionStatus(matchedUnit);
-        return status.learnerDone;
-      });
-
-      if (!filteredAssignments.length) {
+      if (!mappings.length) {
         return res.status(200).json({
-          message: 'No mapped evidence found for this unit',
           status: true,
           data: [],
+          message: "No mapped evidence found",
         });
       }
 
-      const assignmentIds = filteredAssignments.map((a) => a.assignment_id);
+      const mappingIds = mappings.map(m => m.mapping_id);
 
-      // 3. load role-level reviews (bottom table)
+      // 3️⃣ Load role-level reviews (bottom table)
       const reviews = await reviewRepo.find({
         where: {
-          assignment: { assignment_id: In(assignmentIds) } as any,
+          mapping: { mapping_id: In(mappingIds) } as any,
           plan_detail: { id: detailId } as any,
         },
-        relations: ['assignment', 'signed_off_by'],
+        relations: ["signed_off_by"],
       });
 
       const reviewMap: Record<number, any> = {};
-
-      for (const r of reviews) {
-        if (!r.assignment) continue;
-        const aid = (r.assignment as any).assignment_id;
-
-        if (!reviewMap[aid]) reviewMap[aid] = {};
-
-        reviewMap[aid][r.role] = {
+      reviews.forEach(r => {
+        const mid = r.mapping.mapping_id;
+        if (!reviewMap[mid]) reviewMap[mid] = {};
+        reviewMap[mid][r.role] = {
           id: r.id,
           completed: r.completed,
           comment: r.comment,
-          file: r.file,
           signed_off_at: r.signed_off_at,
           signed_off_by: r.signed_off_by
             ? {
               user_id: r.signed_off_by.user_id,
-              name:
-                (r.signed_off_by as any).first_name +
-                ' ' +
-                (r.signed_off_by as any).last_name,
+              name: `${r.signed_off_by.first_name} ${r.signed_off_by.last_name}`,
             }
             : null,
         };
-      }
+      });
 
-      // 4. load PC-level reviews (blue ticks row)
+      // 4️⃣ Load PC reviews (blue/orange ticks)
       const pcReviews = await pcReviewRepo.find({
         where: {
-          assignment: { assignment_id: In(assignmentIds) } as any,
-          unit_code: unit_code as any,
+          mapping: { mapping_id: In(mappingIds) } as any,
+          unit_code,
         },
-        relations: ['assignment', 'signed_by'],
+        relations: ["signed_by"],
       });
 
       const pcReviewMap: Record<number, Record<string, any>> = {};
-
-      for (const pr of pcReviews) {
-        if (!pr.assignment) continue;
-        const aid = (pr.assignment as any).assignment_id;
-        if (!pcReviewMap[aid]) pcReviewMap[aid] = {};
-
-        pcReviewMap[aid][pr.pc_id] = {
+      pcReviews.forEach(pr => {
+        const mid = pr.mapping.mapping_id;
+        if (!pcReviewMap[mid]) pcReviewMap[mid] = {};
+        pcReviewMap[mid][pr.pc_id] = {
           signed_off: pr.signed_off,
           signed_at: pr.signed_at,
           signed_by: pr.signed_by
             ? {
               user_id: pr.signed_by.user_id,
-              name:
-                (pr.signed_by as any).first_name +
-                ' ' +
-                (pr.signed_by as any).last_name,
+              name: `${pr.signed_by.first_name} ${pr.signed_by.last_name}`,
             }
             : null,
         };
-      }
+      });
 
-      // 5. build response
-      const data = filteredAssignments.map((a) => {
-        const unitsArr = Array.isArray(a.units) ? (a.units as any[]) : [];
-        const matchedUnit = unitsArr.find(
-          (u) => u.unit_ref == unit_code || u.id == unit_code,
-        );
-
-        const subUnits = Array.isArray(matchedUnit?.subUnit) ? matchedUnit.subUnit : [];
-        const mappedSubUnits = subUnits.length
-          ? subUnits
-            .map((s: any) => ({
-              id: String(s.id),
-              subTitle: s.title,
-              learnerMapped: s.learnerMap === true,
-              trainerMapped: s.trainerMap === true,
-            }))
-          : [{
-            id: String(matchedUnit.id),
-            subTitle: matchedUnit.title,
-            learnerMapped: matchedUnit.learnerMap === true,
-            trainerMapped: matchedUnit.trainerMap === true,
-          }];
+      // 5️⃣ Build response (UI-SAFE)
+      const data = mappings.map(m => {
+        const assignment = m.assignment;
 
         return {
-          assignment_id: a.assignment_id,
-          title: a.title || (a.file as any)?.name,
-          description: a.description,
-          file: a.file,
-          grade: a.grade,
-          assessment_method: a.assessment_method,
-          created_at: a.created_at,
-          course_type: (detail.samplingPlan as any).course?.course_core_type,
+          mapping_id: m.mapping_id,
+          assignment_id: assignment.assignment_id,
+          title: assignment.title || assignment.file?.name,
+          description: assignment.description,
+          file: assignment.file,
+          created_at: assignment.created_at,
+
           unit: {
-            unit_code: matchedUnit?.id,
-            code: matchedUnit?.code,
-            unit_ref: matchedUnit?.unit_ref || matchedUnit?.id,
-            title: matchedUnit?.title,
-            type: matchedUnit?.type || ""
+            unit_ref: unit_code,
           },
-          // for PC row (orange/blue ticks)
-          mappedSubUnits: mappedSubUnits.map((s: any) => {
-            const pcId = s.id;
-            const review = pcReviewMap[a.assignment_id]?.[pcId] || null;
-            return {
-              ...s,
-              review,
-            };
-          }),
-          // for bottom sign table
-          reviews: reviewMap[a.assignment_id] || {},
+
+          mappedSubUnits: m.sub_unit_id
+            // SubUnit-based course
+            ? [{
+              id: m.sub_unit_id,
+              learnerMapped: m.learnerMap,
+              trainerMapped: m.trainerMap,
+              review: pcReviewMap[m.mapping_id]?.[m.sub_unit_id] || null,
+            }]
+            // Unit-only course
+            : [{
+              id: unit_code,
+              learnerMapped: m.learnerMap,
+              trainerMapped: m.trainerMap,
+              review: pcReviewMap[m.mapping_id]?.[unit_code] || null,
+            }],
+
+          reviews: reviewMap[m.mapping_id] || {},
         };
       });
 
       return res.status(200).json({
-        message: 'Evidence list loaded',
         status: true,
+        message: "Evidence list loaded",
         data,
       });
+
     } catch (error: any) {
       return res.status(500).json({
-        message: 'Internal Server Error',
         status: false,
+        message: "Internal Server Error",
         error: error.message,
       });
     }
   }
 
   // helper to update sampledUnits + status (called from saveReview)
-  public static async updateSamplingProgress(detailId: number, unit_code: string): Promise<void> {
+  public static async updateSamplingProgress( detailId: number, unit_code: string ): Promise<void> {
+
     const planDetailRepo = AppDataSource.getRepository(SamplingPlanDetail);
     const reviewRepo = AppDataSource.getRepository(AssignmentReview);
+    const mappingRepo = AppDataSource.getRepository(AssignmentMapping);
 
-    const detail = await planDetailRepo.findOne({ where: { id: detailId } });
+    const detail = await planDetailRepo.findOne({
+      where: { id: detailId }
+    });
+
     if (!detail) return;
+
+    // 🔹 Get all mappings for this unit
+    const mappings = await mappingRepo.find({
+      where: {
+        course: { course_id: (detail as any).samplingPlan?.course?.course_id } as any,
+        unit_code: unit_code
+      }
+    });
+
+    if (!mappings.length) return;
+
+    const mappingIds = mappings.map(m => m.mapping_id);
+
+    // 🔹 Check IQA completion
+    const iqaReviews = await reviewRepo.find({
+      where: {
+        mapping: { mapping_id: In(mappingIds) } as any,
+        plan_detail: { id: detailId } as any,
+        role: ReviewRole.IQA
+      }
+    });
+
+    const anyCompleted = iqaReviews.some(r => r.completed === true);
 
     const sampledUnits = Array.isArray(detail.sampledUnits)
       ? detail.sampledUnits
       : [];
 
-    // consider unit completed if any IQA review is completed
-    const iqaReviews = await reviewRepo.find({
-      where: {
-        plan_detail: { id: detailId } as any,
-        role: ReviewRole.IQA,
-      },
-    });
-
-    const anyCompleted = iqaReviews.some((r) => r.completed === true);
-
     const updatedSampledUnits = sampledUnits.map((u: any) => {
       if (u.unit_code === unit_code || u.unit_name === unit_code) {
-        return { ...u, completed: anyCompleted };
+        return {
+          ...u,
+          completed: anyCompleted
+        };
       }
       return u;
     });
 
     detail.sampledUnits = updatedSampledUnits;
 
-    // if all sampled units completed → mark detail as Reviewed
+    // 🔹 Mark detail as Reviewed if all completed
     const allDone =
       updatedSampledUnits.length > 0 &&
       updatedSampledUnits.every((u: any) => u.completed === true);
@@ -1259,77 +1238,52 @@ export class SamplingPlanController {
   public async upsertAssignmentReview(req: any, res: Response) {
     try {
       const {
-        assignment_id,
+        mapping_id,
         sampling_plan_detail_id,
-        role, // "IQA" typically for now
-        comment, // optional
-        completed, // optional
-        signed_off, // boolean
-        unit_code // required for progress update
+        role,
+        completed,
+        signed_off,
+        comment,
+        unit_code
       } = req.body;
 
-      if (!assignment_id || !sampling_plan_detail_id || !role || !unit_code) {
+      if (!mapping_id || !sampling_plan_detail_id || !role || !unit_code) {
         return res.status(400).json({
-          message: "assignment_id, sampling_plan_detail_id, role, and unit_code are required",
-          status: false
+          status: false,
+          message:
+            "mapping_id, sampling_plan_detail_id, role and unit_code are required",
         });
       }
 
-      const assignmentRepo = AppDataSource.getRepository(Assignment);
-      const detailRepo = AppDataSource.getRepository(SamplingPlanDetail);
       const reviewRepo = AppDataSource.getRepository(AssignmentReview);
 
-      const assignment = await assignmentRepo.findOne({
-        where: { assignment_id }
-      });
-      const detail = await detailRepo.findOne({
-        where: { id: sampling_plan_detail_id }
-      });
-
-      if (!assignment || !detail) {
-        return res.status(404).json({
-          message: "Assignment or Sample plan detail not found",
-          status: false
-        });
-      }
-
-      // Permission: only IQA/EQA/Admin allowed in Examine Evidence
-      const roles = req.user.roles || [req.user.role];
-      const canReview =
-        roles.includes(UserRole.IQA) ||
-        roles.includes(UserRole.Admin) ||
-        roles.includes("EQA"); // adjust if needed
-
-      if (!canReview) {
-        return res.status(403).json({
-          message: "Not authorized to review evidence",
-          status: false
-        });
-      }
-
-      // check if review exists, else create new entry
       let review = await reviewRepo.findOne({
         where: {
-          assignment: { assignment_id } as any,
+          mapping: { mapping_id } as any,
           plan_detail: { id: sampling_plan_detail_id } as any,
-          role
+          role,
         },
-        relations: ["signed_off_by"]
+        relations: ["signed_off_by"],
       });
 
       if (!review) {
         review = reviewRepo.create({
-          assignment,
-          plan_detail: detail,
-          role
+          mapping: { mapping_id } as any,
+          plan_detail: { id: sampling_plan_detail_id } as any,
+          role,
         });
       }
 
-      if (comment !== undefined) review.comment = comment;
-      if (completed !== undefined) review.completed = completed;
+      if (completed !== undefined) {
+        review.completed = completed;
+      }
+
+      if (comment !== undefined) {
+        review.comment = comment;
+      }
 
       if (signed_off !== undefined) {
-        if (signed_off === true) {
+        if (signed_off) {
           review.signed_off_by = { user_id: req.user.user_id } as any;
           review.signed_off_at = new Date();
         } else {
@@ -1338,9 +1292,9 @@ export class SamplingPlanController {
         }
       }
 
+      // optional file upload
       if (req.file) {
         const uploaded = await uploadToS3(req.file, "assignment-review");
-
         review.file = {
           name: req.file.originalname,
           size: req.file.size,
@@ -1349,22 +1303,24 @@ export class SamplingPlanController {
         };
       }
 
-      const savedReview = await reviewRepo.save(review);
+      const saved = await reviewRepo.save(review);
 
-      // 🔁 auto update sample plan status + completed units
-      await SamplingPlanController.updateSamplingProgress(sampling_plan_detail_id, unit_code);
+      // 🔁 VERY IMPORTANT — update sampling progress
+      await SamplingPlanController.updateSamplingProgress(
+        sampling_plan_detail_id,
+        unit_code
+      );
 
       return res.status(200).json({
-        message: "Evidence review saved successfully",
         status: true,
-        data: savedReview
+        message: "Assignment review saved successfully",
+        data: saved,
       });
-
     } catch (error: any) {
       return res.status(500).json({
-        message: "Internal Server Error",
         status: false,
-        error: error.message
+        message: "Internal Server Error",
+        error: error.message,
       });
     }
   }
@@ -1373,63 +1329,41 @@ export class SamplingPlanController {
   public async upsertAssignmentPCReview(req: any, res: Response) {
     try {
       const {
-        assignment_id,
+        mapping_id,
         unit_code,
-        pc_id,       // subUnit id
-        signed_off,  // boolean
+        pc_id,
+        signed_off
       } = req.body;
 
-      if (!assignment_id || !unit_code || !pc_id || signed_off === undefined) {
+      if (
+        !mapping_id ||
+        !unit_code ||
+        !pc_id ||
+        signed_off === undefined
+      ) {
         return res.status(400).json({
-          message: 'assignment_id, unit_code, pc_id and signed_off are required',
           status: false,
+          message: "mapping_id, unit_code, pc_id and signed_off are required"
         });
       }
 
-      const assignmentRepo = AppDataSource.getRepository(Assignment);
-      const pcReviewRepo = AppDataSource.getRepository(AssignmentPCReview);
+      const repo = AppDataSource.getRepository(AssignmentPCReview);
 
-      const assignment = await assignmentRepo.findOne({
-        where: { assignment_id },
-      });
-
-      if (!assignment) {
-        return res.status(404).json({
-          message: 'Assignment not found',
-          status: false,
-        });
-      }
-
-      // permissions: IQA / Admin / EQA can sign PCs
-      const roles = (req.user.roles || [req.user.role]) as string[];
-      const canSignPC =
-        roles.includes(UserRole.IQA) ||
-        roles.includes(UserRole.Admin) ||
-        roles.includes('EQA');
-
-      if (!canSignPC) {
-        return res.status(403).json({
-          message: 'You are not authorised to sign off criteria',
-          status: false,
-        });
-      }
-
-      const pcIdStr = String(pc_id);
-
-      let pcReview = await pcReviewRepo.findOne({
+      let pcReview = await repo.findOne({
         where: {
-          assignment: { assignment_id } as any,
+          mapping: { mapping_id } as any,
           unit_code,
-          pc_id: pcIdStr,
+          pc_id: String(pc_id)
         },
-        relations: ['assignment', 'signed_by'],
+        relations: ["signed_by"]
       });
 
+      // create if not exists
       if (!pcReview) {
-        pcReview = pcReviewRepo.create({
-          assignment,
+        pcReview = repo.create({
+          mapping: { mapping_id } as any,
           unit_code,
-          pc_id: pcIdStr,
+          pc_id: String(pc_id)
         });
       }
 
@@ -1439,114 +1373,104 @@ export class SamplingPlanController {
         pcReview.signed_by = { user_id: req.user.user_id } as any;
         pcReview.signed_at = new Date();
       } else {
-        pcReview.signed_by = null as any;
+        // un-sign
+        pcReview.signed_by = null;
         pcReview.signed_at = null;
       }
 
-      const saved = await pcReviewRepo.save(pcReview);
+      const saved = await repo.save(pcReview);
 
       return res.status(200).json({
-        message: 'PC review saved successfully',
         status: true,
-        data: saved,
+        message: signed_off
+          ? "PC signed off successfully"
+          : "PC sign-off removed",
+        data: saved
       });
+
     } catch (error: any) {
       return res.status(500).json({
-        message: 'Internal Server Error',
         status: false,
-        error: error.message,
+        message: "Internal Server Error",
+        error: error.message
       });
     }
   }
 
   // POST /assignment-pc-review/bulk
-  public async upsertAssignmentPCReviewBulk(req: any, res: Response) {
+  public async upsertAssignmentPCReviewBulk( req: any, res: Response ): Promise<Response> {
     try {
       const {
-        assignment_id,
+        mapping_id,
         unit_code,
-        pc_ids,      // array of pc_id (subTopic ids)
-        signed_off,  // boolean
+        pc_ids,
+        signed_off
       } = req.body;
 
-      if (!assignment_id || !unit_code || !Array.isArray(pc_ids) || signed_off === undefined) {
+      if (
+        !mapping_id ||
+        !unit_code ||
+        !Array.isArray(pc_ids) ||
+        pc_ids.length === 0 ||
+        signed_off === undefined
+      ) {
         return res.status(400).json({
-          message: 'assignment_id, unit_code, pc_ids[] and signed_off are required',
           status: false,
+          message:
+            "mapping_id, unit_code, pc_ids[] and signed_off are required",
         });
       }
 
-      const assignmentRepo = AppDataSource.getRepository(Assignment);
       const pcReviewRepo = AppDataSource.getRepository(AssignmentPCReview);
-
-      const assignment = await assignmentRepo.findOne({
-        where: { assignment_id },
-      });
-
-      if (!assignment) {
-        return res.status(404).json({
-          message: 'Assignment not found',
-          status: false,
-        });
-      }
-
-      const roles = (req.user.roles || [req.user.role]) as string[];
-      const canSignPC =
-        roles.includes(UserRole.IQA) ||
-        roles.includes(UserRole.Admin) ||
-        roles.includes('EQA');
-
-      if (!canSignPC) {
-        return res.status(403).json({
-          message: 'You are not authorised to sign off criteria',
-          status: false,
-        });
-      }
 
       const results: AssignmentPCReview[] = [];
 
-      for (const pc of pc_ids) {
-        const pcIdStr = String(pc);
+      for (const pc_id of pc_ids) {
+        const pcIdStr = String(pc_id);
 
         let pcReview = await pcReviewRepo.findOne({
           where: {
-            assignment: { assignment_id } as any,
+            mapping: { mapping_id } as any,   // ✅ CORRECT
             unit_code,
             pc_id: pcIdStr,
           },
-          relations: ['assignment', 'signed_by'],
+          relations: ["mapping", "signed_by"],
         });
 
         if (!pcReview) {
           pcReview = pcReviewRepo.create({
-            assignment,
+            mapping: { mapping_id } as any,   // ✅ CORRECT
             unit_code,
             pc_id: pcIdStr,
           });
         }
 
-        pcReview.signed_off = !!signed_off;
+        pcReview.signed_off = signed_off;
 
         if (signed_off) {
           pcReview.signed_by = { user_id: req.user.user_id } as any;
           pcReview.signed_at = new Date();
         } else {
-          pcReview.signed_by = null as any;
+          pcReview.signed_by = null;
           pcReview.signed_at = null;
         }
 
-        results.push(await pcReviewRepo.save(pcReview));
+        const saved = await pcReviewRepo.save(pcReview);
+        results.push(saved);
       }
 
       return res.status(200).json({
-        message: 'PC reviews saved successfully',
         status: true,
+        message: signed_off
+          ? "PC reviews signed off successfully"
+          : "PC sign-offs removed successfully",
         data: results,
       });
+
     } catch (error: any) {
       return res.status(500).json({
-        message: 'Internal Server Error',
         status: false,
+        message: "Internal Server Error",
         error: error.message,
       });
     }
@@ -1560,14 +1484,14 @@ export class SamplingPlanController {
       if (!detailId) {
         return res.status(400).json({
           status: false,
-          message: 'detailId is required',
+          message: "detailId is required",
         });
       }
 
       const planDetailRepo = AppDataSource.getRepository(SamplingPlanDetail);
-      const assignmentRepo = AppDataSource.getRepository(Assignment);
+      const mappingRepo = AppDataSource.getRepository(AssignmentMapping);
 
-      // 1️⃣ Fetch plan detail + course + learner
+      // 1️⃣ Load sample plan detail + course
       const detail = await planDetailRepo
         .createQueryBuilder("spd")
         .leftJoinAndSelect("spd.learner", "learner")
@@ -1577,95 +1501,124 @@ export class SamplingPlanController {
         .where("spd.id = :id", { id: detailId })
         .getOne();
 
-
       if (!detail) {
         return res.status(404).json({
           status: false,
-          message: 'Sample plan detail not found',
+          message: "Sample plan detail not found",
         });
       }
 
       const learnerUserId = detail.learner?.user_id?.user_id;
-      const courseId = (detail.samplingPlan as any)?.course?.course_id;
-      const courseUnits = (detail.samplingPlan as any)?.course?.units || [];
+      const course = (detail.samplingPlan as any)?.course;
 
-      if (!learnerUserId || !courseId) {
+      if (!learnerUserId || !course) {
         return res.status(200).json({
           status: true,
           data: [],
         });
       }
 
-      // 2️⃣ Fetch all assignments for learner + course
-      const assignments = await assignmentRepo.find({
+      const courseUnits = Array.isArray(course.units) ? course.units : [];
+
+      // 2️⃣ Load all mappings for learner + course
+      const mappings = await mappingRepo.find({
         where: {
-          user: { user_id: learnerUserId } as any,
-          course_id: courseId,
+          course: { course_id: course.course_id } as any,
         },
       });
 
-      // 3️⃣ Build unit → subUnit mapping
+      // 3️⃣ Build lookup: unit_ref → subUnit_ref → flags
+      const unitMap = new Map<
+        string,
+        {
+          learnerMapped: boolean;
+          trainerMapped: boolean;
+          subUnits: Map<
+            string,
+            { learnerMapped: boolean; trainerMapped: boolean }
+          >;
+        }
+      >();
+
+      mappings.forEach((m) => {
+        if (!unitMap.has(m.unit_code)) {
+          unitMap.set(m.unit_code, {
+            learnerMapped: false,
+            trainerMapped: false,
+            subUnits: new Map(),
+          });
+        }
+
+        const u = unitMap.get(m.unit_code)!;
+
+        if (m.learnerMap) u.learnerMapped = true;
+        if (m.trainerMap) u.trainerMapped = true;
+
+        // subUnit based
+        if (m.sub_unit_id) {
+          u.subUnits.set(m.sub_unit_id, {
+            learnerMapped: m.learnerMap,
+            trainerMapped: m.trainerMap,
+          });
+        }
+      });
+
+      // 4️⃣ Build response from course JSON + mapping overlay
       const result = courseUnits
         .filter((unit: any) => {
           if (!type) return true;
           return unit.type === type;
-        }).map((unit: any) => {
-          let learnerMapped = false;
-          let trainerMapped = false;
-          console.log(unit)
-          // clone subUnits from course structure
-          let subUnits = Array.isArray(unit.subUnit)
-            ? unit.subUnit.map((su: any) => ({
-              id: su.id,
-              title: su.title,
-              code: su.code,
-            learnerMapped: false,
-            trainerMapped: false,
-          }))
-          : [];
-        // console.log('Assignments count:', assignments.length);
-        // console.log('Course units:', courseUnits.length);
-        // console.log('Sample assignment units:', assignments[0]?.units);
+        })
+        .map((unit: any) => {
+          const unitRef = unit.id || unit.unit_ref;
+          const unitMapping = unitMap.get(unitRef);
 
-        assignments.forEach((assignment) => {
-          Array.isArray(assignment.units) && assignment.units.forEach((aUnit: any) => {
-            if (aUnit.id !== unit.id) return;
+          let learnerMapped = unitMapping?.learnerMapped || false;
+          let trainerMapped = unitMapping?.trainerMapped || false;
 
-            // 🔹 unit-only course
-            if (!Array.isArray(aUnit.subUnit) || !aUnit.subUnit.length) {
-              if (aUnit.learnerMap) learnerMapped = true;
-              if (aUnit.trainerMap) trainerMapped = true;
-            }
+          // 🔹 CASE-1: unit has subUnits
+          if (Array.isArray(unit.subUnit) && unit.subUnit.length) {
+            const subUnits = unit.subUnit.map((su: any) => {
+              const suMap = unitMapping?.subUnits.get(su.id);
+              return {
+                id: su.id,
+                title: su.title,
+                code: su.code,
+                learnerMapped: suMap?.learnerMapped || false,
+                trainerMapped: suMap?.trainerMapped || false,
+              };
+            });
 
-            // 🔹 subUnit-based course
-            if (Array.isArray(aUnit.subUnit)) {
-              aUnit.subUnit.forEach((asu: any) => {
-                const matchedSub = subUnits.find(s => s.id === asu.id);
-                if (!matchedSub) return;
+            return {
+              unit_code: unitRef,
+              code: unit.code,
+              unit_title: unit.title,
+              type: unit.type,
+              learnerMapped,
+              trainerMapped,
+              subUnits,
+            };
+          }
 
-                if (asu.learnerMap) {
-                  matchedSub.learnerMapped = true;
-                  learnerMapped = true;
-                }
-                if (asu.trainerMap) {
-                  matchedSub.trainerMapped = true;
-                  trainerMapped = true;
-                }
-              });
-            }
-          });
+          // 🔹 CASE-2: unit-only course (NO subUnits)
+          return {
+            unit_code: unitRef,
+            code: unit.code,
+            unit_title: unit.title,
+            type: unit.type,
+            learnerMapped,
+            trainerMapped,
+            subUnits: [
+              {
+                id: unitRef, // 👈 unit acts as single PC
+                title: unit.title,
+                code: unit.code,
+                learnerMapped,
+                trainerMapped,
+              },
+            ],
+          };
         });
-
-        return {
-          unit_code: unit.id,
-          code: unit.code,
-          unit_title: unit.title,
-          type: unit.type,
-          learnerMapped,
-          trainerMapped,
-          subUnits,
-        };
-      });
 
       return res.status(200).json({
         status: true,
@@ -1675,7 +1628,7 @@ export class SamplingPlanController {
     } catch (error: any) {
       return res.status(500).json({
         status: false,
-        message: 'Internal Server Error',
+        message: "Internal Server Error",
         error: error.message,
       });
     }
