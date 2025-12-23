@@ -29,6 +29,16 @@ export class AssignmentMapping {
   @Column({ type: 'boolean', default: false })
   trainerMap: boolean;
 
+  @Column({ type: 'varchar', length: 4000, nullable: true })
+  comment: string;
+
+  @ManyToOne(() => User, { nullable: true })
+  @JoinColumn({ name: 'comment_updated_by' })
+  comment_updated_by: User;
+
+  @Column({ type: 'timestamp', nullable: true })
+  comment_updated_at: Date;
+
   @CreateDateColumn()
   created_at: Date;
 }

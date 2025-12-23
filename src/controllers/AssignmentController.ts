@@ -874,6 +874,238 @@ class AssignmentController {
         }
     }
 
+    public async mapAssignment(req: CustomRequest, res: Response) {
+        try {
+            const {
+                assignment_id,
+                course_id,
+                unit_code,
+                sub_unit_ids = [],
+                mapped_by,
+                learnerMap,
+                trainerMap
+            } = req.body;
+
+            if (!assignment_id || !course_id || !unit_code) {
+                return res.status(400).json({
+                    status: false,
+                    message: "assignment_id, course_id and unit_code are required"
+                });
+            }
+
+            const assignmentRepo = AppDataSource.getRepository(Assignment);
+            const mappingRepo = AppDataSource.getRepository(AssignmentMapping);
+
+            const assignment = await assignmentRepo.findOne({
+                where: { assignment_id }
+            });
+
+            if (!assignment) {
+                return res.status(404).json({
+                    status: false,
+                    message: "Assignment not found"
+                });
+            }
+
+            const isLearner = mapped_by === "Learner";
+            const rows: AssignmentMapping[] = [];
+
+            // Sub-unit based mapping
+            if (sub_unit_ids.length) {
+                for (const sid of sub_unit_ids) {
+                    let row = await mappingRepo.findOne({
+                        where: {
+                            assignment: { assignment_id } as any,
+                            course: { course_id } as any,
+                            unit_code,
+                            sub_unit_id: sid
+                        }
+                    });
+
+                    if (!row) {
+                        row = mappingRepo.create({
+                            assignment,
+                            course: { course_id } as any,
+                            unit_code,
+                            sub_unit_id: sid
+                        });
+                    }
+
+                    row.learnerMap = learnerMap !== undefined ? learnerMap : isLearner;
+                    row.trainerMap = trainerMap !== undefined ? trainerMap : !isLearner;
+
+                    rows.push(row);
+                }
+            }
+            // Unit-only mapping
+            else {
+                let row = await mappingRepo.findOne({
+                    where: {
+                        assignment: { assignment_id } as any,
+                        course: { course_id } as any,
+                        unit_code,
+                        sub_unit_id: null
+                    }
+                });
+
+                if (!row) {
+                    row = mappingRepo.create({
+                        assignment,
+                        course: { course_id } as any,
+                        unit_code,
+                        sub_unit_id: null
+                    });
+                }
+
+                row.learnerMap = learnerMap !== undefined ? learnerMap : isLearner;
+                row.trainerMap = trainerMap !== undefined ? trainerMap : !isLearner;
+
+                rows.push(row);
+            }
+
+            const saved = await mappingRepo.save(rows);
+
+            return res.status(200).json({
+                status: true,
+                message: "Evidence mapped successfully",
+                data: saved
+            });
+
+        } catch (error: any) {
+            return res.status(500).json({
+                status: false,
+                message: "Internal Server Error",
+                error: error.message
+            });
+        }
+    }
+
+    public async getMappedEvidence(req: CustomRequest, res: Response) {
+        try {
+            const { course_id, unit_code, user_id } = req.query as any;
+
+            if (!course_id || !unit_code || !user_id) {
+                return res.status(400).json({
+                    status: false,
+                    message: "course_id, unit_code and user_id are required",
+                });
+            }
+
+            const repo = AppDataSource.getRepository(AssignmentMapping);
+
+            const mappings = await repo.find({
+                where: {
+                    course: { course_id: Number(course_id) } as any,
+                    unit_code,
+                    learnerMap: true,
+                },
+                relations: ["assignment", "assignment.user"],
+                order: { created_at: "DESC" },
+            });
+
+            const data = mappings
+                .filter(
+                    (m) => m.assignment?.user?.user_id === Number(user_id)
+                )
+                .map((m) => ({
+                    mapping_id: m.mapping_id,
+                    assignment_id: m.assignment.assignment_id,
+                    title: m.assignment.title,
+                    file: m.assignment.file,
+                    unit_ref: m.unit_code,
+                    sub_unit_ref: m.sub_unit_id,
+                    learnerMap: m.learnerMap,
+                    trainerMap: m.trainerMap,
+                    uploaded_at: m.assignment.created_at,
+                }));
+
+            return res.status(200).json({
+                status: true,
+                data,
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                status: false,
+                message: "Internal Server Error",
+                error: error.message,
+            });
+        }
+    }
+
+    public async toggleMappingFlag(req: CustomRequest, res: Response) {
+        try {
+            const { mapping_id, learnerMap, trainerMap, comment } = req.body;
+
+            if (
+                !mapping_id ||
+                (learnerMap === undefined &&
+                    trainerMap === undefined &&
+                    comment === undefined)
+            ) {
+                return res.status(400).json({
+                    status: false,
+                    message: "Invalid payload",
+                });
+            }
+
+            const repo = AppDataSource.getRepository(AssignmentMapping);
+
+            const row = await repo.findOne({
+                where: { mapping_id },
+            });
+
+            if (!row) {
+                return res.status(404).json({
+                    status: false,
+                    message: "Mapping not found",
+                });
+            }
+
+            if (learnerMap !== undefined) row.learnerMap = learnerMap;
+            if (trainerMap !== undefined) row.trainerMap = trainerMap;
+
+            if (comment !== undefined) {
+                row.comment = comment;
+                row.comment_updated_by = { user_id: req.user.user_id } as any;
+                row.comment_updated_at = new Date();
+            }
+
+            const saved = await repo.save(row);
+
+            return res.status(200).json({
+                status: true,
+                data: saved,
+            });
+        } catch (e: any) {
+            return res.status(500).json({
+                status: false,
+                error: e.message,
+            });
+        }
+    }
+
+    public async unmapAssignment(req: CustomRequest, res: Response) {
+        try {
+            const { assignment_id, course_id, unit_code, sub_unit_id } = req.body;
+
+            if (!assignment_id || !course_id || !unit_code) {
+                return res.status(400).json({ status: false, message: "Invalid payload" });
+            }
+
+            const repo = AppDataSource.getRepository(AssignmentMapping);
+
+            await repo.delete({
+                assignment: { assignment_id } as any,
+                course: { course_id } as any,
+                unit_code,
+                sub_unit_id: sub_unit_id ?? null,
+            });
+
+            return res.status(200).json({ status: true, message: "Unmapped successfully" });
+        } catch (e: any) {
+            return res.status(500).json({ status: false, error: e.message });
+        }
+    }
 }
 
 export default AssignmentController;

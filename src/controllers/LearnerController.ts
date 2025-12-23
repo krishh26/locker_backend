@@ -427,7 +427,7 @@ class LearnerController {
             const learner_id = req.params.id as any;
             const learnerRepository = AppDataSource.getRepository(Learner);
             const userCourseRepository = AppDataSource.getRepository(UserCourse);
-            const assignmentCourseRepository = AppDataSource.getRepository(Assignment);
+            const assignmentMappingRepository = AppDataSource.getRepository(AssignmentMapping);
             const timeLogRepository = AppDataSource.getRepository(TimeLog);
             const learner: any = await learnerRepository
                 .createQueryBuilder('learner')
@@ -449,30 +449,14 @@ class LearnerController {
             let courses = await userCourseRepository.find({ where: { learner_id }, relations: ["trainer_id", "IQA_id", "LIQA_id", "EQA_id", "employer_id", "employer_id.employer"] })
 
             const course_ids = courses.map((course: any) => course.course.course_id)
-            const mappingRepository = AppDataSource.getRepository(AssignmentMapping);
-
-            const mappings = course_ids.length
-                ? await mappingRepository.find({
-                    where: {
-                        course: { course_id: In(course_ids) } as any,
-                        learnerMap: true,
-                    },
-                    relations: ["assignment", "assignment.user"],
-                })
-                : [];
-
-
-            const mappingByCourseUnit = new Map<string, any[]>();
-
-            mappings.forEach((m) => {
-                const key = `${m.course.course_id}_${m.unit_code}`;
-
-                if (!mappingByCourseUnit.has(key)) {
-                    mappingByCourseUnit.set(key, []);
-                }
-
-                mappingByCourseUnit.get(key)!.push(m);
-            });
+            const filteredMappings = course_ids.length ? await assignmentMappingRepository.createQueryBuilder('mapping')
+                .leftJoinAndSelect('mapping.assignment', 'assignment')
+                .leftJoinAndSelect('mapping.course', 'course')
+                .leftJoin('assignment.user', 'assignment_user')
+                .where('course.course_id IN (:...course_ids)', { course_ids })
+                .andWhere('assignment_user.user_id = :user_id', { user_id: learner.user_id.user_id })
+                .select(['mapping', 'assignment', 'course.course_id'])
+                .getMany() : [];
 
             courses = courses?.map((userCourse: any) => {
                 let partiallyCompleted = new Set();
@@ -480,26 +464,37 @@ class LearnerController {
                 let partiallyCompletedUnits = new Set();
                 let fullyCompletedUnits = new Set();
 
-                userCourse.course.units.forEach((unit: any) => {
-                    const unitKey = `${userCourse.course.course_id}_${unit.id}`;
-                    const unitMappings = mappingByCourseUnit.get(unitKey) || [];
+                // Using AssignmentMapping: merge mapping flags into course units/subUnits
+                let courseMappings: any = filteredMappings.filter(mapping => mapping.course.course_id === userCourse.course.course_id);
 
-                    // overlay mapping flags onto unit JSON
-                    if (Array.isArray(unit.subUnit) && unit.subUnit.length > 0) {
-                        unit.subUnit.forEach((sub: any) => {
-                            const match = unitMappings.find(
-                                (m) => m.sub_unit_ref === sub.id
-                            );
+                // Apply mapping flags onto units/subUnits
+                courseMappings.forEach(mapping => {
+                    const unitsArray = userCourse.course.units || [];
+                    const unitIndex = unitsArray.findIndex((item: any) => String(item.id) === String(mapping.unit_code) || String(item.unit_ref) === String(mapping.unit_code));
+                    if (unitIndex === -1) return;
 
-                            sub.learnerMap = Boolean(match?.learnerMap);
-                            sub.trainerMap = Boolean(match?.trainerMap);
-                        });
+                    const unit = unitsArray[unitIndex] || {};
+
+                    if (mapping.sub_unit_id) {
+                        unit.subUnit = unit.subUnit || [];
+                        const subIndex = unit.subUnit.findIndex((s: any) => String(s.id) === String(mapping.sub_unit_id));
+                        if (subIndex !== -1) {
+                            unit.subUnit[subIndex].learnerMap = unit.subUnit[subIndex].learnerMap || mapping.learnerMap;
+                            unit.subUnit[subIndex].trainerMap = unit.subUnit[subIndex].trainerMap || mapping.trainerMap;
+                        }
                     } else {
-                        // unit-only course
-                        const match = unitMappings[0];
-                        unit.learnerMap = Boolean(match?.learnerMap);
-                        unit.trainerMap = Boolean(match?.trainerMap);
+                        unit.learnerMap = unit.learnerMap || mapping.learnerMap;
+                        unit.trainerMap = unit.trainerMap || mapping.trainerMap;
                     }
+
+                    unitsArray[unitIndex] = unit;
+                    userCourse.course.units = unitsArray;
+                });
+
+                // Compute unit-wise completion status only for units that have mappings
+                const mappedUnitIds = new Set(courseMappings.map((m: any) => String(m.unit_code)));
+                (userCourse.course.units || []).forEach((unit: any) => {
+                    if (!mappedUnitIds.size || !mappedUnitIds.has(String(unit.id))) return;
 
                     const status = getUnitCompletionStatus(unit);
 
@@ -1829,67 +1824,54 @@ export default LearnerController;
 
 const getCourseData = async (courses: any[], user_id: string) => {
     try {
-        const mappingRepo = AppDataSource.getRepository(AssignmentMapping);
+        const assignmentMappingRepository = AppDataSource.getRepository(AssignmentMapping);
+        const course_ids = courses?.map((course: any) => course.course.course_id)
+        const filteredMappings = course_ids.length ? await assignmentMappingRepository.createQueryBuilder('mapping')
+            .leftJoinAndSelect('mapping.assignment', 'assignment')
+            .leftJoinAndSelect('mapping.course', 'course')
+            .leftJoin('assignment.user', 'assignment_user')
+            .where('course.course_id IN (:...course_ids)', { course_ids })
+            .andWhere('assignment_user.user_id = :user_id', { user_id })
+            .select(['mapping', 'assignment', 'course.course_id'])
+            .getMany() : [];
 
-        const course_ids = courses?.map((c: any) => c.course.course_id);
-
-        // 1️⃣ Fetch all learner mappings for these courses
-        const mappings = course_ids.length
-            ? await mappingRepo.find({
-                where: {
-                    course: { course_id: In(course_ids) } as any,
-                    learnerMap: true,
-                },
-                relations: ["assignment", "assignment.user", "course"],
-            })
-            : [];
-
-        // 2️⃣ Build lookup: courseId_unitId → mappings[]
-        const mappingLookup = new Map<string, any[]>();
-
-        mappings.forEach((m) => {
-            // ensure mapping belongs to this learner
-            const learnerUserId = Number(user_id);
-
-            if (m.assignment?.user?.user_id !== learnerUserId) return;
-
-            const key = `${m.course.course_id}_${m.unit_code}`;
-
-            if (!mappingLookup.has(key)) {
-                mappingLookup.set(key, []);
-            }
-
-            mappingLookup.get(key)!.push(m);
-        });
-
-        // 3️⃣ Process courses (LOGIC SAME AS BEFORE)
         courses = courses?.map((userCourse: any) => {
+            let partiallyCompleted = new Set();
+            let fullyCompleted = new Set();
             let partiallyCompletedUnits = new Set();
             let fullyCompletedUnits = new Set();
 
-            userCourse.course.units.forEach((unit: any) => {
-                const unitKey = `${userCourse.course.course_id}_${unit.id}`;
-                const unitMappings = mappingLookup.get(unitKey) || [];
+            let courseMappings: any = filteredMappings.filter(mapping => mapping.course.course_id === userCourse.course.course_id);
 
-                // 🔹 Case 1: Unit has subUnits
-                if (Array.isArray(unit.subUnit) && unit.subUnit.length > 0) {
-                    unit.subUnit.forEach((sub: any) => {
-                        const match = unitMappings.find(
-                            (m) => m.sub_unit_ref === sub.id
-                        );
+            // Apply mapping info onto course units (safe when units may be undefined)
+            courseMappings.forEach(mapping => {
+                const unitsArray = userCourse.course.units || [];
+                const unitIndex = unitsArray.findIndex((item: any) => String(item.id) === String(mapping.unit_code) || String(item.unit_ref) === String(mapping.unit_code));
+                if (unitIndex === -1) return;
 
-                        sub.learnerMap = Boolean(match?.learnerMap);
-                        sub.trainerMap = Boolean(match?.trainerMap);
-                    });
+                const unit = unitsArray[unitIndex] || {};
+
+                if (mapping.sub_unit_id) {
+                    unit.subUnit = unit.subUnit || [];
+                    const subIndex = unit.subUnit.findIndex((s: any) => String(s.id) === String(mapping.sub_unit_id));
+                    if (subIndex !== -1) {
+                        unit.subUnit[subIndex].learnerMap = unit.subUnit[subIndex].learnerMap || mapping.learnerMap;
+                        unit.subUnit[subIndex].trainerMap = unit.subUnit[subIndex].trainerMap || mapping.trainerMap;
+                    }
+                } else {
+                    unit.learnerMap = unit.learnerMap || mapping.learnerMap;
+                    unit.trainerMap = unit.trainerMap || mapping.trainerMap;
                 }
-                // 🔹 Case 2: Unit-only course
-                else {
-                    const match = unitMappings[0];
-                    unit.learnerMap = Boolean(match?.learnerMap);
-                    unit.trainerMap = Boolean(match?.trainerMap);
-                }
 
-                // 🔹 Use EXISTING helper (UNCHANGED)
+                unitsArray[unitIndex] = unit;
+                userCourse.course.units = unitsArray;
+            });
+
+            // Compute completion only for units that have mapping
+            const mappedUnitIds = new Set(courseMappings.map((m: any) => String(m.unit_code)));
+            (userCourse.course.units || []).forEach((unit: any) => {
+                if (!mappedUnitIds.size || !mappedUnitIds.has(String(unit.id))) return;
+
                 const status = getUnitCompletionStatus(unit);
 
                 if (status.fullyCompleted) {
@@ -1897,33 +1879,27 @@ const getCourseData = async (courses: any[], user_id: string) => {
                 } else if (status.partiallyCompleted) {
                     partiallyCompletedUnits.add(unit.id);
                 }
-            });
+            })
 
-            const totalSubUnits =
-                userCourse.course.units?.reduce((count: number, unit: any) => {
-                    return count + (unit.subUnit?.length || 0);
-                }, 0) || 0;
+            const totalSubUnits = userCourse.course.units?.reduce((count, unit) => {
+                return count + (unit.subUnit?.length || 0);
+            }, 0) || 0;
 
             const totalUnits = userCourse.course.units?.length || 0;
 
             return {
                 ...userCourse,
                 totalSubUnits,
-                notStarted:
-                    totalSubUnits -
-                    (fullyCompletedUnits.size + partiallyCompletedUnits.size),
-                partiallyCompleted: partiallyCompletedUnits.size,
-                fullyCompleted: fullyCompletedUnits.size,
+                notStarted: totalSubUnits - (fullyCompleted.size + partiallyCompleted.size),
+                partiallyCompleted: partiallyCompleted.size,
+                fullyCompleted: fullyCompleted.size,
                 totalUnits,
-                unitsNotStarted:
-                    totalUnits -
-                    (fullyCompletedUnits.size + partiallyCompletedUnits.size),
+                unitsNotStarted: totalUnits - (fullyCompletedUnits.size + partiallyCompletedUnits.size),
                 unitsPartiallyCompleted: partiallyCompletedUnits.size,
                 unitsFullyCompleted: fullyCompletedUnits.size,
-            };
-        });
-
-        return courses;
+            }
+        })
+        return courses
     } catch (error) {
         console.log(error, "Error in getting course data");
         return [];
