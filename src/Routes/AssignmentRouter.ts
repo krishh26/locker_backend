@@ -22,8 +22,8 @@ AssignmentRoutes.post('/:id/external-feedback', authorizeRoles(), singleFileUplo
 AssignmentRoutes.delete('/:id/external-feedback', authorizeRoles(), Controller.deleteAudioFeedback);
 
 // Signature routes
-AssignmentRoutes.post('/:id/request-signature', authorizeRoles(), Controller.requestSignature);
-AssignmentRoutes.post('/:id/sign', authorizeRoles(), Controller.signAssignment);
+AssignmentRoutes.post('/request-signature', authorizeRoles(), Controller.requestSignature);
+AssignmentRoutes.post('/sign', authorizeRoles(), Controller.signAssignment);
 AssignmentRoutes.get('/:id/signatures', authorizeRoles(), Controller.getAssignmentSignatures);
 
 //Mapping
