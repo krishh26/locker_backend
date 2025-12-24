@@ -600,38 +600,53 @@ class AssignmentController {
     public async getAssignmentSignatures(req: CustomRequest, res: Response) {
         try {
             const assignmentId = parseInt(req.params.id);
+
             const signatureRepository = AppDataSource.getRepository(AssignmentSignature);
-            const signatures = await signatureRepository.createQueryBuilder('sig')
+
+            const signatures = await signatureRepository
+                .createQueryBuilder('sig')
                 .leftJoinAndSelect('sig.user', 'user')
-                .leftJoin('sig.assignment', 'assignment')
-                .where('assignment.assignment_id = :assignmentId', { assignmentId })
                 .leftJoinAndSelect('sig.requested_by', 'requested_by')
+                .leftJoin('sig.mapping', 'mapping')              // ✅ NEW
+                .leftJoin('mapping.assignment', 'assignment')    // ✅ NEW
+                .where('assignment.assignment_id = :assignmentId', { assignmentId })
                 .getMany();
 
-                            
             const result = signatures.map((s: any) => {
-                const requestedByUser = Array.isArray(s.requested_by) ? s.requested_by[0] : s.requested_by;
+                const requestedByUser = s.requested_by || null;
+
                 return {
                     id: s.id,
                     role: s.role,
                     user_id: s.user?.user_id || null,
-                    name: s.user ? `${s.user.first_name || ''} ${s.user.last_name || ''}`.trim() : null,
+                    name: s.user
+                        ? `${s.user.first_name || ''} ${s.user.last_name || ''}`.trim()
+                        : null,
                     isSigned: s.is_signed,
                     isRequested: s.is_requested,
                     signedAt: s.signed_at,
                     requestedAt: s.requested_at,
-                    //add null if requested_by is null or undefined , not in database
                     requestedBy: requestedByUser
                         ? `${requestedByUser.first_name || ''} ${requestedByUser.last_name || ''}`.trim()
                         : null,
                     requestedByNameId: requestedByUser?.user_id || null,
-                    requestedByName: requestedByUser?.first_name + ' ' + requestedByUser?.last_name || null,
+                    requestedByName: requestedByUser
+                        ? `${requestedByUser.first_name} ${requestedByUser.last_name}`
+                        : null,
                 };
             });
 
-            return res.status(200).json({ message: 'Signatures fetched', status: true, data: result });
-        } catch (error) {
-            return res.status(500).json({ message: 'Internal Server Error', status: false, error: error.message });
+            return res.status(200).json({
+                message: 'Signatures fetched',
+                status: true,
+                data: result,
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                status: false,
+                error: error.message,
+            });
         }
     }
 
@@ -639,7 +654,8 @@ class AssignmentController {
         try {
             const { id } = req.params as any;
             const assignmentRepository = AppDataSource.getRepository(Assignment);
-
+            const mappingRepo = AppDataSource.getRepository(AssignmentMapping);
+            const signatureRepo = AppDataSource.getRepository(AssignmentSignature);
             const assignment = await assignmentRepository.findOne({
                 where: { assignment_id: Number(id) },
                 relations: ['user'], // evidence owner only
@@ -668,6 +684,15 @@ class AssignmentController {
                 });
             }
 
+            // add mapping details
+            const mappings = await mappingRepo.find({
+                where: { assignment: { assignment_id: assignment.assignment_id } as any }
+            });
+
+            // add signature details
+            const signatures = await signatureRepo.find({
+                where: { mapping: { assignment: { assignment_id: assignment.assignment_id } as any } }
+            });
             // ✅ Return FULL evidence object
             return res.status(200).json({
                 message: "Assignment retrieved successfully",
@@ -691,7 +716,8 @@ class AssignmentController {
                     session: assignment.session,
                     grade: assignment.grade,
                     status: assignment.status,
-
+                    mappings: mappings,
+                    signatures: signatures,
                     created_at: assignment.created_at,
                     updated_at: assignment.updated_at,
                 },
