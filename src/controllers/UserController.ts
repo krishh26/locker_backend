@@ -13,6 +13,7 @@ import { UserCourse } from "../entity/UserCourse.entity";
 import { Employer } from "../entity/Employer.entity";
 import { Raw, In } from 'typeorm';
 import { AssignmentSignature } from "../entity/AssignmentSignature.entity";
+import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
 
 
 class UserController {
@@ -536,8 +537,9 @@ class UserController {
             const signatureRepository = AppDataSource.getRepository(AssignmentSignature);
             
             const pendingRows = await signatureRepository.createQueryBuilder('sig')
-                .leftJoinAndSelect('sig.assignment', 'assignment')
-                .leftJoinAndSelect('assignment.course_id', 'course')
+                .leftJoinAndSelect('sig.mapping', 'mapping')
+                .leftJoinAndSelect('mapping.assignment', 'assignment')
+                .leftJoinAndSelect('mapping.course', 'course')
                 .leftJoin('sig.user', 'sig_user')
                 .where('sig_user.user_id = :userId', { userId })
                 .andWhere('sig.is_requested = true')
@@ -548,7 +550,7 @@ class UserController {
             const seen = new Set<number>();
             const assignmentIds: number[] = [];
             for (const row of pendingRows as any[]) {
-                const aid = row.assignment?.assignment_id;
+                const aid = row.mapping?.assignment?.assignment_id || row.assignment?.assignment_id;
                 if (!aid || seen.has(aid)) continue;
                 seen.add(aid);
                 assignmentIds.push(aid);
@@ -561,14 +563,32 @@ class UserController {
             const fullSignatures = await signatureRepository.createQueryBuilder('sig')
                 .leftJoinAndSelect('sig.user', 'sig_user')
                 .leftJoinAndSelect('sig.requested_by', 'requested_by_user')
-                .leftJoinAndSelect('sig.assignment', 'assignment')
+                .leftJoinAndSelect('sig.mapping', 'mapping')
+                .leftJoinAndSelect('mapping.assignment', 'assignment')
                 .where('assignment.assignment_id IN (:...ids)', { ids: assignmentIds })
                 .getMany();
 
+            // Fetch mapping(s) for these assignments to obtain course information (fallback to assignment.course_id)
+            const mappingRepo = AppDataSource.getRepository(AssignmentMapping);
+            const mappings = await mappingRepo.createQueryBuilder('mapping')
+                .leftJoinAndSelect('mapping.course', 'course')
+                .leftJoinAndSelect('mapping.assignment', 'assignment')
+                .where('assignment.assignment_id IN (:...ids)', { ids: assignmentIds })
+                .select(['mapping', 'course.course_id', 'course.course_name', 'assignment.assignment_id'])
+                .getMany();
+
+            const mappingMap = new Map<number, any>();
+            mappings.forEach(m => {
+                const aid = m.assignment?.assignment_id;
+                if (!aid) return;
+                // Prefer first mapping per assignment (keeps existing single-course behavior)
+                if (!mappingMap.has(aid)) mappingMap.set(aid, m);
+            });
+
             const data = assignmentIds.map((aid) => {
-                const row = (pendingRows as any[]).find(pr => pr.assignment?.assignment_id === aid);
+                const row = (pendingRows as any[]).find(pr => (pr.mapping?.assignment?.assignment_id || pr.assignment?.assignment_id) === aid);
                 const signatures = (fullSignatures as any[])
-                    .filter(s => s.assignment?.assignment_id === aid)
+                    .filter(s => (s.mapping?.assignment?.assignment_id || s.assignment?.assignment_id) === aid)
                     .map(s => ({
                         id: s.id,
                         role: s.role,
@@ -581,14 +601,19 @@ class UserController {
                         requested_by_name: s.requested_by ? (s.requested_by.first_name + ' ' + s.requested_by.last_name).trim() : null,
                         signed_at: s.signed_at
                     }));
+
+                const mapping = mappingMap.get(aid);
+                const courseFromMapping = mapping?.course;
+                const assignmentObj = row?.mapping?.assignment || row?.assignment;
+
                 return {
                     assignment_id: aid,
-                    assignment_name: row?.assignment?.title,
-                    course_id: row?.assignment?.course_id?.course_id,
-                    course_name: row?.assignment?.course_id?.course_name,
-                    assignment_created_at: row?.assignment?.created_at,
-                    assignment_created_by: row?.assignment?.user?.user_id,
-                    assignment_created_by_name: row?.assignment?.user ? (row?.assignment?.user.first_name + ' ' + row?.assignment?.user.last_name).trim() : null,
+                    assignment_name: assignmentObj?.title || null,
+                    course_id: courseFromMapping?.course_id || assignmentObj?.course_id?.course_id,
+                    course_name: courseFromMapping?.course_name || assignmentObj?.course_id?.course_name,
+                    assignment_created_at: assignmentObj?.created_at,
+                    assignment_created_by: assignmentObj?.user?.user_id,
+                    assignment_created_by_name: assignmentObj?.user ? (assignmentObj?.user.first_name + ' ' + assignmentObj?.user.last_name).trim() : null,
                     signatures
                 };
             });

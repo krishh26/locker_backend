@@ -465,19 +465,19 @@ class LearnerController {
                 let fullyCompletedUnits = new Set();
 
                 // Using AssignmentMapping: merge mapping flags into course units/subUnits
-                let courseMappings: any = filteredMappings.filter(mapping => mapping.course.course_id === userCourse.course.course_id);
+                let courseMappings: any = filteredMappings.filter(mapping => mapping.course.course_id == userCourse.course.course_id);
 
                 // Apply mapping flags onto units/subUnits
                 courseMappings.forEach(mapping => {
                     const unitsArray = userCourse.course.units || [];
-                    const unitIndex = unitsArray.findIndex((item: any) => String(item.id) === String(mapping.unit_code) || String(item.unit_ref) === String(mapping.unit_code));
+                    const unitIndex = unitsArray.findIndex((item: any) => String(item.id) == String(mapping.unit_code) || String(item.unit_ref) == String(mapping.unit_code));
                     if (unitIndex === -1) return;
 
                     const unit = unitsArray[unitIndex] || {};
 
                     if (mapping.sub_unit_id) {
                         unit.subUnit = unit.subUnit || [];
-                        const subIndex = unit.subUnit.findIndex((s: any) => String(s.id) === String(mapping.sub_unit_id));
+                        const subIndex = unit.subUnit.findIndex((s: any) => String(s.id) == String(mapping.sub_unit_id));
                         if (subIndex !== -1) {
                             unit.subUnit[subIndex].learnerMap = unit.subUnit[subIndex].learnerMap || mapping.learnerMap;
                             unit.subUnit[subIndex].trainerMap = unit.subUnit[subIndex].trainerMap || mapping.trainerMap;
@@ -503,8 +503,17 @@ class LearnerController {
                     } else if (status.partiallyCompleted) {
                         partiallyCompletedUnits.add(unit.id);
                     }
-                });
 
+                    if (Array.isArray(unit.subUnit)) {
+                        unit.subUnit.forEach((sub: any) => {
+                            if (sub?.learnerMap && sub?.trainerMap) {
+                                fullyCompleted.add(sub.id);
+                            } else if (sub?.learnerMap || sub?.trainerMap) {
+                                partiallyCompleted.add(sub.id);
+                            }
+                        });
+                    }
+                });
 
                 const totalSubUnits = userCourse.course.units?.reduce((count, unit) => {
                     return count + (unit.subUnit?.length || 0);
