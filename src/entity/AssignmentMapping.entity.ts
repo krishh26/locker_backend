@@ -21,6 +21,9 @@ export class AssignmentMapping {
   unit_code: string; // unit_ref / unit id
 
   @Column({ type: 'varchar', nullable: true })
+  code: string;
+
+  @Column({ type: 'varchar', nullable: true })
   sub_unit_id: string; // PC / subUnit id (optional)
 
   @Column({ type: 'boolean', default: false })

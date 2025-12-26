@@ -1137,6 +1137,7 @@ export class SamplingPlanController {
             // SubUnit-based course
             ? [{
               id: m.sub_unit_id,
+              code: m.code,
               learnerMapped: m.learnerMap,
               trainerMapped: m.trainerMap,
               review: pcReviewMap[m.mapping_id]?.[m.sub_unit_id] || null,
@@ -1144,6 +1145,7 @@ export class SamplingPlanController {
             // Unit-only course
             : [{
               id: unit_code,
+              code: m.code,
               learnerMapped: m.learnerMap,
               trainerMapped: m.trainerMap,
               review: pcReviewMap[m.mapping_id]?.[unit_code] || null,
