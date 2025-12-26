@@ -335,7 +335,12 @@ class AssignmentController {
             const requestingUserId = req.user.user_id;
             const requestingUserRoles = req.user.roles || [req.user.role];
 
-            if ( course_id ) {
+            /* ================= AUTH CHECK ================= */
+            if (
+                course_id &&
+                !requestingUserRoles.includes(UserRole.Admin) &&
+                !requestingUserRoles.includes(UserRole.Learner)
+            ) {
                 const userCourseInvolvement = await userCourseRepo
                     .createQueryBuilder("uc")
                     .leftJoin("uc.learner_id", "learner")
@@ -346,11 +351,11 @@ class AssignmentController {
                     .leftJoin("uc.EQA_id", "EQA")
                     .leftJoin("uc.employer_id", "employer")
                     .where(
-                        `(learner_user.user_id = :uid 
-            OR trainer.user_id = :uid 
-            OR IQA.user_id = :uid 
-            OR LIQA.user_id = :uid 
-            OR EQA.user_id = :uid 
+                        `(learner_user.user_id = :uid
+            OR trainer.user_id = :uid
+            OR IQA.user_id = :uid
+            OR LIQA.user_id = :uid
+            OR EQA.user_id = :uid
             OR employer.user_id = :uid)`,
                         { uid: requestingUserId }
                     )
@@ -364,7 +369,34 @@ class AssignmentController {
                 }
             }
 
-            /* ================= STEP 1: FETCH ASSIGNMENTS ================= */
+            /* ================= STEP 1: COURSE FILTER (ONLY IF course_id EXISTS) ================= */
+            let allowedAssignmentIds: number[] | null = null;
+
+            if (course_id) {
+                const mappedAssignments = await mappingRepo
+                    .createQueryBuilder("m")
+                    .leftJoin("m.assignment", "assignment")
+                    .leftJoin("m.course", "course")
+                    .where("course.course_id = :course_id", {
+                        course_id: Number(course_id),
+                    })
+                    .select("assignment.assignment_id", "assignment_id")
+                    .distinct(true)
+                    .getRawMany();
+
+                allowedAssignmentIds = mappedAssignments.map(
+                    (m) => m.assignment_id
+                );
+
+                if (!allowedAssignmentIds.length) {
+                    return res.status(200).json({
+                        status: true,
+                        data: [],
+                    });
+                }
+            }
+
+            /* ================= STEP 2: FETCH ASSIGNMENTS ================= */
             const assignmentQB = assignmentRepo
                 .createQueryBuilder("assignment")
                 .leftJoinAndSelect("assignment.user", "user")
@@ -372,6 +404,13 @@ class AssignmentController {
                 .orderBy("assignment.created_at", "DESC")
                 .skip(req.pagination.skip)
                 .take(Number(req.pagination.limit));
+
+            if (allowedAssignmentIds) {
+                assignmentQB.andWhere(
+                    "assignment.assignment_id IN (:...ids)",
+                    { ids: allowedAssignmentIds }
+                );
+            }
 
             if (search) {
                 assignmentQB.andWhere(
@@ -382,36 +421,31 @@ class AssignmentController {
 
             const [assignments, count] = await assignmentQB.getManyAndCount();
 
-            if (!assignments.length) {
-                return res.status(200).json({
-                    status: true,
-                    data: [],
-                });
-            }
-            /* ================= STEP 2: FETCH MAPPINGS (ALWAYS) ================= */
+            /* ================= STEP 3: FETCH & ATTACH MAPPINGS ================= */
             const assignmentIds = assignments.map(a => a.assignment_id);
-            console.log(assignmentIds)
 
-            const mappingQB = mappingRepo
-                .createQueryBuilder("m")
-                .leftJoinAndSelect("m.course", "course")
-                .leftJoinAndSelect("m.assignment", "assignment")
-                .where("assignment.assignment_id IN (:...ids)", {
-                    ids: assignmentIds,
-                });
+            let mappings: AssignmentMapping[] = [];
 
-            // course_id ONLY filters mappings
-            if (course_id) {
-                mappingQB.andWhere("course.course_id = :course_id", {
-                    course_id: Number(course_id),
-                });
+            if (assignmentIds.length) {
+                const mappingQB = mappingRepo
+                    .createQueryBuilder("m")
+                    .leftJoinAndSelect("m.course", "course")
+                    .leftJoinAndSelect("m.assignment", "assignment")
+                    .where("assignment.assignment_id IN (:...ids)", {
+                        ids: assignmentIds,
+                    });
+
+                if (course_id) {
+                    mappingQB.andWhere("course.course_id = :course_id", {
+                        course_id: Number(course_id),
+                    });
+                }
+
+                mappings = await mappingQB.getMany();
             }
 
-            const mappings = await mappingQB.getMany();
-
-            /* ================= STEP 3: ATTACH MAPPINGS TO ASSIGNMENTS ================= */
             const mappingByAssignment = new Map<number, AssignmentMapping[]>();
-            console.log(mappings)
+
             mappings.forEach(m => {
                 const aid = m.assignment.assignment_id;
                 if (!mappingByAssignment.has(aid)) {
@@ -439,6 +473,7 @@ class AssignmentController {
                     },
                 }),
             });
+
         } catch (error: any) {
             return res.status(500).json({
                 status: false,
