@@ -1071,7 +1071,7 @@ export class SamplingPlanController {
           mapping: { mapping_id: In(mappingIds) } as any,
           plan_detail: { id: detailId } as any,
         },
-        relations: ["signed_off_by"],
+        relations: ["mapping", "signed_off_by"],
       });
 
       const reviewMap: Record<number, any> = {};
@@ -1098,7 +1098,7 @@ export class SamplingPlanController {
           mapping: { mapping_id: In(mappingIds) } as any,
           unit_code,
         },
-        relations: ["signed_by"],
+        relations: ["mapping", "signed_by"], // ✅ ADD mapping
       });
 
       const pcReviewMap: Record<number, Record<string, any>> = {};
@@ -1610,15 +1610,7 @@ export class SamplingPlanController {
             type: unit.type,
             learnerMapped,
             trainerMapped,
-            subUnits: [
-              {
-                id: unitRef, // 👈 unit acts as single PC
-                title: unit.title,
-                code: unit.code,
-                learnerMapped,
-                trainerMapped,
-              },
-            ],
+            subUnits: [],
           };
         });
 

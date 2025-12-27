@@ -559,15 +559,15 @@ class AssignmentController {
             }
 
             // Permission: only Trainer / Admin can request
-            const requesterRoles = req.user.roles || [req.user.role];
-            const isAdmin = requesterRoles.includes(UserRole.Admin);
+            //const requesterRoles = req.user.roles || [req.user.role];
+            //const isAdmin = requesterRoles.includes(UserRole.Admin);
 
-            if (!isAdmin && !requesterRoles.includes(UserRole.Trainer)) {
-                return res.status(403).json({
-                    message: 'Not authorised to request signatures',
-                    status: false,
-                });
-            }
+            // if (!isAdmin && !requesterRoles.includes(UserRole.Trainer)) {
+            //     return res.status(403).json({
+            //         message: 'Not authorised to request signatures',
+            //         status: false,
+            //     });
+            // }
 
             // Fetch signature rows via mapping → assignment
             const signatures = await signatureRepo

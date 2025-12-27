@@ -1623,15 +1623,14 @@ class LearnerController {
                     })
                 }
                 else if (type === 'assignments_without_mapped') {
-                    const assignments_without_mapped = await assignmentRepository.createQueryBuilder("assignment")
-                        .where("assignment.units IS NOT NULL")
-                        .andWhere(`
-                            NOT EXISTS (
-                              SELECT 1
-                              FROM jsonb_array_elements(assignment.units::jsonb) AS unit,
-                                   jsonb_array_elements(unit->'subUnit') AS sub
-                            )
-                            `)
+                    const assignments_without_mapped = await assignmentRepository
+                        .createQueryBuilder("assignment")
+                        .leftJoin(
+                            AssignmentMapping,
+                            "mapping",
+                            "mapping.assignment_id = assignment.assignment_id"
+                        )
+                        .where("mapping.mapping_id IS NULL")
                         .getMany();
                     return res.status(200).json({
                         message: "Assignments without mapped fetched successfully",
