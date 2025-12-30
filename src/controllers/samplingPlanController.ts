@@ -232,6 +232,7 @@ export class SamplingPlanController {
 
           return {
             unit_code: u.id,
+            code: u.code,
             unit_name: u.title || "Unnamed",
             status,
             type: u.type ? u.type : "",
@@ -1005,7 +1006,7 @@ export class SamplingPlanController {
 
   public async getEvidenceForSamplePlanDetail(req: Request, res: Response) {
     try {
-      const detailId = parseInt(req.params.detailId);
+      const detailId = Number(req.params.detailId);
       const { unit_code } = req.query as { unit_code?: string };
 
       if (!detailId || !unit_code) {
@@ -1038,7 +1039,7 @@ export class SamplingPlanController {
       }
 
       const learnerUserId = detail.learner?.user_id?.user_id;
-      const courseId = (detail.samplingPlan as any).course?.course_id;
+      const courseId = detail.samplingPlan?.course?.course_id;
 
       if (!learnerUserId || !courseId) {
         return res.status(200).json({ status: true, data: [] });
@@ -1048,7 +1049,7 @@ export class SamplingPlanController {
       const mappings = await mappingRepo.find({
         where: {
           course: { course_id: courseId } as any,
-          unit_code: unit_code,
+          unit_code,
           learnerMap: true,
         },
         relations: ["assignment"],
@@ -1058,8 +1059,8 @@ export class SamplingPlanController {
       if (!mappings.length) {
         return res.status(200).json({
           status: true,
-          data: [],
           message: "No mapped evidence found",
+          data: [],
         });
       }
 
@@ -1071,7 +1072,7 @@ export class SamplingPlanController {
           mapping: { mapping_id: In(mappingIds) } as any,
           plan_detail: { id: detailId } as any,
         },
-        relations: ["mapping", "signed_off_by"],
+        relations: ["signed_off_by", "mapping"],
       });
 
       const reviewMap: Record<number, any> = {};
@@ -1098,7 +1099,7 @@ export class SamplingPlanController {
           mapping: { mapping_id: In(mappingIds) } as any,
           unit_code,
         },
-        relations: ["mapping", "signed_by"], // ✅ ADD mapping
+        relations: ["signed_by", "mapping"],
       });
 
       const pcReviewMap: Record<number, Record<string, any>> = {};
@@ -1134,22 +1135,22 @@ export class SamplingPlanController {
           },
 
           mappedSubUnits: m.sub_unit_id
-            // SubUnit-based course
-            ? [{
-              id: m.sub_unit_id,
-              code: m.code,
-              learnerMapped: m.learnerMap,
-              trainerMapped: m.trainerMap,
-              review: pcReviewMap[m.mapping_id]?.[m.sub_unit_id] || null,
-            }]
-            // Unit-only course
-            : [{
-              id: unit_code,
-              code: m.code,
-              learnerMapped: m.learnerMap,
-              trainerMapped: m.trainerMap,
-              review: pcReviewMap[m.mapping_id]?.[unit_code] || null,
-            }],
+            ? [
+              {
+                id: m.sub_unit_id,
+                learnerMapped: m.learnerMap,
+                trainerMapped: m.trainerMap,
+                review: pcReviewMap[m.mapping_id]?.[m.sub_unit_id] || null,
+              },
+            ]
+            : [
+              {
+                id: unit_code,
+                learnerMapped: m.learnerMap,
+                trainerMapped: m.trainerMap,
+                review: pcReviewMap[m.mapping_id]?.[unit_code] || null,
+              },
+            ],
 
           reviews: reviewMap[m.mapping_id] || {},
         };
