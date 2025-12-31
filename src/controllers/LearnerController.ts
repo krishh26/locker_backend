@@ -15,7 +15,7 @@ import { FundingBand } from "../entity/FundingBand.entity";
 import { LearnerPlan, LearnerPlanType } from "../entity/LearnerPlan.entity";
 import { SessionLearnerAction } from "../entity/SessionLearnerAction.entity";
 import { Course } from "../entity/Course.entity";
-import { getUnitCompletionStatus } from '../util/unitCompletion';
+import { getUnitCompletionStatus, unitCompletionStatus } from '../util/unitCompletion';
 import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
 import { In } from "typeorm";
 class LearnerController {
@@ -470,21 +470,49 @@ class LearnerController {
                 // Apply mapping flags onto units/subUnits
                 courseMappings.forEach(mapping => {
                     const unitsArray = userCourse.course.units || [];
-                    const unitIndex = unitsArray.findIndex((item: any) => String(item.id) == String(mapping.unit_code) || String(item.unit_ref) == String(mapping.unit_code));
+
+                    const unitIndex = unitsArray.findIndex(
+                        (u: any) =>
+                            String(u.id) === String(mapping.unit_code) ||
+                            String(u.unit_ref) === String(mapping.unit_code)
+                    );
                     if (unitIndex === -1) return;
 
-                    const unit = unitsArray[unitIndex] || {};
+                    const unit = unitsArray[unitIndex];
 
+                    // UNIT LEVEL
+                    if (!mapping.sub_unit_id) {
+                        unit.evidenceBoxes = unit.evidenceBoxes || [];
+                        unit.evidenceBoxes.push({
+                            mapping_id: mapping.mapping_id,
+                            assignment_id: mapping.assignment.assignment_id,
+                            learnerMap: mapping.learnerMap,
+                            trainerMap: mapping.trainerMap,
+                            sub_unit_id: null,
+                        });
+                    }
+
+                    // SUB-UNIT LEVEL
                     if (mapping.sub_unit_id) {
                         unit.subUnit = unit.subUnit || [];
-                        const subIndex = unit.subUnit.findIndex((s: any) => String(s.id) == String(mapping.sub_unit_id));
-                        if (subIndex !== -1) {
-                            unit.subUnit[subIndex].learnerMap = unit.subUnit[subIndex].learnerMap || mapping.learnerMap;
-                            unit.subUnit[subIndex].trainerMap = unit.subUnit[subIndex].trainerMap || mapping.trainerMap;
-                        }
-                    } else {
-                        unit.learnerMap = unit.learnerMap || mapping.learnerMap;
-                        unit.trainerMap = unit.trainerMap || mapping.trainerMap;
+
+                        const subIndex = unit.subUnit.findIndex(
+                            (s: any) => String(s.id) === String(mapping.sub_unit_id)
+                        );
+                        if (subIndex === -1) return;
+
+                        const sub = unit.subUnit[subIndex];
+                        sub.evidenceBoxes = sub.evidenceBoxes || [];
+
+                        sub.evidenceBoxes.push({
+                            mapping_id: mapping.mapping_id,
+                            assignment_id: mapping.assignment.assignment_id,
+                            learnerMap: mapping.learnerMap,
+                            trainerMap: mapping.trainerMap,
+                            sub_unit_id: mapping.sub_unit_id,
+                        });
+
+                        unit.subUnit[subIndex] = sub;
                     }
 
                     unitsArray[unitIndex] = unit;
@@ -540,18 +568,6 @@ class LearnerController {
                 .getRawOne();
             learner.otjTimeSpend = Number(result?.totalMinutes) || 0;
             learner.otjTimeSpendRequired = 100;
-
-            // Get next visit date
-            // const sessionRepository = AppDataSource.getRepository(LearnerPlan);
-            // const nextSession = await sessionRepository.createQueryBuilder('session')
-            //     .leftJoin('session.learners', 'learner')
-            //     .where('learner.learner_id = :learner_id', { learner_id })
-            //     .andWhere('session.startDate > :currentDate', { currentDate: new Date() })
-            //     .orderBy('session.startDate', 'ASC')
-            //     .select(['session.startDate'])
-            //     .getOne();
-
-            // const nextVisitDate = nextSession ? nextSession.startDate : null;
 
             // Automatically fetch funding bands based on learner's assigned courses
             let fundingBandData = null;
@@ -1623,15 +1639,14 @@ class LearnerController {
                     })
                 }
                 else if (type === 'assignments_without_mapped') {
-                    const assignments_without_mapped = await assignmentRepository.createQueryBuilder("assignment")
-                        .where("assignment.units IS NOT NULL")
-                        .andWhere(`
-                            NOT EXISTS (
-                              SELECT 1
-                              FROM jsonb_array_elements(assignment.units::jsonb) AS unit,
-                                   jsonb_array_elements(unit->'subUnit') AS sub
-                            )
-                            `)
+                    const assignments_without_mapped = await assignmentRepository
+                        .createQueryBuilder("assignment")
+                        .leftJoin(
+                            AssignmentMapping,
+                            "mapping",
+                            "mapping.assignment_id = assignment.assignment_id"
+                        )
+                        .where("mapping.mapping_id IS NULL")
                         .getMany();
                     return res.status(200).json({
                         message: "Assignments without mapped fetched successfully",
@@ -1881,7 +1896,7 @@ const getCourseData = async (courses: any[], user_id: string) => {
             (userCourse.course.units || []).forEach((unit: any) => {
                 if (!mappedUnitIds.size || !mappedUnitIds.has(String(unit.id))) return;
 
-                const status = getUnitCompletionStatus(unit);
+                const status = unitCompletionStatus(unit);
 
                 if (status.fullyCompleted) {
                     fullyCompletedUnits.add(unit.id);
