@@ -35,3 +35,33 @@ export const getUnitCompletionStatus = (unit: any): UnitCompletionStatus => {
     partiallyCompleted: learnerDone || trainerDone,
   };
 };
+
+export const unitCompletionStatus = (unit: any) => {
+  let learnerDone = false;
+  let trainerDone = false;
+
+  // CASE 1: Unit has sub-units
+  if (Array.isArray(unit.subUnit) && unit.subUnit.length > 0) {
+    unit.subUnit.forEach((sub: any) => {
+      (sub.evidenceBoxes || []).forEach((box: any) => {
+        if (box.learnerMap) learnerDone = true;
+        if (box.trainerMap) trainerDone = true;
+      });
+    });
+  }
+
+  // CASE 2: Unit-only (no sub-units)
+  if (Array.isArray(unit.evidenceBoxes)) {
+    unit.evidenceBoxes.forEach((box: any) => {
+      if (box.learnerMap) learnerDone = true;
+      if (box.trainerMap) trainerDone = true;
+    });
+  }
+
+  return {
+    learnerDone,
+    trainerDone,
+    fullyCompleted: learnerDone && trainerDone,
+    partiallyCompleted: learnerDone || trainerDone,
+  };
+};
