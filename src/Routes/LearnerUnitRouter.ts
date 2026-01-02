@@ -3,9 +3,16 @@ import LearnerUnitController from '../controllers/LearnerUnitController';
 import { authorizeRoles } from '../middleware/verifyToken';
 import { UserRole } from '../util/constants';
 
-const router = express.Router();
+const learnerUnitRouter = express.Router();
+
+const Controller = new LearnerUnitController();
 
 // Save selected units (activate/deactivate)
-router.post('/', authorizeRoles(UserRole.Admin, UserRole.Trainer, UserRole.Learner), LearnerUnitController.saveSelectedUnits);
+learnerUnitRouter.post('/', authorizeRoles(UserRole.Admin, UserRole.Trainer, UserRole.Learner), Controller.saveSelectedUnits);
+// Get all units of a course
+learnerUnitRouter.get('/courses/:course_id/units', Controller.getCourseUnits);
 
-export default router;
+// Get chosen units for learner + course
+learnerUnitRouter.get('/:learner_id/:course_id', Controller.getChosenUnits);
+
+export default learnerUnitRouter;
