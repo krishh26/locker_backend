@@ -39,6 +39,7 @@ import SamplingDocRoutes from './samplingPlanDocument.routes';
 import SamplingFormsRoutes from './samplingPlanForm.routes';
 import SamplingQuestionRoutes from './samplingPlanQuestion.routes';
 import SessionTypeRoutes from './SessionTypeRoutes';
+import SurveyRoutes from './SurveyRouter';
 
 const fileController = new FileController;
 const Routes = express.Router();
@@ -79,6 +80,7 @@ Routes.use("/sample-doc", SamplingDocRoutes)
 Routes.use("/sample-form", SamplingFormsRoutes)
 Routes.use("/sample-question", SamplingQuestionRoutes)
 Routes.use('/sessionType', SessionTypeRoutes)
+Routes.use('/surveys', SurveyRoutes)
 
 // API routes
 Routes.get("/file", fileController.getFile)
