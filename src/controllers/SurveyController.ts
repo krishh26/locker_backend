@@ -1,0 +1,975 @@
+import { Response } from 'express';
+import { AppDataSource } from '../data-source';
+import { CustomRequest } from '../util/Interface/expressInterface';
+import { UserRole } from '../util/constants';
+import {
+    Survey,
+    SurveyBackgroundType,
+    SurveyStatus,
+} from '../entity/Survey.entity';
+import {
+    SurveyQuestion,
+    SurveyQuestionType,
+} from '../entity/SurveyQuestion.entity';
+import { SurveyResponse } from '../entity/SurveyResponse.entity';
+
+type ErrorDetail = { field?: string; message: string };
+
+class SurveyController {
+
+    public async getSurveys(req: CustomRequest, res: Response) {
+        try {
+            const { status, userId, organizationId, search } = req.query as any;
+            const repo = AppDataSource.getRepository(Survey);
+
+            const qb = repo.createQueryBuilder('survey');
+
+            if (status) {
+                if (!Object.values(SurveyStatus).includes(status)) {
+                    return res.status(400).json({
+                        message: 'Invalid status filter',
+                        status: false,
+                    });
+                }
+                qb.andWhere('survey.status = :status', { status });
+            }
+
+            if (userId) {
+                qb.andWhere('survey.userId = :userId', { userId });
+            }
+
+            if (organizationId) {
+                qb.andWhere('survey.organizationId = :organizationId', { organizationId });
+            }
+
+            if (search) {
+                qb.andWhere('(survey.name ILIKE :search OR survey.description ILIKE :search)', { search: `%${search}%` });
+            }
+
+            const page = req.pagination?.page || 1;
+            const limit = req.pagination?.limit || 10;
+            const skip = req.pagination?.skip || 0;
+
+            const [surveys, total] = await qb
+                .orderBy('survey.createdAt', 'DESC')
+                .skip(skip)
+                .take(limit)
+                .getManyAndCount();
+
+            return res.status(200).json({
+                message: 'Surveys retrieved successfully',
+                status: true,
+                data: {
+                    surveys,
+                    pagination: {
+                        page,
+                        limit,
+                        total,
+                        totalPages: Math.ceil(total / limit),
+                    },
+                },
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                message: error.message,
+                status: false,
+                error: { code: 'INTERNAL_ERROR', message: error.message },
+            });
+        }
+    }
+
+    public async getSurveyById(req: CustomRequest, res: Response) {
+        try {
+            const { surveyId } = req.params;
+            const repo = AppDataSource.getRepository(Survey);
+            const survey = await repo.findOne({ where: { id: surveyId } });
+
+            if (!survey) {
+                return res.status(404).json({
+                    message: 'Survey not found',
+                    status: false,
+                });
+            }
+
+            return res.status(200).json({
+                message: 'Survey retrieved successfully',
+                status: true,
+                data: { survey },
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                message: error.message,
+                status: false,
+                error: { code: 'INTERNAL_ERROR', message: error.message },
+            });
+        }
+    }
+
+    public async createSurvey(req: CustomRequest, res: Response) {
+        try {
+            const { name, description, status, background, organizationId } = req.body;
+
+            if (!name || String(name).trim().length < 2) {
+                return res.status(400).json({
+                    message: 'Name must be at least 2 characters',
+                    status: false,
+                });
+            }
+
+            if (status && ![SurveyStatus.Draft, SurveyStatus.Published].includes(status)) {
+                return res.status(400).json({
+                    message: 'Status must be Draft or Published',
+                    status: false,
+                });
+            }
+
+            let parsedBackground: { type: SurveyBackgroundType; value: string } | null = null;
+            try {
+                if (background) {
+                    if (!background.type || !background.value) {
+                        return res.status(400).json({
+                            message: 'Background is required',
+                            status: false,
+                        });
+                    }
+                    if (![SurveyBackgroundType.Gradient, SurveyBackgroundType.Image].includes(background.type)) {
+                        return res.status(400).json({
+                            message: 'Background type must be gradient or image',
+                            status: false,
+                        });
+                    }
+                    parsedBackground = {
+                        type: background.type,
+                        value: background.value,
+                    };
+                }
+            } catch (err: any) {
+                return res.status(400).json({
+                    message: err.message,
+                    status: false,
+                });
+            }
+
+            const repo = AppDataSource.getRepository(Survey);
+            const survey = repo.create({
+                name: String(name).trim(),
+                description: description ?? null,
+                status: status ?? SurveyStatus.Draft,
+                backgroundType: parsedBackground?.type ?? null,
+                backgroundValue: parsedBackground?.value ?? null,
+                userId: req.user?.user_id ? String(req.user.user_id) : null,
+                organizationId: organizationId ?? null,
+            });
+
+            const saved = await repo.save(survey);
+
+            return res.status(201).json({
+                message: 'Survey created successfully',
+                status: true,
+                data: { survey: saved },
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                message: error.message,
+                status: false,
+                error: { code: 'INTERNAL_ERROR', message: error.message },
+            });
+        }
+    }
+
+    public async updateSurvey(req: CustomRequest, res: Response) {
+        try {
+            const { surveyId } = req.params;
+            const { name, description, status, background, organizationId } = req.body;
+            const repo = AppDataSource.getRepository(Survey);
+
+            const survey = await repo.findOne({ where: { id: surveyId } });
+            if (!survey) {
+                    return res.status(404).json({
+                    message: 'Survey not found',
+                    status: false,
+                });
+            }
+
+            if (!canManageSurvey(req, survey)) {
+                return res.status(403).json({
+                    message: 'Not allowed to update this survey',
+                    status: false,
+                });
+            }
+
+            if (name !== undefined) {
+                if (String(name).trim().length < 2) {
+                    return res.status(400).json({
+                        message: 'Name must be at least 2 characters',
+                        status: false,
+                    });
+                }
+                survey.name = String(name).trim();
+            }
+
+            if (description !== undefined) {
+                survey.description = description ?? null;
+            }
+
+            if (status !== undefined) {
+                if (![SurveyStatus.Draft, SurveyStatus.Published, SurveyStatus.Archived].includes(status)) {
+                    return res.status(400).json({
+                        message: 'Invalid status value',
+                        status: false,
+                    });
+                }
+                survey.status = status;
+            }
+
+            if (organizationId !== undefined) {
+                survey.organizationId = organizationId ?? null;
+            }
+
+            if (background !== undefined) {
+                if (!background) {
+                    survey.backgroundType = null;
+                    survey.backgroundValue = null;
+                } else {
+                    try {
+                        if (!background.type || !background.value) {
+                            return res.status(400).json({
+                                message: 'Background is required',
+                                status: false,
+                            });
+                        }
+                        if (![SurveyBackgroundType.Gradient, SurveyBackgroundType.Image].includes(background.type)) {
+                            return res.status(400).json({
+                                message: 'Background type must be gradient or image',
+                                status: false,
+                            });
+                        }
+                        survey.backgroundType = background.type;
+                        survey.backgroundValue = background.value;
+                    } catch (err: any) {
+                        return res.status(400).json({
+                            message: err.message,
+                            status: false,
+                        });
+                    }
+                }
+            }
+
+            const updated = await repo.save(survey);
+            return res.status(200).json({
+                message: 'Survey updated successfully',
+                status: true,
+                data: { survey: updated },
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                message: error.message,
+                status: false,
+                error: { code: 'INTERNAL_ERROR', message: error.message },
+            });
+        }
+    }
+
+    public async deleteSurvey(req: CustomRequest, res: Response) {
+        try {
+            const { surveyId } = req.params;
+            const repo = AppDataSource.getRepository(Survey);
+            const survey = await repo.findOne({ where: { id: surveyId } });
+
+            if (!survey) {
+                return res.status(404).json({
+                    message: 'Survey not found',
+                    status: false,
+                });
+            }
+
+            if (!canManageSurvey(req, survey)) {
+                return res.status(403).json({
+                    message: 'Not allowed to delete this survey',
+                    status: false,
+                });
+            }
+
+            await repo.delete(surveyId);
+
+            return res.status(200).json({
+                message: 'Survey deleted successfully',
+                status: true,
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                message: error.message,
+                status: false,
+                error: { code: 'INTERNAL_ERROR', message: error.message },
+            });
+        }
+    }
+
+    public async getQuestionsForSurvey(req: CustomRequest, res: Response) {
+        try {
+            const { surveyId } = req.params;
+            const surveyRepo = AppDataSource.getRepository(Survey);
+            const questionRepo = AppDataSource.getRepository(SurveyQuestion);
+
+            const survey = await surveyRepo.findOne({ where: { id: surveyId } });
+            if (!survey) {
+                return res.status(404).json({
+                    message: 'Survey not found',
+                    status: false,
+                });
+            }
+
+            if (!canManageSurvey(req, survey)) {
+                return res.status(403).json({
+                    message: 'Not allowed to access questions',
+                    status: false,
+                });
+            }
+
+            const questions = await questionRepo.find({
+                where: { surveyId },
+                order: { order: 'ASC' },
+            });
+
+            return res.status(200).json({
+                message: 'Questions retrieved successfully',
+                status: true,
+                data: { questions },
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                message: error.message,
+                status: false,
+                error: { code: 'INTERNAL_ERROR', message: error.message },
+            });
+        }
+    }
+
+    public async createQuestion(req: CustomRequest, res: Response) {
+        try {
+            const { surveyId } = req.params;
+            const payload = req.body;
+            const surveyRepo = AppDataSource.getRepository(Survey);
+            const questionRepo = AppDataSource.getRepository(SurveyQuestion);
+
+            const survey = await surveyRepo.findOne({ where: { id: surveyId } });
+            if (!survey) {
+                return res.status(404).json({
+                    message: 'Survey not found',
+                    status: false,
+                });
+            }
+
+            if (!canManageSurvey(req, survey)) {
+                return res.status(403).json({
+                    message: 'Not allowed to manage questions',
+                    status: false,
+                });
+            }
+
+            const { errors, normalized } = validateQuestionPayload(payload);
+            if (errors.length) {
+                return res.status(400).json({
+                    message: 'Validation failed',
+                    status: false,
+                });
+            }
+
+            let order = normalized.order;
+            if (order === undefined) {
+                const lastQuestion = await questionRepo.findOne({
+                    where: { surveyId },
+                    order: { order: 'DESC' },
+                });
+                order = lastQuestion ? lastQuestion.order + 1 : 0;
+            }
+
+            const question = questionRepo.create({
+                surveyId,
+                title: normalized.title!,
+                description: normalized.description ?? null,
+                type: normalized.type as SurveyQuestionType,
+                required: normalized.required ?? false,
+                options: normalized.options ?? null,
+                order,
+            });
+
+            const saved = await questionRepo.save(question);
+
+            return res.status(201).json({
+                message: 'Question created successfully',
+                status: true,
+                data: { question: saved },
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                message: error.message,
+                status: false,
+                error: { code: 'INTERNAL_ERROR', message: error.message },
+            });
+        }
+    }
+
+    public async updateQuestion(req: CustomRequest, res: Response) {
+        try {
+            const { surveyId, questionId } = req.params;
+            const payload = req.body;
+            const surveyRepo = AppDataSource.getRepository(Survey);
+            const questionRepo = AppDataSource.getRepository(SurveyQuestion);
+
+            const survey = await surveyRepo.findOne({ where: { id: surveyId } });
+            if (!survey) {
+                return res.status(404).json({
+                    message: 'Survey not found',
+                    status: false,
+                });
+            }
+
+            if (!canManageSurvey(req, survey)) {
+                return res.status(403).json({
+                            message: 'Not allowed to manage questions',
+                    status: false,
+                });
+            }
+
+            const question = await questionRepo.findOne({ where: { id: questionId, surveyId } });
+            if (!question) {
+                return res.status(404).json({
+                    message: 'Question not found',
+                    status: false,
+                });
+            }
+
+            const { errors, normalized } = validateQuestionPayload(payload, true);
+            if (errors.length) {
+                return res.status(400).json({
+                    message: 'Validation failed',
+                    status: false,
+                });
+            }
+
+            question.title = normalized.title ?? question.title;
+            question.description = normalized.description !== undefined ? normalized.description : question.description;
+            question.type = (normalized.type as SurveyQuestionType) ?? question.type;
+            question.required = normalized.required ?? question.required;
+            question.options = normalized.options !== undefined ? normalized.options : question.options;
+            question.order = normalized.order ?? question.order;
+
+            const saved = await questionRepo.save(question);
+            return res.status(200).json({
+                message: 'Question updated successfully',
+                status: true,
+                data: { question: saved },
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                message: error.message,
+                status: false,
+                error: { code: 'INTERNAL_ERROR', message: error.message },
+            });
+        }
+    }
+
+    public async deleteQuestion(req: CustomRequest, res: Response) {
+        try {
+            const { surveyId, questionId } = req.params;
+            const surveyRepo = AppDataSource.getRepository(Survey);
+            const questionRepo = AppDataSource.getRepository(SurveyQuestion);
+
+            const survey = await surveyRepo.findOne({ where: { id: surveyId } });
+            if (!survey) {
+                return res.status(404).json({
+                    message: 'Survey not found',
+                    status: false,
+                });
+            }
+
+            if (!canManageSurvey(req, survey)) {
+                return res.status(403).json({
+                    message: 'Not allowed to manage questions',
+                    status: false,
+                });
+            }
+
+            const question = await questionRepo.findOne({ where: { id: questionId, surveyId } });
+            if (!question) {
+                return res.status(404).json({
+                    message: 'Question not found',
+                    status: false,
+                });
+            }
+
+            await questionRepo.delete(questionId);
+
+            // Reorder remaining questions
+            const remaining = await questionRepo.find({ where: { surveyId }, order: { order: 'ASC' } });
+            await Promise.all(
+                remaining.map((q, index) => questionRepo.update(q.id, { order: index }))
+            );
+
+            return res.status(200).json({
+                message: 'Question deleted successfully',
+                status: true
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                success: false,
+                error: { code: 'INTERNAL_ERROR', message: error.message },
+            });
+        }
+    }
+
+    public async reorderQuestions(req: CustomRequest, res: Response) {
+        try {
+            const { surveyId } = req.params;
+            const { questionIds } = req.body as { questionIds: string[] };
+            const surveyRepo = AppDataSource.getRepository(Survey);
+            const questionRepo = AppDataSource.getRepository(SurveyQuestion);
+
+            const survey = await surveyRepo.findOne({ where: { id: surveyId } });
+            if (!survey) {
+                return res.status(404).json({
+                    message: 'Survey not found',
+                    status: false,
+                });
+            }
+
+            if (!canManageSurvey(req, survey)) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Not allowed to manage questions',
+                    status: false,
+                });
+            }
+
+            if (!Array.isArray(questionIds) || !questionIds.length) {
+                return res.status(400).json({
+                    message: 'questionIds array is required',
+                    status: false,
+                });
+            }
+
+            const existingQuestions = await questionRepo.find({
+                where: { surveyId },
+                select: ['id'],
+            });
+            const existingIds = existingQuestions.map((q) => q.id);
+            
+            const allPresent = questionIds.every((id) => existingIds.includes(id));
+            if (!allPresent || existingIds.length !== questionIds.length) {
+                return res.status(400).json({
+                    message: 'questionIds must include all survey questions',
+                    status: false,
+                });
+            }
+
+            await AppDataSource.transaction(async (manager) => {
+                for (let i = 0; i < questionIds.length; i++) {
+                    await manager.update(SurveyQuestion, { id: questionIds[i] }, { order: i });
+                }
+            });
+
+            const updated = await questionRepo.find({ where: { surveyId }, order: { order: 'ASC' } });
+
+            return res.status(200).json({
+                success: true,
+                data: { questions: updated },
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                success: false,
+                error: { code: 'INTERNAL_ERROR', message: error.message },
+            });
+        }
+    }
+
+    public async getResponsesForSurvey(req: CustomRequest, res: Response) {
+        try {
+            const { surveyId } = req.params;
+            const { startDate, endDate } = req.query as any;
+            const surveyRepo = AppDataSource.getRepository(Survey);
+            const responseRepo = AppDataSource.getRepository(SurveyResponse);
+
+            const survey = await surveyRepo.findOne({ where: { id: surveyId } });
+            if (!survey) {
+                return res.status(404).json({
+                    message: 'Survey not found',
+                    status: false,
+                });
+            }
+
+            if (!canManageSurvey(req, survey)) {
+                return res.status(403).json({
+                    success: false,
+                        message: 'Not allowed to view responses',
+                    status: false,
+                });
+            }
+
+            const qb = responseRepo.createQueryBuilder('response').where('response.surveyId = :surveyId', { surveyId });
+
+            if (startDate) {
+                qb.andWhere('response.submittedAt >= :startDate', { startDate });
+            }
+
+            if (endDate) {
+                qb.andWhere('response.submittedAt <= :endDate', { endDate });
+            }
+
+            const page = req.pagination?.page || 1;
+            const limit = req.pagination?.limit || 10;
+            const skip = req.pagination?.skip || 0;
+
+            const [responses, total] = await qb
+                .orderBy('response.submittedAt', 'DESC')
+                .skip(skip)
+                .take(limit)
+                .getManyAndCount();
+
+            return res.status(200).json({
+                success: true,
+                data: {
+                    responses,
+                    pagination: {
+                        page,
+                        limit,
+                        total,
+                        totalPages: Math.ceil(total / limit),
+                    },
+                },
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                success: false,
+                error: { code: 'INTERNAL_ERROR', message: error.message },
+            });
+        }
+    }
+
+    public async getResponseById(req: CustomRequest, res: Response) {
+        try {
+            const { surveyId, responseId } = req.params;
+            const surveyRepo = AppDataSource.getRepository(Survey);
+            const responseRepo = AppDataSource.getRepository(SurveyResponse);
+
+            const survey = await surveyRepo.findOne({ where: { id: surveyId } });
+            if (!survey) {
+                return res.status(404).json({
+                    message: 'Survey not found',
+                    status: false,
+                });
+            }
+
+            if (!canManageSurvey(req, survey)) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Not allowed to view responses',
+                    status: false,
+                });
+            }
+
+            const responseEntity = await responseRepo.findOne({ where: { id: responseId, surveyId } });
+            if (!responseEntity) {
+                return res.status(404).json({
+                    message: 'Response not found',
+                    status: false,
+                });
+            }
+
+            return res.status(200).json({
+                success: true,
+                data: { response: responseEntity },
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                success: false,
+                error: { code: 'INTERNAL_ERROR', message: error.message },
+            });
+        }
+    }
+
+    public async submitSurveyResponse(req: CustomRequest, res: Response) {
+        try {
+            const { surveyId } = req.params;
+            const { userId, email, answers } = req.body;
+            const surveyRepo = AppDataSource.getRepository(Survey);
+            const questionRepo = AppDataSource.getRepository(SurveyQuestion);
+            const responseRepo = AppDataSource.getRepository(SurveyResponse);
+
+            const survey = await surveyRepo.findOne({ where: { id: surveyId } });
+            if (!survey) {
+                return res.status(404).json({
+                    message: 'Survey not found',
+                    status: false,
+                });
+            }
+
+            if (survey.status !== SurveyStatus.Published) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Survey is not available for responses',
+                    status: false,
+                });
+            }
+
+            const questions = await questionRepo.find({ where: { surveyId }, order: { order: 'ASC' } });
+            const validationErrors = await validateAnswers(questions, answers || {});
+
+            if (validationErrors.length) {
+                    return res.status(400).json({
+                        message: 'Validation failed',
+                        status: false,
+                    });
+            }
+
+            const responseEntity = responseRepo.create({
+                surveyId,
+                userId: userId ?? null,
+                email: email ?? null,
+                answers: answers || {},
+            });
+
+            const saved = await responseRepo.save(responseEntity);
+
+            return res.status(201).json({
+                success: true,
+                data: { response: saved },
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                success: false,
+                error: { code: 'INTERNAL_ERROR', message: error.message },
+            });
+        }
+    }
+
+    public async deleteResponse(req: CustomRequest, res: Response) {
+        try {
+            const { surveyId, responseId } = req.params;
+            const surveyRepo = AppDataSource.getRepository(Survey);
+            const responseRepo = AppDataSource.getRepository(SurveyResponse);
+
+            const survey = await surveyRepo.findOne({ where: { id: surveyId } });
+            if (!survey) {
+                return res.status(404).json({
+                    message: 'Survey not found',
+                    status: false,
+                });
+            }
+
+            const responseEntity = await responseRepo.findOne({ where: { id: responseId, surveyId } });
+            if (!responseEntity) {
+                return res.status(404).json({
+                    message: 'Response not found',
+                    status: false,
+                });
+            }
+
+            const currentUserId = req.user?.user_id ? String(req.user.user_id) : null;
+            if (
+                !isAdmin(req) &&
+                survey.userId !== currentUserId &&
+                responseEntity.userId !== currentUserId
+            ) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Not allowed to delete this response',
+                    status: false,
+                });
+            }
+
+            await responseRepo.delete(responseId);
+
+            return res.status(200).json({
+                success: true,
+                message: 'Response deleted successfully',
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                success: false,
+                error: { code: 'INTERNAL_ERROR', message: error.message },
+            });
+        }
+    }
+
+    public async getPublishedSurveyWithQuestions(req: CustomRequest, res: Response) {
+        try {
+            const { surveyId } = req.params;
+            const surveyRepo = AppDataSource.getRepository(Survey);
+            const questionRepo = AppDataSource.getRepository(SurveyQuestion);
+
+            const survey = await surveyRepo.findOne({ where: { id: surveyId, status: SurveyStatus.Published } });
+            if (!survey) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Survey not available',
+                    status: false,
+                });
+            }
+
+            const questions = await questionRepo.find({
+                where: { surveyId },
+                order: { order: 'ASC' },
+            });
+
+            return res.status(200).json({
+                success: true,
+                data: {
+                    survey: {
+                        id: survey.id,
+                        name: survey.name,
+                        description: survey.description,
+                        status: survey.status,
+                        background: survey.backgroundType && survey.backgroundValue ? {
+                            type: survey.backgroundType,
+                            value: survey.backgroundValue,
+                        } : null,
+                    },
+                    questions,
+                },
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                success: false,
+                message: error.message,
+                status: false,
+            });
+        }
+    }
+}
+
+export default SurveyController;
+
+const isAdmin = (req: CustomRequest) => {
+    return req.user?.role === UserRole.Admin || (Array.isArray(req.user?.roles) && req.user.roles.includes(UserRole.Admin));
+}
+
+const canManageSurvey = (req: CustomRequest, survey: Survey) => {
+    const userId = req.user?.user_id ? String(req.user.user_id) : null;
+    return isAdmin(req) || (userId && survey.userId === userId);
+}
+
+const validateQuestionPayload = (payload: any, isUpdate = false): { errors: ErrorDetail[]; normalized?: Partial<SurveyQuestion> } => {
+    const errors: ErrorDetail[] = [];
+    const normalized: Partial<SurveyQuestion> = {};
+
+    if (!isUpdate || payload.title !== undefined) {
+        if (!payload.title || String(payload.title).trim().length < 1) {
+            errors.push({ field: 'title', message: 'Title is required' });
+        } else {
+            normalized.title = String(payload.title).trim();
+        }
+    }
+
+    if (!isUpdate || payload.type !== undefined) {
+        if (!Object.values(SurveyQuestionType).includes(payload.type)) {
+            errors.push({
+                field: 'type',
+                message: 'Invalid question type',
+            });
+        } else {
+            normalized.type = payload.type;
+        }
+    }
+
+    if (!isUpdate || payload.required !== undefined) {
+        normalized.required = Boolean(payload.required);
+    }
+
+    if (!isUpdate || payload.description !== undefined) {
+        normalized.description = payload.description ?? null;
+    }
+
+    const needsOptions = [SurveyQuestionType.MultipleChoice, SurveyQuestionType.Checkbox];
+    if (!isUpdate || payload.options !== undefined) {
+        if (payload.options !== undefined) {
+            if (needsOptions.includes(payload.type) || (isUpdate && needsOptions.includes(payload.type ?? normalized.type as any))) {
+                if (!Array.isArray(payload.options) || payload.options.length === 0) {
+                    errors.push({ field: 'options', message: 'Options required for this question type' });
+                } else {
+                    const trimmedOptions = payload.options.map((opt: string) => String(opt).trim()).filter((opt: string) => opt);
+                    if (!trimmedOptions.length) {
+                        errors.push({ field: 'options', message: 'Options cannot be empty' });
+                    } else {
+                        normalized.options = Array.from(new Set(trimmedOptions));
+                    }
+                }
+            } else {
+                normalized.options = null;
+            }
+        }
+    }
+
+    if (!isUpdate || payload.order !== undefined) {
+        if (payload.order !== undefined) {
+            const parsedOrder = Number(payload.order);
+            if (Number.isNaN(parsedOrder) || parsedOrder < 0) {
+                errors.push({ field: 'order', message: 'Order must be a non-negative number' });
+            } else {
+                normalized.order = parsedOrder;
+            }
+        }
+    }
+
+    return { errors, normalized };
+}
+
+const validateAnswers = async (questions: SurveyQuestion[], answers: Record<string, any>): Promise<ErrorDetail[]> => {
+    const errors: ErrorDetail[] = [];
+
+    for (const question of questions) {
+        const value = answers ? answers[question.id] : undefined;
+
+        if (question.required && (value === undefined || value === null || value === '')) {
+            errors.push({ field: question.id, message: 'Required question not answered' });
+            continue;
+        }
+
+        if (value === undefined || value === null || value === '') continue;
+
+        switch (question.type) {
+            case SurveyQuestionType.ShortText:
+            case SurveyQuestionType.LongText:
+            case SurveyQuestionType.Date:
+                if (typeof value !== 'string') {
+                    errors.push({ field: question.id, message: 'Answer must be a string' });
+                }
+                break;
+            case SurveyQuestionType.MultipleChoice:
+                if (typeof value !== 'string') {
+                    errors.push({ field: question.id, message: 'Answer must be a string' });
+                    break;
+                }
+                if (question.options && !question.options.includes(value)) {
+                    errors.push({ field: question.id, message: 'Answer must match one of the options' });
+                }
+                break;
+            case SurveyQuestionType.Checkbox:
+                if (!Array.isArray(value)) {
+                    errors.push({ field: question.id, message: 'Answer must be an array of strings' });
+                    break;
+                }
+                if (question.options) {
+                    const invalid = value.some((v) => typeof v !== 'string' || !question.options.includes(v));
+                    if (invalid) {
+                        errors.push({ field: question.id, message: 'All answers must match provided options' });
+                    }
+                }
+                break;
+            case SurveyQuestionType.Rating:
+                if (typeof value !== 'string') {
+                    errors.push({ field: question.id, message: 'Answer must be a string rating (1-5)' });
+                    break;
+                }
+                const rating = Number(value);
+                if (Number.isNaN(rating) || rating < 1 || rating > 5) {
+                    errors.push({ field: question.id, message: 'Rating must be between 1 and 5' });
+                }
+                break;
+            default:
+                errors.push({ field: question.id, message: 'Invalid question type' });
+        }
+    }
+
+    return errors;
+}

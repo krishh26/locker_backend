@@ -399,6 +399,9 @@ class LearnerController {
             for (let index in formattedLearners) {
                 formattedLearners[index].course = await getCourseData(formattedLearners[index]?.course, formattedLearners[index].user_id);
             }
+            // for (let index in formattedLearners) {
+            //     formattedLearners[index].course = await getCourseData(formattedLearners[index]?.course, formattedLearners[index].user_id, formattedLearners[index]?.learner_id);
+            // }
 
             return res.status(200).json({
                 message: "Learner fetched successfully",
@@ -449,6 +452,23 @@ class LearnerController {
             let courses = await userCourseRepository.find({ where: { learner_id }, relations: ["trainer_id", "IQA_id", "LIQA_id", "EQA_id", "employer_id", "employer_id.employer"] })
 
             const course_ids = courses.map((course: any) => course.course.course_id)
+
+            // Fetch learner-unit preferences for this learner across assigned courses
+            // const learnerUnitRepository = AppDataSource.getRepository(LearnerUnit as any);
+            // const learnerUnitsAll = course_ids.length ? await learnerUnitRepository.createQueryBuilder('lu')
+            //     .leftJoinAndSelect('lu.course', 'course')
+            //     .where('lu.learner_id = :learner_id', { learner_id })
+            //     .andWhere('course.course_id IN (:...course_ids)', { course_ids })
+            //     .getMany() : [];
+            // const learnerUnitsByCourse = new Map<number, { hasRecords: boolean, activeSet: Set<string> }>();
+            // for (const rec of learnerUnitsAll) {
+            //     const cid = (rec.course as any).course_id;
+            //     if (!learnerUnitsByCourse.has(cid)) learnerUnitsByCourse.set(cid, { hasRecords: false, activeSet: new Set() });
+            //     const v = learnerUnitsByCourse.get(cid)!;
+            //     v.hasRecords = true;
+            //     if (rec.active) v.activeSet.add(String(rec.unit_id));
+            // }
+
             const filteredMappings = course_ids.length ? await assignmentMappingRepository.createQueryBuilder('mapping')
                 .leftJoinAndSelect('mapping.assignment', 'assignment')
                 .leftJoinAndSelect('mapping.course', 'course')
@@ -463,6 +483,12 @@ class LearnerController {
                 let fullyCompleted = new Set();
                 let partiallyCompletedUnits = new Set();
                 let fullyCompletedUnits = new Set();
+
+                // Apply learner unit filtering for this userCourse if learner has preferences
+                // const courseFilter = learnerUnitsByCourse.get(userCourse.course.course_id);
+                // if (courseFilter && courseFilter.hasRecords) {
+                //     userCourse.course.units = (userCourse.course.units || []).filter((u: any) => courseFilter.activeSet.has(String(u.id)) || courseFilter.activeSet.has(String(u.unit_ref)));
+                // }
 
                 // Using AssignmentMapping: merge mapping flags into course units/subUnits
                 let courseMappings: any = filteredMappings.filter(mapping => mapping.course.course_id == userCourse.course.course_id);
@@ -1277,6 +1303,9 @@ class LearnerController {
                 formattedLearners[index].course = await getCourseData(formattedLearners[index]?.course, formattedLearners[index].user_id);
             }
 
+            // for (let index in formattedLearners) {
+            //     formattedLearners[index].course = await getCourseData(formattedLearners[index]?.course, formattedLearners[index].user_id, formattedLearners[index]?.learner_id);
+            // }
             const learnerData = [];
             formattedLearners.forEach(learner => {
                 if (learner.course.length) {
@@ -1607,38 +1636,45 @@ class LearnerController {
 
     public async getLearnerListWithCount(req: CustomRequest, res: Response) {
         try {
-            //if type pass then return data (typewise active learners, suspended learners, assignments without mapped, learners over due, learner plan due, learner plan due in next 7 days, session learner action due, session learner action due in next 7 days, session learner action overdue, learners course due in next 30 days) with count else only all counts
             const { type } = req.query as any;
             const learnerRepository = AppDataSource.getRepository(Learner);
             const userCourseRepository = AppDataSource.getRepository(UserCourse);
             const assignmentRepository = AppDataSource.getRepository(Assignment);
+            const assignmentMappingRepository = AppDataSource.getRepository(AssignmentMapping);
             const learnerPlanRepository = AppDataSource.getRepository(LearnerPlan);
             const SessionLearnerActionRepository = AppDataSource.getRepository(SessionLearnerAction);
             const courseRepository = AppDataSource.getRepository(Course);
             if (type) {
-                console.log(type)
-                if (type === 'active_learners') {
-                    const active_learners = await learnerRepository.createQueryBuilder("learner")
-                        .leftJoinAndSelect('learner.user_id', "user_id")
-                        .where("user_id.status = 'Active'").getMany();
+                if (type === "active_learners") {
+                    const active_learners = await learnerRepository
+                        .createQueryBuilder("learner")
+                        .leftJoinAndSelect("learner.user_id", "user_id")
+                        .where("user_id.status = 'Active'")
+                        .getMany();
+
                     return res.status(200).json({
                         message: "Active learners fetched successfully",
                         status: true,
-                        data: active_learners
-                    })
+                        data: active_learners,
+                    });
                 }
-                else if (type === 'suspended_learners') {
-                    const suspended_learners = await userCourseRepository.createQueryBuilder("user_course")
-                        .leftJoinAndSelect('user_course.learner_id', "learner_id")
-                        .leftJoinAndSelect('learner_id.user_id', "user_id")
-                        .where("user_course.course_status = 'Training Suspended'").distinctOn(["learner_id.learner_id"]).getMany();
+
+                else if (type === "suspended_learners") {
+                    const suspended_learners = await userCourseRepository
+                        .createQueryBuilder("user_course")
+                        .leftJoinAndSelect("user_course.learner_id", "learner_id")
+                        .leftJoinAndSelect("learner_id.user_id", "user_id")
+                        .where("user_course.course_status = 'Training Suspended'")
+                        .distinctOn(["learner_id.learner_id"])
+                        .getMany();
+
                     return res.status(200).json({
                         message: "Suspended learners fetched successfully",
                         status: true,
-                        data: suspended_learners
-                    })
+                        data: suspended_learners,
+                    });
                 }
-                else if (type === 'assignments_without_mapped') {
+                else if (type === "assignments_without_mapped") {
                     const assignments_without_mapped = await assignmentRepository
                         .createQueryBuilder("assignment")
                         .leftJoin(
@@ -1651,204 +1687,239 @@ class LearnerController {
                     return res.status(200).json({
                         message: "Assignments without mapped fetched successfully",
                         status: true,
-                        data: assignments_without_mapped
+                        data: assignments_without_mapped,
                     })
                 }
-                else if (type === 'learners_over_due') {
-                    const learners_over_due = await userCourseRepository.createQueryBuilder("user_course")
-                        .leftJoinAndSelect('user_course.learner_id', "learner_id")
-                        .leftJoinAndSelect('learner_id.user_id', "user_id")
+                else if (type === "learners_over_due") {
+                    const learners_over_due = await userCourseRepository
+                        .createQueryBuilder("user_course")
+                        .leftJoinAndSelect("user_course.learner_id", "learner_id")
+                        .leftJoinAndSelect("learner_id.user_id", "user_id")
                         .where("user_course.end_date < :currentDate", { currentDate: new Date() })
-                        .distinctOn(["learner_id.learner_id"]).getMany();
+                        .distinctOn(["learner_id.learner_id"])
+                        .getMany();
+
                     return res.status(200).json({
                         message: "Learners over due fetched successfully",
                         status: true,
-                        data: learners_over_due
-                    })
+                        data: learners_over_due,
+                    });
                 }
-                else if (type === 'learner_plan_due') {
-                    const learner_plan_due = await learnerPlanRepository.createQueryBuilder("learner_plan")
-                        .leftJoinAndSelect('learner_plan.learners', "learner")
-                        .leftJoinAndSelect('learner.user_id', "user_id")
-                        .where("learner_plan.startDate < :currentDate", { currentDate: new Date() }).getMany();
+
+                else if (type === "learner_plan_due") {
+                    const learner_plan_due = await learnerPlanRepository
+                        .createQueryBuilder("learner_plan")
+                        .leftJoinAndSelect("learner_plan.learners", "learner")
+                        .leftJoinAndSelect("learner.user_id", "user_id")
+                        .where("learner_plan.startDate < :currentDate", { currentDate: new Date() })
+                        .getMany();
+
                     return res.status(200).json({
                         message: "Learner plan due fetched successfully",
                         status: true,
-                        data: learner_plan_due
-                    })
+                        data: learner_plan_due,
+                    });
                 }
-                else if (type === 'learner_plan_due_in_next_7_days') {
-                    const learner_plan_due_in_next_7_days = await learnerPlanRepository.createQueryBuilder("learner_plan")
-                        .leftJoinAndSelect('learner_plan.learners', "learner")
-                        .leftJoinAndSelect('learner.user_id', "user_id")
-                        .where("learner_plan.startDate BETWEEN NOW() AND NOW() + INTERVAL '7 days'").getMany();
+
+                else if (type === "learner_plan_due_in_next_7_days") {
+                    const learner_plan_due_in_next_7_days = await learnerPlanRepository
+                        .createQueryBuilder("learner_plan")
+                        .leftJoinAndSelect("learner_plan.learners", "learner")
+                        .leftJoinAndSelect("learner.user_id", "user_id")
+                        .where("learner_plan.startDate BETWEEN NOW() AND NOW() + INTERVAL '7 days'")
+                        .getMany();
+
                     return res.status(200).json({
                         message: "Learner plan due in next 7 days fetched successfully",
                         status: true,
-                        data: learner_plan_due_in_next_7_days
-                    })
+                        data: learner_plan_due_in_next_7_days,
+                    });
                 }
-                else if (type === 'session_learner_action_due') {
-                    const session_learner_action_due = await SessionLearnerActionRepository.createQueryBuilder("session_learner_action")
-                        .leftJoinAndSelect('session_learner_action.learner_plan', "learner_plan")
-                        .leftJoinAndSelect('learner_plan.learners', "learner")
-                        .leftJoinAndSelect('learner.user_id', "user_id")
-                        .where("DATE(session_learner_action.target_date) = CURRENT_DATE").getMany();
+
+                else if (type === "session_learner_action_due") {
+                    const session_learner_action_due = await SessionLearnerActionRepository
+                        .createQueryBuilder("session_learner_action")
+                        .leftJoinAndSelect("session_learner_action.learner_plan", "learner_plan")
+                        .leftJoinAndSelect("learner_plan.learners", "learner")
+                        .leftJoinAndSelect("learner.user_id", "user_id")
+                        .where("DATE(session_learner_action.target_date) = CURRENT_DATE")
+                        .getMany();
+
                     return res.status(200).json({
                         message: "Session learner action due fetched successfully",
                         status: true,
-                        data: session_learner_action_due
-                    })
+                        data: session_learner_action_due,
+                    });
                 }
-                else if (type === 'session_action_due_in_next_7_days') {
-                    const session_learner_action_due_in_next_7_days = await SessionLearnerActionRepository.createQueryBuilder("session_learner_action")
-                        .leftJoinAndSelect('session_learner_action.learner_plan', "learner_plan")
-                        .leftJoinAndSelect('learner_plan.learners', "learner")
-                        .leftJoinAndSelect('learner.user_id', "user_id")
-                        .where("session_learner_action.target_date BETWEEN NOW() AND NOW() + INTERVAL '7 days'").getMany();
+
+                else if (type === "session_action_due_in_next_7_days") {
+                    const session_learner_action_due_in_next_7_days =
+                        await SessionLearnerActionRepository
+                            .createQueryBuilder("session_learner_action")
+                            .leftJoinAndSelect("session_learner_action.learner_plan", "learner_plan")
+                            .leftJoinAndSelect("learner_plan.learners", "learner")
+                            .leftJoinAndSelect("learner.user_id", "user_id")
+                            .where("session_learner_action.target_date BETWEEN NOW() AND NOW() + INTERVAL '7 days'")
+                            .getMany();
+
                     return res.status(200).json({
                         message: "Session learner action due in next 7 days fetched successfully",
                         status: true,
-                        data: session_learner_action_due_in_next_7_days
-                    })
+                        data: session_learner_action_due_in_next_7_days,
+                    });
                 }
-                else if (type === 'session_learner_action_overdue') {
-                    const session_learner_action_overdue = await SessionLearnerActionRepository.createQueryBuilder("session_learner_action")
-                        .leftJoinAndSelect('session_learner_action.learner_plan', "learner_plan")
-                        .leftJoinAndSelect('learner_plan.learners', "learner")
-                        .leftJoinAndSelect('learner.user_id', "user_id")
-                        .where("session_learner_action.target_date < NOW()").getMany();
+
+                else if (type === "session_learner_action_overdue") {
+                    const session_learner_action_overdue =
+                        await SessionLearnerActionRepository
+                            .createQueryBuilder("session_learner_action")
+                            .leftJoinAndSelect("session_learner_action.learner_plan", "learner_plan")
+                            .leftJoinAndSelect("learner_plan.learners", "learner")
+                            .leftJoinAndSelect("learner.user_id", "user_id")
+                            .where("session_learner_action.target_date < NOW()")
+                            .getMany();
+
                     return res.status(200).json({
                         message: "Session learner action overdue fetched successfully",
                         status: true,
-                        data: session_learner_action_overdue
-                    })
+                        data: session_learner_action_overdue,
+                    });
                 }
-                else if (type === 'learners_course_due_in_next_30_days') {
-                    const learners_course_due_in_next_30_days = await userCourseRepository.createQueryBuilder("user_course")
-                        .leftJoinAndSelect('user_course.learner_id', "learner_id")
-                        .leftJoinAndSelect('learner_id.user_id', "user_id")
-                        .where("user_course.end_date BETWEEN NOW() AND NOW() + INTERVAL '30 days'").getMany();
+
+                else if (type === "learners_course_due_in_next_30_days") {
+                    const learners_course_due_in_next_30_days =
+                        await userCourseRepository
+                            .createQueryBuilder("user_course")
+                            .leftJoinAndSelect("user_course.learner_id", "learner_id")
+                            .leftJoinAndSelect("learner_id.user_id", "user_id")
+                            .where("user_course.end_date BETWEEN NOW() AND NOW() + INTERVAL '30 days'")
+                            .getMany();
+
                     return res.status(200).json({
                         message: "Learners course due in next 30 days fetched successfully",
                         status: true,
-                        data: learners_course_due_in_next_30_days
-                    })
+                        data: learners_course_due_in_next_30_days,
+                    });
                 }
-            } else {
-
-                const total_learners = await learnerRepository.createQueryBuilder("learner")
-                    .leftJoinAndSelect('learner.user_id', "user_id")
-                    .where("user_id.status = 'Active'").getMany();
-
-                const learners_suspended = await userCourseRepository.createQueryBuilder("user_course")
-                    .leftJoinAndSelect('user_course.learner_id', "learner_id")
-                    .leftJoinAndSelect('learner_id.user_id', "user_id")
-                    .where("user_course.course_status = 'Training Suspended'").distinctOn(["learner_id.learner_id"]).getMany();
-                // const learners = await learnerRepository.createQueryBuilder("learner")
-                //     .leftJoinAndSelect('learner.user_id', "user_id")
-                //     .where("user_id.status = 'Active'").getMany();
-
-                const assignmentsWithoutMapped = await assignmentRepository
-                    .createQueryBuilder("assignment")
-                    .where("assignment.units IS NOT NULL")
-                    .andWhere(`
-                            NOT EXISTS (
-                              SELECT 1
-                              FROM jsonb_array_elements(assignment.units::jsonb) AS unit,
-                                   jsonb_array_elements(unit->'subUnit') AS sub
-                              WHERE (sub->>'trainerMap')::boolean = true
-                            )
-                        `)
-                    .getMany();
-
-                const learnersOverDue = await userCourseRepository.createQueryBuilder("user_course")
-                    .leftJoinAndSelect('user_course.learner_id', "learner_id")
-                    .leftJoinAndSelect('learner_id.user_id', "user_id")
-                    .where("user_course.end_date < :currentDate", { currentDate: new Date() })
-                    .distinctOn(["learner_id.learner_id"]).getMany();
-
-                //count of learners who's course due in next 30 days
-                const learnersCourseDueInNext30Days = await userCourseRepository.createQueryBuilder("user_course")
-                    .leftJoinAndSelect('user_course.learner_id', "learner_id")
-                    .leftJoinAndSelect('learner_id.user_id', "user_id")
-                    .where("user_course.end_date BETWEEN NOW() AND NOW() + INTERVAL '30 days'")
-                    .distinctOn(["learner_id.learner_id"]).getMany();
-                // total count of course
-                const totalCourses = await courseRepository.createQueryBuilder("course").getCount();
-                // count of all learner plan which are due and due in next 7 days sepearte
-                const learnerPlanDue = await learnerPlanRepository.createQueryBuilder("learner_plan")
-                    .leftJoinAndSelect('learner_plan.learners', "learner")
-                    .leftJoinAndSelect('learner.user_id', "user_id")
-                    .where("learner_plan.startDate < :currentDate", { currentDate: new Date() }).getMany();
-                const learnerPlanDueInNext7Days = await learnerPlanRepository
-                    .createQueryBuilder("learner_plan")
-                    .leftJoinAndSelect("learner_plan.learners", "learner")
-                    .leftJoinAndSelect("learner.user_id", "user_id")
-                    .where("learner_plan.startDate BETWEEN NOW() AND NOW() + INTERVAL '7 days'")
-                    .orderBy("learner_plan.startDate", "ASC")
-                    .getMany();
-
-                // count of all session learner action which are due, overdue and due in next 7 days sepearte
-                const sessionLearnerActionDue = await SessionLearnerActionRepository.createQueryBuilder("session_learner_action")
-                    .leftJoinAndSelect("session_learner_action.learner_plan", "learner_plan")
-                    .leftJoinAndSelect("learner_plan.learners", "learner")
-                    .leftJoinAndSelect("learner.user_id", "user_id")
-                    .where("DATE(session_learner_action.target_date) = CURRENT_DATE")
-                    .orderBy("session_learner_action.target_date", "ASC")
-                    .getMany();
-
-                const sessionLearnerActionDueInNext7Days = await SessionLearnerActionRepository.createQueryBuilder("session_learner_action")
-                    .leftJoinAndSelect("session_learner_action.learner_plan", "learner_plan")
-                    .leftJoinAndSelect("learner_plan.learners", "learner")
-                    .leftJoinAndSelect("learner.user_id", "user_id")
-                    .where("session_learner_action.target_date BETWEEN NOW() AND NOW() + INTERVAL '7 days'")
-                    .orderBy("session_learner_action.target_date", "ASC")
-                    .getMany();
-                const sessionLearnerActionOverdue = await SessionLearnerActionRepository.createQueryBuilder("session_learner_action")
-                    .leftJoinAndSelect("session_learner_action.learner_plan", "learner_plan")
-                    .leftJoinAndSelect("learner_plan.learners", "learner")
-                    .leftJoinAndSelect("learner.user_id", "user_id")
-                    .where("session_learner_action.target_date < NOW()")
-                    .orderBy("session_learner_action.target_date", "ASC")
-                    .getMany();
-
-                const data = {
-                    active_learners_count: total_learners.length,
-                    learners_suspended_count: learners_suspended.length,
-                    assignmentsWithoutMapped_count: assignmentsWithoutMapped.length,
-                    learnersOverDue_count: learnersOverDue.length,
-                    learnerPlanDue_count: learnerPlanDue.length,
-                    learnerPlanDueInNext7Days_count: learnerPlanDueInNext7Days.length,
-                    sessionLearnerActionDue_count: sessionLearnerActionDue.length,
-                    sessionLearnerActionDueInNext7Days_count: sessionLearnerActionDueInNext7Days.length,
-                    sessionLearnerActionOverdue_count: sessionLearnerActionOverdue.length,
-                    learnersCourseDueInNext30Days_count: learnersCourseDueInNext30Days.length,
-                    totalCourses: totalCourses
-                }
-
-                return res.status(200).json({
-                    message: "Dashboard data fetched successfully",
-                    status: true,
-                    data: data
-                })
             }
-        } catch (error) {
+
+
+            const total_learners = await learnerRepository
+                .createQueryBuilder("learner")
+                .leftJoinAndSelect("learner.user_id", "user_id")
+                .where("user_id.status = 'Active'")
+                .getMany();
+
+            const learners_suspended = await userCourseRepository
+                .createQueryBuilder("user_course")
+                .leftJoinAndSelect("user_course.learner_id", "learner_id")
+                .leftJoinAndSelect("learner_id.user_id", "user_id")
+                .where("user_course.course_status = 'Training Suspended'")
+                .distinctOn(["learner_id.learner_id"])
+                .getMany();
+
+            const assignmentsWithoutMapped = await assignmentRepository
+                .createQueryBuilder("assignment")
+                .leftJoin(
+                    AssignmentMapping,
+                    "mapping",
+                    "mapping.assignment_id = assignment.assignment_id"
+                )
+                .where("mapping.mapping_id IS NULL")
+                .getMany();
+
+            const learnersOverDue = await userCourseRepository
+                .createQueryBuilder("user_course")
+                .leftJoinAndSelect("user_course.learner_id", "learner_id")
+                .leftJoinAndSelect("learner_id.user_id", "user_id")
+                .where("user_course.end_date < :currentDate", { currentDate: new Date() })
+                .distinctOn(["learner_id.learner_id"])
+                .getMany();
+
+            const learnersCourseDueInNext30Days = await userCourseRepository
+                .createQueryBuilder("user_course")
+                .leftJoinAndSelect("user_course.learner_id", "learner_id")
+                .leftJoinAndSelect("learner_id.user_id", "user_id")
+                .where("user_course.end_date BETWEEN NOW() AND NOW() + INTERVAL '30 days'")
+                .distinctOn(["learner_id.learner_id"])
+                .getMany();
+
+            const totalCourses = await courseRepository.createQueryBuilder("course").getCount();
+
+            const learnerPlanDue = await learnerPlanRepository
+                .createQueryBuilder("learner_plan")
+                .leftJoinAndSelect("learner_plan.learners", "learner")
+                .leftJoinAndSelect("learner.user_id", "user_id")
+                .where("learner_plan.startDate < :currentDate", { currentDate: new Date() })
+                .getMany();
+
+            const learnerPlanDueInNext7Days = await learnerPlanRepository
+                .createQueryBuilder("learner_plan")
+                .leftJoinAndSelect("learner_plan.learners", "learner")
+                .leftJoinAndSelect("learner.user_id", "user_id")
+                .where("learner_plan.startDate BETWEEN NOW() AND NOW() + INTERVAL '7 days'")
+                .getMany();
+
+            const sessionLearnerActionDue = await SessionLearnerActionRepository
+                .createQueryBuilder("session_learner_action")
+                .leftJoinAndSelect("session_learner_action.learner_plan", "learner_plan")
+                .leftJoinAndSelect("learner_plan.learners", "learner")
+                .leftJoinAndSelect("learner.user_id", "user_id")
+                .where("DATE(session_learner_action.target_date) = CURRENT_DATE")
+                .getMany();
+
+            const sessionLearnerActionDueInNext7Days = await SessionLearnerActionRepository
+                .createQueryBuilder("session_learner_action")
+                .leftJoinAndSelect("session_learner_action.learner_plan", "learner_plan")
+                .leftJoinAndSelect("learner_plan.learners", "learner")
+                .leftJoinAndSelect("learner.user_id", "user_id")
+                .where("session_learner_action.target_date BETWEEN NOW() AND NOW() + INTERVAL '7 days'")
+                .getMany();
+
+            const sessionLearnerActionOverdue = await SessionLearnerActionRepository
+                .createQueryBuilder("session_learner_action")
+                .leftJoinAndSelect("session_learner_action.learner_plan", "learner_plan")
+                .leftJoinAndSelect("learner_plan.learners", "learner")
+                .leftJoinAndSelect("learner.user_id", "user_id")
+                .where("session_learner_action.target_date < NOW()")
+                .getMany();
+
+            const data = {
+                active_learners_count: total_learners.length,
+                learners_suspended_count: learners_suspended.length,
+                assignmentsWithoutMapped_count: assignmentsWithoutMapped.length,
+                learnersOverDue_count: learnersOverDue.length,
+                learnerPlanDue_count: learnerPlanDue.length,
+                learnerPlanDueInNext7Days_count: learnerPlanDueInNext7Days.length,
+                sessionLearnerActionDue_count: sessionLearnerActionDue.length,
+                sessionLearnerActionDueInNext7Days_count: sessionLearnerActionDueInNext7Days.length,
+                sessionLearnerActionOverdue_count: sessionLearnerActionOverdue.length,
+                learnersCourseDueInNext30Days_count: learnersCourseDueInNext30Days.length,
+                totalCourses: totalCourses
+            }
+
+            return res.status(200).json({
+                message: "Dashboard data fetched successfully",
+                status: true,
+                data
+            })
+        } catch (error: any) {
             return res.status(500).json({
-                message: 'Internal Server Error',
+                message: "Internal Server Error",
                 error: error.message,
                 status: false,
             });
         }
-
     }
 }
 
 export default LearnerController;
 
+/* learner_id?: number */
 const getCourseData = async (courses: any[], user_id: string) => {
     try {
         const assignmentMappingRepository = AppDataSource.getRepository(AssignmentMapping);
+        //const learnerUnitRepository = AppDataSource.getRepository(LearnerUnit);
         const course_ids = courses?.map((course: any) => course.course.course_id)
         const filteredMappings = course_ids.length ? await assignmentMappingRepository.createQueryBuilder('mapping')
             .leftJoinAndSelect('mapping.assignment', 'assignment')
@@ -1859,11 +1930,37 @@ const getCourseData = async (courses: any[], user_id: string) => {
             .select(['mapping', 'assignment', 'course.course_id'])
             .getMany() : [];
 
+        // If learner_id provided, fetch learner_units for all courses in one query
+        // let learnerUnitsByCourse: Map<number, { hasRecords: boolean, activeSet: Set<string> }> = new Map();
+        // if (learner_id && course_ids && course_ids.length) {
+        //     const all = await learnerUnitRepository.createQueryBuilder('lu')
+        //         .leftJoinAndSelect('lu.course', 'course')
+        //         .where('lu.learner_id = :learner_id', { learner_id })
+        //         .andWhere('course.course_id IN (:...course_ids)', { course_ids })
+        //         .getMany();
+
+        //     for (const rec of all) {
+        //         const cid = (rec.course as any).course_id;
+        //         if (!learnerUnitsByCourse.has(cid)) {
+        //             learnerUnitsByCourse.set(cid, { hasRecords: false, activeSet: new Set() });
+        //         }
+        //         const entry = learnerUnitsByCourse.get(cid)!;
+        //         entry.hasRecords = true;
+        //         if (rec.active) entry.activeSet.add(String(rec.unit_id));
+        //     }
+        // }
+
         courses = courses?.map((userCourse: any) => {
             let partiallyCompleted = new Set();
             let fullyCompleted = new Set();
             let partiallyCompletedUnits = new Set();
             let fullyCompletedUnits = new Set();
+
+            // Apply learner-unit filtering when records exist
+            // const courseFilter = learnerUnitsByCourse.get(userCourse.course.course_id as number);
+            // if (courseFilter && courseFilter.hasRecords) {
+            //     userCourse.course.units = (userCourse.course.units || []).filter((u: any) => courseFilter.activeSet.has(String(u.id)) || courseFilter.activeSet.has(String(u.unit_ref)));
+            // }
 
             let courseMappings: any = filteredMappings.filter(mapping => mapping.course.course_id === userCourse.course.course_id);
 
