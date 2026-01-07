@@ -55,12 +55,33 @@ class SurveyController {
                 .skip(skip)
                 .take(limit)
                 .getManyAndCount();
-
+            
+            // total count of questions in the each survey using survey id
+            const totalQuestions = await AppDataSource.getRepository(SurveyQuestion).createQueryBuilder('question')
+                .select('question.surveyId', 'surveyId')
+                .addSelect('COUNT(question.id)', 'totalQuestions')
+                .groupBy('question.surveyId')
+                .getRawMany();
+            const totalResponses = await AppDataSource.getRepository(SurveyResponse).createQueryBuilder('response')
+                .select('response.surveyId', 'surveyId')
+                .addSelect('COUNT(response.id)', 'totalResponses')
+                .groupBy('response.surveyId')
+                .getRawMany();
+                
+            const surveysWithTotal = surveys.map(survey => {
+                const totalQuestion = totalQuestions.find(question => question.surveyId === survey.id);
+                const totalResponse = totalResponses.find(response => response.surveyId === survey.id);
+                return {
+                    ...survey,
+                    totalQuestions: totalQuestion?.totalQuestions || 0,
+                    totalResponses: totalResponse?.totalResponses || 0
+                };
+            });
             return res.status(200).json({
                 message: 'Surveys retrieved successfully',
                 status: true,
                 data: {
-                    surveys,
+                    surveys: surveysWithTotal,
                     pagination: {
                         page,
                         limit,
