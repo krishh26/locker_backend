@@ -17,6 +17,7 @@ surveyRoutes.post('/', authorizeRoles(), trimMiddleware, controller.createSurvey
 surveyRoutes.get('/:surveyId', authorizeRoles(), controller.getSurveyById);
 surveyRoutes.put('/:surveyId', authorizeRoles(), trimMiddleware, controller.updateSurvey);
 surveyRoutes.delete('/:surveyId', authorizeRoles(), controller.deleteSurvey);
+surveyRoutes.post('/:surveyId/apply-template', authorizeRoles(), trimMiddleware, controller.applyTemplate);
 
 // Question management
 surveyRoutes.get('/:surveyId/questions', authorizeRoles(), controller.getQuestionsForSurvey);
