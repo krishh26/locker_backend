@@ -326,6 +326,158 @@ class SurveyController {
         }
     }
 
+    public async applyTemplate(req: CustomRequest, res: Response) {
+        try {
+            const { surveyId } = req.params;
+            const { templateKey, background, questions } = req.body;
+
+            const surveyRepo = AppDataSource.getRepository(Survey);
+            const questionRepo = AppDataSource.getRepository(SurveyQuestion);
+
+            // Validate survey exists and user can manage it
+            const survey = await surveyRepo.findOne({ where: { id: surveyId } });
+            if (!survey) {
+                return res.status(404).json({
+                    message: 'Survey not found',
+                    status: false,
+                });
+            }
+
+            if (!canManageSurvey(req, survey)) {
+                return res.status(403).json({
+                    message: 'Not allowed to manage this survey',
+                    status: false,
+                });
+            }
+
+            // Validate questions array
+            if (!Array.isArray(questions) || questions.length === 0) {
+                return res.status(400).json({
+                    message: 'Questions array is required and must not be empty',
+                    status: false,
+                });
+            }
+
+            // Validate background if provided
+            let parsedBackground: { type: SurveyBackgroundType; value: string } | null = null;
+            if (background) {
+                if (!background.type || !background.value) {
+                    return res.status(400).json({
+                        message: 'background.type and background.value are required when background is provided',
+                        status: false,
+                    });
+                }
+                if (![SurveyBackgroundType.Gradient, SurveyBackgroundType.Image].includes(background.type)) {
+                    return res.status(400).json({
+                        message: 'Background type must be gradient or image',
+                        status: false,
+                    });
+                }
+                parsedBackground = { type: background.type, value: background.value };
+            }
+
+            // Validate all questions before transaction
+            const validationErrors: ErrorDetail[] = [];
+            const normalizedQuestions: Array<{ title: string; description: string | null; type: SurveyQuestionType; required: boolean; options: string[] | null; order: number }> = [];
+
+            for (let i = 0; i < questions.length; i++) {
+                const q = questions[i];
+                const { errors, normalized } = validateQuestionPayload(q, false);
+
+                if (errors.length) {
+                    validationErrors.push(...errors.map(err => ({ field: `questions[${i}].${err.field}`, message: err.message })));
+                } else if (normalized) {
+                    normalizedQuestions.push({
+                        title: normalized.title!,
+                        description: normalized.description ?? null,
+                        type: normalized.type as SurveyQuestionType,
+                        required: normalized.required ?? false,
+                        options: normalized.options ?? null,
+                        order: normalized.order ?? 0, // Will be recalculated in transaction
+                    });
+                }
+            }
+
+            if (validationErrors.length > 0) {
+                return res.status(400).json({
+                    message: 'Validation failed',
+                    status: false,
+                    errors: validationErrors,
+                });
+            }
+
+            // Execute all operations in a single transaction
+            const result = await AppDataSource.transaction(async (transactionalEntityManager) => {
+                // Get current max order to append questions after existing ones
+                const existingMaxOrder = await transactionalEntityManager
+                    .createQueryBuilder(SurveyQuestion, 'q')
+                    .select('MAX(q.order)', 'maxOrder')
+                    .where('q.surveyId = :surveyId', { surveyId })
+                    .getRawOne();
+
+                const startOrder = existingMaxOrder?.maxOrder !== null && existingMaxOrder?.maxOrder !== undefined
+                    ? Number(existingMaxOrder.maxOrder) + 1
+                    : 0;
+
+                // Update survey background and templateKey
+                const surveyUpdateData: Partial<Survey> = {};
+                if (parsedBackground) {
+                    surveyUpdateData.backgroundType = parsedBackground.type;
+                    surveyUpdateData.backgroundValue = parsedBackground.value;
+                }
+                if (templateKey !== undefined) {
+                    (surveyUpdateData as any).templateKey = templateKey || null;
+                }
+
+                if (Object.keys(surveyUpdateData).length > 0) {
+                    await transactionalEntityManager.update(Survey, { id: surveyId }, surveyUpdateData);
+                }
+
+                // Create all questions with proper order
+                const transactionQuestionRepo = transactionalEntityManager.getRepository(SurveyQuestion);
+                const createdQuestions: SurveyQuestion[] = [];
+
+                for (let i = 0; i < normalizedQuestions.length; i++) {
+                    const q = normalizedQuestions[i];
+                    const question = transactionQuestionRepo.create({
+                        surveyId,
+                        title: q.title,
+                        description: q.description,
+                        type: q.type,
+                        required: q.required,
+                        options: q.options,
+                        order: startOrder + i,
+                    });
+                    const saved = await transactionQuestionRepo.save(question);
+                    createdQuestions.push(saved);
+                }
+
+                // Reload survey to get updated timestamp
+                const updatedSurvey = await transactionalEntityManager.findOne(Survey, { where: { id: surveyId } });
+
+                return {
+                    survey: updatedSurvey,
+                    questions: createdQuestions,
+                };
+            });
+
+            return res.status(200).json({
+                message: 'Template applied successfully',
+                status: true,
+                data: {
+                    survey: result.survey,
+                    questions: result.questions,
+                },
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                message: error.message,
+                status: false,
+                error: { code: 'INTERNAL_ERROR', message: error.message },
+            });
+        }
+    }
+
     public async getQuestionsForSurvey(req: CustomRequest, res: Response) {
         try {
             const { surveyId } = req.params;
