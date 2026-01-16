@@ -2,6 +2,7 @@ import * as express from 'express';
 import { authorizeRoles } from '../middleware/verifyToken';
 import { paginationMiddleware } from '../middleware/pagination';
 import { trimMiddleware } from '../middleware/trimMiddleware';
+import { UserRole } from '../util/constants';
 import SurveyController from '../controllers/SurveyController';
 
 const surveyRoutes = express.Router();
@@ -30,6 +31,11 @@ surveyRoutes.patch('/:surveyId/questions/reorder', authorizeRoles(), controller.
 surveyRoutes.get('/:surveyId/responses', authorizeRoles(), paginationMiddleware, controller.getResponsesForSurvey);
 surveyRoutes.get('/:surveyId/responses/:responseId', authorizeRoles(), controller.getResponseById);
 surveyRoutes.delete('/:surveyId/responses/:responseId', authorizeRoles(), controller.deleteResponse);
+
+// Allocation management
+surveyRoutes.post('/allocate', authorizeRoles(UserRole.Admin), trimMiddleware, controller.allocateSurvey);
+surveyRoutes.get('/allocations/all', authorizeRoles(), controller.getAllSurveysWithAllocations);
+surveyRoutes.get('/:surveyId/allocations', authorizeRoles(), controller.getAllocationsBySurveyId);
 
 export default surveyRoutes;
 

@@ -59,6 +59,9 @@ export class Survey {
     @Column({ type: 'varchar', length: 255, nullable: true, name: 'template_key' })
     templateKey: string | null;
     
+    @Column({ type: 'timestamp', nullable: true })
+    expirationDate : Date;
+
     @CreateDateColumn({ type: 'timestamp', name: 'created_at', default: () => 'CURRENT_TIMESTAMP' })
     createdAt: Date;
 

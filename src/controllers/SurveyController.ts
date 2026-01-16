@@ -1,7 +1,8 @@
 import { Response } from 'express';
 import { AppDataSource } from '../data-source';
 import { CustomRequest } from '../util/Interface/expressInterface';
-import { UserRole } from '../util/constants';
+import { UserRole, NotificationType, SocketDomain } from '../util/constants';
+import { In } from 'typeorm';
 import {
     Survey,
     SurveyBackgroundType,
@@ -12,6 +13,13 @@ import {
     SurveyQuestionType,
 } from '../entity/SurveyQuestion.entity';
 import { SurveyResponse } from '../entity/SurveyResponse.entity';
+import {
+    SurveyAllocation,
+    SurveyAllocationRole,
+    SurveyAllocationStatus,
+} from '../entity/SurveyAllocation.entity';
+import { User } from '../entity/User.entity';
+import { Notification } from '../entity/Notification.entity';
 
 type ErrorDetail = { field?: string; message: string };
 
@@ -999,6 +1007,302 @@ class SurveyController {
                         } : null,
                     },
                     questions,
+                },
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                success: false,
+                message: error.message,
+                status: false,
+            });
+        }
+    }
+
+    public async allocateSurvey(req: CustomRequest, res: Response) {
+        try {
+            const { survey_id, allocations } = req.body;
+
+            // Validate request payload
+            if (!survey_id) {
+                return res.status(400).json({
+                    message: 'survey_id is required',
+                    status: false,
+                });
+            }
+
+            if (!Array.isArray(allocations) || allocations.length === 0) {
+                return res.status(400).json({
+                    message: 'allocations array is required and must not be empty',
+                    status: false,
+                });
+            }
+
+            const surveyRepo = AppDataSource.getRepository(Survey);
+            const allocationRepo = AppDataSource.getRepository(SurveyAllocation);
+            const userRepo = AppDataSource.getRepository(User);
+
+            // Validate survey exists
+            const survey = await surveyRepo.findOne({ where: { id: survey_id } });
+            if (!survey) {
+                return res.status(404).json({
+                    message: 'Survey not found',
+                    status: false,
+                });
+            }
+
+            // Validate all users exist and validate roles
+            const userIds = allocations.map((a: any) => a.user_id);
+            const uniqueUserIds = [...new Set(userIds)];
+            const users = await userRepo.find({
+                where: { user_id: In(uniqueUserIds) },
+            });
+            
+            if (users.length !== uniqueUserIds.length) {
+                return res.status(400).json({
+                    message: 'One or more users not found',
+                    status: false,
+                });
+            }
+
+            // Validate allocations payload
+            const validationErrors: ErrorDetail[] = [];
+            const normalizedAllocations: Array<{ userId: number; role: SurveyAllocationRole }> = [];
+
+            for (let i = 0; i < allocations.length; i++) {
+                const alloc = allocations[i];
+                
+                if (!alloc.user_id || typeof alloc.user_id !== 'number') {
+                    validationErrors.push({ field: `allocations[${i}].user_id`, message: 'user_id is required and must be a number' });
+                    continue;
+                }
+
+                if (!alloc.role || !Object.values(SurveyAllocationRole).includes(alloc.role)) {
+                    validationErrors.push({ 
+                        field: `allocations[${i}].role`, 
+                        message: `role must be one of: ${Object.values(SurveyAllocationRole).join(', ')}` 
+                    });
+                    continue;
+                }
+
+                normalizedAllocations.push({
+                    userId: alloc.user_id,
+                    role: alloc.role,
+                });
+            }
+
+            if (validationErrors.length > 0) {
+                return res.status(400).json({
+                    message: validationErrors,
+                    status: false
+                });
+            }
+
+            // Check for duplicate allocations (same survey + user combination)
+            const existingAllocations = await allocationRepo.find({
+                where: {
+                    surveyId: survey_id,
+                    userId: In(userIds),
+                },
+            });
+
+            const existingPairs = new Set(existingAllocations.map(a => `${a.surveyId}-${a.userId}`));
+            const duplicates: ErrorDetail[] = [];
+
+            for (const alloc of normalizedAllocations) {
+                const key = `${survey_id}-${alloc.userId}`;
+                if (existingPairs.has(key)) {
+                    duplicates.push({
+                        field: `user_id: ${alloc.userId}`,
+                        message: `User ${alloc.userId} is already allocated to this survey`,
+                    });
+                }
+            }
+
+            if (duplicates.length > 0) {
+                return res.status(400).json({
+                    message: duplicates,
+                    status: false
+                });
+            }
+
+            // Create all allocations in a single transaction
+            const createdAllocations = await AppDataSource.transaction(async (transactionalEntityManager) => {
+                const transactionAllocationRepo = transactionalEntityManager.getRepository(SurveyAllocation);
+                const created: SurveyAllocation[] = [];
+
+                for (const alloc of normalizedAllocations) {
+                    const allocation = transactionAllocationRepo.create({
+                        surveyId: survey_id,
+                        userId: alloc.userId,
+                        role: alloc.role,
+                        status: SurveyAllocationStatus.Pending,
+                    });
+                    const saved = await transactionAllocationRepo.save(allocation);
+                    created.push(saved);
+                }
+
+                return created;
+            });
+
+            // Send notifications to allocated users (without socket)
+            try {
+                const notificationRepo = AppDataSource.getRepository(Notification);
+                const surveyName = survey.name || 'Survey';
+                const surveyLink = `${process.env.FRONTEND}/survey/${survey_id}`; // Frontend survey link
+                
+                const notifications = userIds.map(userId => {
+                    return notificationRepo.create({
+                        user_id: userId as any,
+                        title: 'New Survey Assigned',
+                        message: `You have been assigned to complete the survey: "${surveyName}". Click here to view: ${surveyLink}`,
+                        type: NotificationType.Allocation,
+                    });
+                });
+
+                await notificationRepo.save(notifications);
+            } catch (notificationError: any) {
+                // Log error but don't fail the allocation
+                console.error('Failed to send notifications:', notificationError);
+            }
+
+            return res.status(201).json({
+                message: 'Survey allocated successfully',
+                status: true,
+                data: {
+                    survey_id,
+                    allocations: createdAllocations,
+                },
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                success: false,
+                message: error.message,
+                status: false,
+            });
+        }
+    }
+
+    public async getAllocationsBySurveyId(req: CustomRequest, res: Response) {
+        try {
+            const { surveyId } = req.params;
+            const { role } = req.query as any;
+
+            const surveyRepo = AppDataSource.getRepository(Survey);
+            const allocationRepo = AppDataSource.getRepository(SurveyAllocation);
+
+            // Validate survey exists
+            const survey = await surveyRepo.findOne({ where: { id: surveyId } });
+            if (!survey) {
+                return res.status(404).json({
+                    message: 'Survey not found',
+                    status: false,
+                });
+            }
+
+            // Build query
+            const qb = allocationRepo
+                .createQueryBuilder('allocation')
+                .leftJoinAndSelect('allocation.user', 'user')
+                .leftJoinAndSelect('allocation.survey', 'survey')
+                .where('allocation.surveyId = :surveyId', { surveyId });
+
+            // Filter by role if provided
+            if (role) {
+                if (!Object.values(SurveyAllocationRole).includes(role)) {
+                    return res.status(400).json({
+                        message: `Invalid role. Must be one of: ${Object.values(SurveyAllocationRole).join(', ')}`,
+                        status: false,
+                    });
+                }
+                qb.andWhere('allocation.role = :role', { role });
+            }
+
+            const allocations = await qb
+                .orderBy('allocation.assignedAt', 'DESC')
+                .getMany();
+
+            return res.status(200).json({
+                message: 'Allocations retrieved successfully',
+                status: true,
+                data: {
+                    survey_id: surveyId,
+                    allocations,
+                },
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                success: false,
+                message: error.message,
+                status: false,
+            });
+        }
+    }
+
+    public async getAllSurveysWithAllocations(req: CustomRequest, res: Response) {
+        try {
+            const { role, survey_id } = req.query as any;
+            const surveyRepo = AppDataSource.getRepository(Survey);
+            const allocationRepo = AppDataSource.getRepository(SurveyAllocation);
+
+            // Build query for surveys
+            const surveyQb = surveyRepo.createQueryBuilder('survey');
+
+            // Filter by survey_id if provided
+            if (survey_id) {
+                surveyQb.andWhere('survey.id = :surveyId', { surveyId: survey_id });
+            }
+
+            const surveys = await surveyQb
+                .orderBy('survey.createdAt', 'DESC')
+                .getMany();
+
+            // Build query for allocations
+            const allocationQb = allocationRepo
+                .createQueryBuilder('allocation')
+                .leftJoinAndSelect('allocation.user', 'user')
+                .leftJoinAndSelect('allocation.survey', 'survey');
+
+            // Filter by role if provided
+            if (role) {
+                if (!Object.values(SurveyAllocationRole).includes(role)) {
+                    return res.status(400).json({
+                        message: `Invalid role. Must be one of: ${Object.values(SurveyAllocationRole).join(', ')}`,
+                        status: false,
+                    });
+                }
+                allocationQb.andWhere('allocation.role = :role', { role });
+            }
+
+            // Filter by survey_id if provided
+            if (survey_id) {
+                allocationQb.andWhere('allocation.surveyId = :surveyId', { surveyId: survey_id });
+            }
+
+            const allocations = await allocationQb
+                .orderBy('allocation.assignedAt', 'DESC')
+                .getMany();
+
+            // Group allocations by survey
+            const allocationsBySurvey = allocations.reduce((acc: any, allocation) => {
+                const surveyId = allocation.surveyId;
+                if (!acc[surveyId]) {
+                    acc[surveyId] = [];
+                }
+                acc[surveyId].push(allocation);
+                return acc;
+            }, {});
+
+            // Combine surveys with their allocations
+            const surveysWithAllocations = surveys.map(survey => ({
+                ...survey,
+                allocations: allocationsBySurvey[survey.id] || [],
+            }));
+
+            return res.status(200).json({
+                message: 'Surveys with allocations retrieved successfully',
+                status: true,
+                data: {
+                    surveys: surveysWithAllocations,
                 },
             });
         } catch (error: any) {
