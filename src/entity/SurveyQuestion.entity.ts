@@ -15,6 +15,7 @@ export enum SurveyQuestionType {
     Checkbox = 'checkbox',
     Rating = 'rating',
     Date = 'date',
+    Likert = 'likert'
 }
 
 @Entity('survey_questions')
@@ -44,6 +45,9 @@ export class SurveyQuestion {
 
     @Column({ type: 'json', nullable: true })
     options: string[] | null;
+
+    @Column({ type: 'json', nullable: true })
+    statements: string[] | null;
 
     @Column({ type: 'int', name: 'order' })
     order: number;
