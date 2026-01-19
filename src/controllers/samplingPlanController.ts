@@ -14,6 +14,7 @@ import { AssignmentReview, ReviewRole } from '../entity/AssignmentReview.entity'
 import { Assignment } from '../entity/Assignment.entity';
 import { UserRole } from "../util/constants";
 import { AssignmentPCReview } from "../entity/AssignmentPCReview.entity";
+//import { LearnerUnit } from "../entity/LearnerUnit.entity";
 import { getUnitCompletionStatus } from '../util/unitCompletion';
 import {  deleteFromS3, uploadToS3 } from '../util/aws';
 import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
@@ -162,6 +163,24 @@ export class SamplingPlanController {
 
       const courseUnits = (learners[0]?.course as any)?.units || [];
 
+      // Fetch learner unit preferences for all learners in this plan (if any)
+      // const learnerIds = learners.map(uc => uc.learner_id?.learner_id).filter(Boolean);
+      // const learnerUnitRepository = AppDataSource.getRepository(LearnerUnit as any);
+      // const learnerUnitsForPlan = learnerIds.length ? await learnerUnitRepository.createQueryBuilder('lu')
+      //   .leftJoinAndSelect('lu.course', 'course')
+      //   .where('lu.learner_id IN (:...learnerIds)', { learnerIds })
+      //   .andWhere('course.course_id = :courseId', { courseId })
+      //   .getMany() : [];
+
+      // const learnerUnitsMap = new Map<number, { hasRecords: boolean, activeSet: Set<string> }>();
+      // for (const rec of learnerUnitsForPlan) {
+      //   const lid = (rec.learner_id as any).learner_id;
+      //   if (!learnerUnitsMap.has(lid)) learnerUnitsMap.set(lid, { hasRecords: false, activeSet: new Set() });
+      //   const v = learnerUnitsMap.get(lid)!;
+      //   v.hasRecords = true;
+      //   if (rec.active) v.activeSet.add(String(rec.unit_id));
+      // }
+
       // 4️⃣ Fetch all trainer risk info (single query)
       const trainerIds = learners
         .map((uc) => uc.trainer_id?.user_id)
@@ -220,7 +239,10 @@ export class SamplingPlanController {
           });
         });
 
-        // 6️⃣ Include all course units always
+        // Apply learner's unit filtering if present
+        // const filterInfo = learnerUnitsMap.get(learner.learner_id);
+        // const unitsToConsider = (filterInfo && filterInfo.hasRecords) ? courseUnits.filter((u: any) => filterInfo.activeSet.has(String(u.id)) || filterInfo.activeSet.has(String(u.unit_ref))) : courseUnits;
+
         const finalUnits = courseUnits.map((u: any) => {
           const sampledEntry = learnerDetails
             .flatMap(d => d.sampledUnits || [])
@@ -236,16 +258,20 @@ export class SamplingPlanController {
             unit_name: u.title || "Unnamed",
             status,
             type: u.type ? u.type : "",
-            sample_history: sampledEntry
-              ? (learnerDetails.map(d => ({
+            sample_history: learnerDetails
+              .filter(d =>
+                (d.sampledUnits || []).some(
+                  su => su.unit_code === u.id
+                )
+              )
+              .map(d => ({
                 detail_id: d.id,
                 sample_type: d.sampleType,
                 planned_date: d.plannedDate,
                 completed_date: d.completedDate,
                 status: d.status,
                 assessment_methods: d.assessment_methods || {}
-              })))
-              : []
+              }))
           };
         });
 
