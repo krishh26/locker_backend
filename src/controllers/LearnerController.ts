@@ -206,10 +206,14 @@ class LearnerController {
 
     public async getLearnerList(req: Request, res: Response): Promise<Response> {
         try {
-            let { user_id, role, course_id, employer_id, status, trainer_id } = req.query as any;
+            let { user_id, role, course_id, employer_ids, status, trainer_id } = req.query as any;
             status = status?.split(", ") || [];
             const learnerRepository = AppDataSource.getRepository(Learner);
             const userCourseRepository = AppDataSource.getRepository(UserCourse);
+
+            const employerIdsArray = employer_ids
+                ? employer_ids.split(',').map((id: string) => Number(id))
+                : [];
 
             let learnerIdsArray
             let usercourses
@@ -358,8 +362,10 @@ class LearnerController {
             if (req.query.keyword) {
                 qb.andWhere("(learner.email ILIKE :keyword OR learner.user_name ILIKE :keyword OR learner.first_name ILIKE :keyword OR learner.last_name ILIKE :keyword)", { keyword: `${req.query.keyword}%` });
             }
-            if (employer_id) {
-                qb.andWhere("learner.employer_id = :employer_id", { employer_id });
+            if (employerIdsArray.length) {
+                qb.andWhere("learner.employer_id IN (:...employerIdsArray)", {
+                    employerIdsArray
+                });
             }
             if ((trainer_id && learnerIdsArray.length) || (role && user_id && learnerIdsArray.length) || (course_id && learnerIdsArray.length) || (!status.includes("Show only archived users") && status.length && learnerIdsArray.length)) {
                 qb.andWhere('learner.learner_id IN (:...learnerIdsArray)', { learnerIdsArray })

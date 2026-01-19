@@ -14,7 +14,7 @@ import { Employer } from "../entity/Employer.entity";
 import { Raw, In } from 'typeorm';
 import { AssignmentSignature } from "../entity/AssignmentSignature.entity";
 import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
-
+import { UserEmployer } from '../entity/UserEmployers.entity';
 
 class UserController {
 
@@ -27,7 +27,7 @@ class UserController {
                     status: false
                 })
             }
-            const userRepository = AppDataSource.getRepository(User)
+            const userRepository = AppDataSource.getRepository(User);
 
             const userEmail = await userRepository.findOne({ where: { email: email } });
 
@@ -74,6 +74,20 @@ class UserController {
             });
 
             const users: any = await userRepository.save(user)
+
+            if (Array.isArray(req.body.employer_ids) && req.body.employer_ids.length) {
+                const userEmployerRepo = AppDataSource.getRepository(UserEmployer);
+
+                const mappings = req.body.employer_ids.map((employer_id: number) =>
+                    userEmployerRepo.create({
+                        user: { user_id: users.user_id },
+                        employer: { employer_id }
+                    })
+                );
+
+                await userEmployerRepo.save(mappings);
+            }
+
             res.status(200).json({
                 message: "User create successfully",
                 status: true,
@@ -96,7 +110,19 @@ class UserController {
             const userRepository = AppDataSource.getRepository(User)
             const id: number = parseInt(req.user.user_id);
 
-            const user = await userRepository.findOne({ where: { user_id: id }, relations: ["employer_id"] });
+            const user = await userRepository.findOne({
+                where: { user_id: id },
+                relations: {
+                    userEmployers: {
+                        employer: true
+                    }
+                }
+            });
+
+            const assignedEmployers = user.userEmployers?.map(ue => ({
+                employer_id: ue.employer.employer_id,
+                employer_name: ue.employer.employer_name
+            })) || [];
 
             delete user.password;
 
@@ -110,7 +136,10 @@ class UserController {
             return res.status(200).json({
                 message: "User fetched successfully",
                 status: false,
-                data: user
+                data: {
+                    ...user,
+                    assigned_employers: assignedEmployers
+                }
             })
 
         } catch (error) {
@@ -141,7 +170,7 @@ class UserController {
                 })
             }
 
-
+            const userEmployerRepo = AppDataSource.getRepository(UserEmployer);
             const userRepository = AppDataSource.getRepository(User)
 
             const user = await userRepository.findOne({
@@ -169,6 +198,23 @@ class UserController {
             }
             for (const key in req.body) {
                 (user as any)[key] = req.body[key];
+            }
+
+            if (Array.isArray(req.body.employer_ids)) {
+                // remove old mappings
+                await userEmployerRepo.delete({
+                    user: { user_id: userId }
+                });
+
+                // insert new mappings
+                const mappings = req.body.employer_ids.map((employer_id: number) =>
+                    userEmployerRepo.create({
+                        user: { user_id: userId },
+                        employer: { employer_id }
+                    })
+                );
+
+                await userEmployerRepo.save(mappings);
             }
 
             const updatedUser = await userRepository.save(user)
@@ -449,7 +495,9 @@ class UserController {
         try {
             const userRepository = AppDataSource.getRepository(User)
             const qb = userRepository.createQueryBuilder("user")
-                .leftJoinAndSelect('user.line_manager', 'line_manager');
+                .leftJoinAndSelect('user.line_manager', 'line_manager')
+                .leftJoinAndSelect('user.userEmployers', 'userEmployers')
+                .leftJoinAndSelect('userEmployers.employer', 'employer');
 
             if (req.query.role) {
                 qb.andWhere(":role = ANY(user.roles)", { role: req.query.role });
@@ -498,11 +546,15 @@ class UserController {
                         number_of_active_learners: activeLearnerCount
                     };
                 }
-
+                
                 return {
                     ...user,
                     line_manager: user.line_manager,
-                    ...additionalFields
+                    ...additionalFields,
+                    assigned_employers: user.userEmployers?.map((ue: any) => ({
+                        employer_id: ue.employer?.employer_id,
+                        employer_name: ue.employer?.employer_name
+                    })) || [],
                 };
             }));
 
@@ -718,6 +770,7 @@ class UserController {
             })
         }
     }
+
     public async getUserListForEQA(req: any, res: Response) {
         try {
             const { EQA_id, user } = req.query as any;

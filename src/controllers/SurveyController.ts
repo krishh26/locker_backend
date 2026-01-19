@@ -136,7 +136,7 @@ class SurveyController {
 
     public async createSurvey(req: CustomRequest, res: Response) {
         try {
-            const { name, description, status, background, organizationId } = req.body;
+            const { name, description, status, background, organizationId, expirationDate } = req.body;
 
             if (!name || String(name).trim().length < 2) {
                 return res.status(400).json({
@@ -188,6 +188,7 @@ class SurveyController {
                 backgroundValue: parsedBackground?.value ?? null,
                 userId: req.user?.user_id ? String(req.user.user_id) : null,
                 organizationId: organizationId ?? null,
+                expirationDate: expirationDate ?? null
             });
 
             const saved = await repo.save(survey);
@@ -209,7 +210,7 @@ class SurveyController {
     public async updateSurvey(req: CustomRequest, res: Response) {
         try {
             const { surveyId } = req.params;
-            const { name, description, status, background, organizationId } = req.body;
+            const { name, description, status, background, organizationId, expirationDate } = req.body;
             const repo = AppDataSource.getRepository(Survey);
 
             const survey = await repo.findOne({ where: { id: surveyId } });
@@ -239,6 +240,10 @@ class SurveyController {
 
             if (description !== undefined) {
                 survey.description = description ?? null;
+            }
+
+            if (expirationDate !== undefined) {
+                survey.expirationDate = expirationDate;
             }
 
             if (status !== undefined) {
@@ -572,6 +577,7 @@ class SurveyController {
                 type: normalized.type as SurveyQuestionType,
                 required: normalized.required ?? false,
                 options: normalized.options ?? null,
+                statements: normalized.statements ?? null,
                 order,
             });
 
@@ -634,6 +640,7 @@ class SurveyController {
             question.type = (normalized.type as SurveyQuestionType) ?? question.type;
             question.required = normalized.required ?? question.required;
             question.options = normalized.options !== undefined ? normalized.options : question.options;
+            question.statements = normalized.statements !== undefined ? normalized.statements : question.statements;
             question.order = normalized.order ?? question.order;
 
             const saved = await questionRepo.save(question);

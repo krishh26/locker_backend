@@ -1,6 +1,7 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, OneToOne, JoinColumn, DeleteDateColumn, ManyToOne } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, OneToOne, JoinColumn, DeleteDateColumn, ManyToOne, OneToMany } from 'typeorm';
 import { UserRole, UserStatus } from '../util/constants';
 import { Employer } from './Employer.entity';
+import { UserEmployer } from './UserEmployers.entity';
 
 @Entity('users')
 export class User {
@@ -59,6 +60,9 @@ export class User {
   @ManyToOne(() => User, { nullable: true })
   @JoinColumn({ name: 'line_manager_id', referencedColumnName: 'user_id' })
   line_manager: User;
+
+  @OneToMany(() => UserEmployer, ue => ue.user)
+  userEmployers: UserEmployer[];
 
   @DeleteDateColumn({ type: 'timestamp', nullable: true })
   deleted_at: Date;
