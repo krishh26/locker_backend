@@ -20,6 +20,9 @@ CourseRoutes.get('/list', authorizeRoles(), paginationMiddleware, Controller.get
 //user Course routes
 CourseRoutes.get('/user/get', authorizeRoles(), Controller.getUserCourse);
 CourseRoutes.patch('/user/update/:id', authorizeRoles(), Controller.updateUserCourse);
+CourseRoutes.post('/user/assign-eqa', authorizeRoles(), Controller.updateEqaLearners);
+CourseRoutes.get('/eqa/:eqa_id/assigned-learners', authorizeRoles(), Controller.getAssignedLearnersForEqa);
+CourseRoutes.get('/eqa/:eqa_id/unassigned-learners', authorizeRoles(), Controller.getUnassignedLearnersForEqa);
 
 // GET /api/v1/course/trainer/:trainer_id → get courses by trainer ID
 CourseRoutes.get('/trainer/:trainer_id', authorizeRoles(), Controller.getCoursesByTrainer);
