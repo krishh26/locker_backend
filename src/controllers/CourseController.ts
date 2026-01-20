@@ -824,6 +824,8 @@ class CourseController {
             const rows = await userCourseRepo
                 .createQueryBuilder('uc')
                 .leftJoinAndSelect('uc.learner_id', 'learner')
+                .leftJoinAndSelect('uc.trainer_id', 'trainer')
+                .leftJoinAndSelect('uc.IQA_id', 'iqa')
                 .where('uc."EQA_id" = :eqa_id', { eqa_id })
                 .orderBy('uc.user_course_id', 'ASC')
                 .getMany();
