@@ -349,6 +349,15 @@ class CourseController {
                     }
                 })
             }
+
+            // // Apply learner-specific unit filtering if learner has chosen units previously
+            // const learnerUnitRepository = AppDataSource.getRepository(LearnerUnit);
+            // const existingLearnerUnits = await learnerUnitRepository.find({ where: { learner_id: { learner_id }, course: { course_id } } });
+            // if (existingLearnerUnits && existingLearnerUnits.length) {
+            //     const activeSet = new Set(existingLearnerUnits.filter(r => r.active).map(r => String(r.unit_id)));
+            //     courseData.units = (courseData.units || []).filter((u: any) => activeSet.has(String(u.id)) || activeSet.has(String(u.unit_ref)));
+            // }
+
             await userCourseRepository.save(userCourseRepository.create({ learner_id, trainer_id, IQA_id, LIQA_id, EQA_id, employer_id, course: courseData, start_date, end_date, is_main_course }))
             if (IQA_id) {
                 const existingPlan = await samplingPlanRepository
@@ -742,6 +751,144 @@ class CourseController {
             });
         }
     }
+
+    public async updateEqaLearners(req: CustomRequest, res: Response) {
+        try {
+            const { course_id, eqa_id, learner_ids, action } = req.body;
+
+            if (!course_id || !eqa_id || !Array.isArray(learner_ids) || !learner_ids.length || !action) {
+                return res.status(400).json({
+                    status: false,
+                    message: 'course_id, eqa_id, learner_ids and action are required'
+                });
+            }
+
+            if (!['assign', 'unassign'].includes(action)) {
+                return res.status(400).json({
+                    status: false,
+                    message: 'Invalid action'
+                });
+            }
+
+            const userCourseRepo = AppDataSource.getRepository(UserCourse);
+
+            if (action === 'assign') {
+                await userCourseRepo
+                    .createQueryBuilder()
+                    .update(UserCourse)
+                    .set({ EQA_id: eqa_id })
+                    .where('learner_id IN (:...learner_ids)', { learner_ids })
+                    .andWhere("course ->> 'course_id' = :course_id", { course_id })
+                    .execute();
+            }
+
+            if (action === 'unassign') {
+                await userCourseRepo
+                    .createQueryBuilder()
+                    .update(UserCourse)
+                    .set({ EQA_id: null })
+                    .where('learner_id IN (:...learner_ids)', { learner_ids })
+                    .andWhere("course ->> 'course_id' = :course_id", { course_id })
+                    .andWhere('EQA_id = :eqa_id', { eqa_id })
+                    .execute();
+            }
+
+            return res.status(200).json({
+                status: true,
+                message: `Learners ${action === 'assign' ? 'assigned' : 'unassigned'} successfully`
+            });
+
+        } catch (err: any) {
+            console.error(err);
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                error: err.message,
+                status: false
+            });
+        }
+    }
+
+    public async getAssignedLearnersForEqa(req: CustomRequest, res: Response) {
+        try {
+            const eqa_id = Number(req.params.eqa_id);
+
+            if (!eqa_id) {
+                return res.status(400).json({
+                    status: false,
+                    message: 'eqa_id is required'
+                });
+            }
+
+            const userCourseRepo = AppDataSource.getRepository(UserCourse);
+
+            const rows = await userCourseRepo
+                .createQueryBuilder('uc')
+                .leftJoinAndSelect('uc.learner_id', 'learner')
+                .where('uc."EQA_id" = :eqa_id', { eqa_id })
+                .orderBy('uc.user_course_id', 'ASC')
+                .getMany();
+
+            return res.status(200).json({
+                status: true,
+                message: 'Assigned learners fetched successfully',
+                data: rows
+            });
+
+        } catch (err: any) {
+            console.error(err);
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                error: err.message,
+                status: false
+            });
+        }
+    }
+
+
+    public async getUnassignedLearnersForEqa(req: CustomRequest, res: Response) {
+        try {
+            const eqa_id = Number(req.params.eqa_id);
+            const course_id = String(req.query.course_id);
+
+            if (!eqa_id || !course_id) {
+                return res.status(400).json({
+                    status: false,
+                    message: 'eqa_id and course_id are required'
+                });
+            }
+
+            const learnerRepo = AppDataSource.getRepository(Learner);
+
+            const learners = await learnerRepo
+                .createQueryBuilder('learner')
+                .where(`
+        EXISTS (
+          SELECT 1
+          FROM user_course uc
+          WHERE uc.learner_id = learner.learner_id
+            AND uc.course ->> 'course_id' = :course_id
+            AND (uc."EQA_id" IS NULL OR uc."EQA_id" != :eqa_id)
+        )
+      `)
+                .setParameters({ eqa_id, course_id })
+                .getMany();
+
+            return res.status(200).json({
+                status: true,
+                message: 'Unassigned learners fetched successfully',
+                data: learners
+            });
+
+        } catch (err: any) {
+            console.error(err);
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                error: err.message,
+                status: false
+            });
+        }
+    }
+
 
     public async submitGatewayAnswers(req: CustomRequest, res: Response) {
         try {
