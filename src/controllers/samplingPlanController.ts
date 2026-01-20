@@ -108,7 +108,7 @@ export class SamplingPlanController {
 
   public async getLearnersByPlan(req: Request, res: Response) {
     try {
-      const { plan_id } = req.params;
+      const { plan_id, eqaId } = req.params;
 
       if (!plan_id) {
         return res.status(400).json({
@@ -152,14 +152,19 @@ export class SamplingPlanController {
       }
 
       // Fetch learner + trainer + employer in single query
-      const learners = await userCourseRepo
+      const qb = userCourseRepo
         .createQueryBuilder("uc")
         .leftJoinAndSelect("uc.learner_id", "learner")
         .leftJoinAndSelect("learner.user_id", "user")
         .leftJoinAndSelect("uc.trainer_id", "trainer")
         .leftJoinAndSelect("uc.employer_id", "employer")
         .where("uc.course ->> 'course_id' = :courseId", { courseId })
-        .getMany();
+
+      if (eqaId) {
+        qb.andWhere('uc."EQA_id" = :eqaId', { eqaId });
+      }
+
+      const learners = await qb.getMany();
 
       const courseUnits = (learners[0]?.course as any)?.units || [];
 
