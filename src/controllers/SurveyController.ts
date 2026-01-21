@@ -576,8 +576,8 @@ class SurveyController {
                 description: normalized.description ?? null,
                 type: normalized.type as SurveyQuestionType,
                 required: normalized.required ?? false,
-                options: normalized.options ?? null,
-                statements: normalized.statements ?? null,
+                options: payload.options ?? null,
+                statements: payload.statements ?? null,
                 order,
             });
 
@@ -639,8 +639,8 @@ class SurveyController {
             question.description = normalized.description !== undefined ? normalized.description : question.description;
             question.type = (normalized.type as SurveyQuestionType) ?? question.type;
             question.required = normalized.required ?? question.required;
-            question.options = normalized.options !== undefined ? normalized.options : question.options;
-            question.statements = normalized.statements !== undefined ? normalized.statements : question.statements;
+            question.options = payload.options !== undefined ? payload.options : question.options;
+            question.statements = payload.statements !== undefined ? payload.statements : question.statements;
             question.order = normalized.order ?? question.order;
 
             const saved = await questionRepo.save(question);
@@ -1012,6 +1012,7 @@ class SurveyController {
                             type: survey.backgroundType,
                             value: survey.backgroundValue,
                         } : null,
+                        expirationDate: survey.expirationDate
                     },
                     questions,
                 },
@@ -1449,6 +1450,9 @@ const validateAnswers = async (questions: SurveyQuestion[], answers: Record<stri
                 if (Number.isNaN(rating) || rating < 1 || rating > 5) {
                     errors.push({ field: question.id, message: 'Rating must be between 1 and 5' });
                 }
+                break;
+            case SurveyQuestionType.Likert:
+                //
                 break;
             default:
                 errors.push({ field: question.id, message: 'Invalid question type' });
