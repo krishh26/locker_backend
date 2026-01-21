@@ -844,12 +844,12 @@ class CourseController {
             }
 
             let rows;
-            let total;
+            let items;
 
             if (page && limit) {
                 const skip = (page - 1) * limit;
 
-                [rows, total] = await qb
+                [rows, items] = await qb
                     .skip(skip)
                     .take(limit)
                     .orderBy('uc.user_course_id', 'ASC')
@@ -860,7 +860,7 @@ class CourseController {
                     .orderBy('uc.user_course_id', 'ASC')
                     .getMany();
 
-                total = rows.length;
+                items = rows.length;
             }
 
             return res.status(200).json({
@@ -868,11 +868,11 @@ class CourseController {
                 message: 'Assigned learners fetched successfully',
                 data: rows,
                 ...(page && limit && {
-                    meta: {
+                    meta_data: {
                         page,
-                        limit,
-                        total,
-                        pages: Math.ceil(total / limit)
+                        page_size: limit,
+                        items,
+                        pages: Math.ceil(items / limit)
                     }
                 })
             });

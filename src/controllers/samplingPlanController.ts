@@ -69,22 +69,18 @@ export class SamplingPlanController {
     try {
       const { iqa_id, course_id } = req.query as any;
 
-      if (!iqa_id) {
-        return res.status(400).json({
-          message: "IQA ID is required",
-          status: false,
-        });
-      }
-
       const samplingPlanRepo = AppDataSource.getRepository(SamplingPlan);
 
       const query = samplingPlanRepo
         .createQueryBuilder("plan")
         .leftJoinAndSelect("plan.course", "course")
-        .leftJoinAndSelect("plan.iqa", "iqa") // renamed to match actual field
-        .where("iqa.user_id = :iqa_id", { iqa_id });
+        .leftJoinAndSelect("plan.iqa", "iqa");
 
-      // ✅ Optional course filter
+      if (iqa_id) {
+        query.andWhere("iqa.user_id = :iqa_id", { iqa_id });
+      }
+
+      // Optional course filter
       if (course_id) {
         query.andWhere("course.course_id = :course_id", { course_id });
       }
