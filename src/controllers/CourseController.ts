@@ -811,6 +811,10 @@ class CourseController {
     public async getAssignedLearnersForEqa(req: CustomRequest, res: Response) {
         try {
             const eqa_id = Number(req.params.eqa_id);
+            const { course_id, status } = req.query as any;
+
+            const page = req.query.page ? Number(req.query.page) : null;
+            const limit = req.query.limit ? Number(req.query.limit) : null;
 
             if (!eqa_id) {
                 return res.status(400).json({
@@ -821,19 +825,56 @@ class CourseController {
 
             const userCourseRepo = AppDataSource.getRepository(UserCourse);
 
-            const rows = await userCourseRepo
+            const qb = userCourseRepo
                 .createQueryBuilder('uc')
                 .leftJoinAndSelect('uc.learner_id', 'learner')
+                .leftJoinAndSelect('learner.user_id', 'user')
                 .leftJoinAndSelect('uc.trainer_id', 'trainer')
                 .leftJoinAndSelect('uc.IQA_id', 'iqa')
-                .where('uc."EQA_id" = :eqa_id', { eqa_id })
-                .orderBy('uc.user_course_id', 'ASC')
-                .getMany();
+                .where('uc."EQA_id" = :eqa_id', { eqa_id });
+
+            // Course filter
+            if (course_id) {
+                qb.andWhere("uc.course ->> 'course_id' = :course_id", { course_id });
+            }
+
+            //Status filter
+            if (status) {
+                qb.andWhere('uc.course_status = :status', { status });
+            }
+
+            let rows;
+            let total;
+
+            if (page && limit) {
+                const skip = (page - 1) * limit;
+
+                [rows, total] = await qb
+                    .skip(skip)
+                    .take(limit)
+                    .orderBy('uc.user_course_id', 'ASC')
+                    .getManyAndCount();
+
+            } else {
+                rows = await qb
+                    .orderBy('uc.user_course_id', 'ASC')
+                    .getMany();
+
+                total = rows.length;
+            }
 
             return res.status(200).json({
                 status: true,
                 message: 'Assigned learners fetched successfully',
-                data: rows
+                data: rows,
+                ...(page && limit && {
+                    meta: {
+                        page,
+                        limit,
+                        total,
+                        pages: Math.ceil(total / limit)
+                    }
+                })
             });
 
         } catch (err: any) {
