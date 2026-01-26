@@ -20,6 +20,8 @@ import {
 } from '../entity/SurveyAllocation.entity';
 import { User } from '../entity/User.entity';
 import { Notification } from '../entity/Notification.entity';
+import { SendEmailTemplet } from '../util/nodemailer';
+import { generateSurveyAllocationEmailHTML } from '../util/mailSend';
 
 type ErrorDetail = { field?: string; message: string };
 
@@ -1171,6 +1173,45 @@ class SurveyController {
             } catch (notificationError: any) {
                 // Log error but don't fail the allocation
                 console.error('Failed to send notifications:', notificationError);
+            }
+
+            // Send emails to allocated users
+            try {
+                const surveyName = survey.name || 'Survey';
+                const surveyLink = `${process.env.FRONTEND}/survey/${survey_id}`;
+                const subject = `New Survey Assigned: ${surveyName}`;
+
+                // Create a map of userId to user for quick lookup
+                const userMap = new Map(users.map(user => [user.user_id, user]));
+
+                // Send emails to all allocated users
+                const emailPromises = normalizedAllocations.map(async (alloc) => {
+                    const user = userMap.get(alloc.userId);
+                    if (user && user.email) {
+                        try {
+                            // Get user's display name
+                            const userName = user.first_name 
+                                ? `${user.first_name}${user.last_name ? ' ' + user.last_name : ''}`
+                                : (user.email ? user.email.split('@')[0] : 'User');
+                            
+                            const emailHTML = generateSurveyAllocationEmailHTML(
+                                surveyName,
+                                surveyLink,
+                                userName
+                            );
+                            await SendEmailTemplet(user.email, subject, null, emailHTML);
+                            return { userId: alloc.userId, email: user.email, status: 'sent' };
+                        } catch (error: any) {
+                            console.error(`Failed to send email to ${user.email}:`, error);
+                            return { userId: alloc.userId, email: user.email, status: 'failed', error: error.message };
+                        }
+                    }
+                    return { userId: alloc.userId, email: null, status: 'skipped', reason: 'No email address' };
+                });
+
+                await Promise.all(emailPromises);
+            } catch (emailError: any) {
+                console.error('Failed to send emails:', emailError);
             }
 
             return res.status(201).json({

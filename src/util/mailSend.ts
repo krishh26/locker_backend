@@ -453,3 +453,124 @@ const generateICalEvent = (sessionData: {
 
     return builder.toString();
 };
+
+export const generateSurveyAllocationEmailHTML = (surveyName: string, surveyLink: string, userName?: string): string => {
+    return `<!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            body {
+                font-family: 'Arial', sans-serif;
+                background-color: #f0f0f0;
+                margin: 0;
+                padding: 0;
+                text-align: center;
+            }
+
+            .container {
+                max-width: 600px;
+                margin: 20px auto;
+                background-color: #ffffff;
+                padding: 30px;
+                border-radius: 10px;
+                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            }
+
+            .logo {
+                max-width: 150px;
+                height: auto;
+                margin-bottom: 20px;
+            }
+
+            .title {
+                font-size: 24px;
+                font-weight: bold;
+                margin-bottom: 20px;
+                color: #333;
+            }
+
+            .message {
+                font-size: 16px;
+                line-height: 1.6;
+                margin-bottom: 25px;
+                color: #555;
+                text-align: left;
+            }
+
+            .survey-info {
+                background-color: #f5f5f5;
+                padding: 20px;
+                border-radius: 5px;
+                margin: 25px 0;
+                text-align: left;
+            }
+
+            .survey-name {
+                font-size: 20px;
+                font-weight: bold;
+                color: #2c3e50;
+                margin: 0 0 10px 0;
+            }
+
+            .survey-link-btn {
+                display: inline-block;
+                background-color: #3498db;
+                color: #ffffff;
+                padding: 12px 25px;
+                text-decoration: none;
+                border-radius: 5px;
+                font-size: 16px;
+                margin-top: 20px;
+                transition: background-color 0.3s;
+            }
+
+            .survey-link-btn:hover {
+                background-color: #2980b9;
+            }
+
+            .footer {
+                font-size: 14px;
+                color: #777;
+                margin-top: 30px;
+                text-align: left;
+            }
+
+            .footer hr {
+                margin: 20px 0;
+                border: none;
+                border-top: 1px solid #eee;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            
+            <div class="title">New Survey Assigned</div>
+            <div class="message">
+                ${userName ? `<p>Hello ${userName},</p>` : '<p>Hello,</p>'}
+                <p>You have been assigned a new survey to complete. Please review the details below and complete it at your earliest convenience.</p>
+            </div>
+            
+            <div class="survey-info">
+                <div class="survey-name" style="text-align: center">${surveyName}</div>
+            </div>
+
+            <div style="text-align: center; margin: 25px 0;">
+                <a href="${surveyLink}" class="survey-link-btn">Access Survey</a>
+            </div>
+
+            <div class="footer">
+                <hr>
+                <p style="font-size: 12px; color: #666;">
+                    This is an automated message from the Locker system. Please do not reply to this email.
+                </p>
+                <p style="font-size: 12px; color: #666;">
+                    If you have any questions, please log in to the system: <a href="${process.env.FRONTEND}" style="color: #3498db;">Locker</a>
+                </p>
+            </div>
+        </div>
+    </body>
+    </html>`;
+};
