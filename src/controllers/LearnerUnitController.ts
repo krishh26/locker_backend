@@ -3,6 +3,8 @@ import { AppDataSource } from '../data-source';
 import { LearnerUnit } from '../entity/LearnerUnit.entity';
 import { Learner } from '../entity/Learner.entity';
 import { Course } from '../entity/Course.entity';
+import { UserCourse } from '../entity/UserCourse.entity';
+import { getUnitCompletionStatus } from '../util/unitCompletion';
 
 class LearnerUnitController {
     public async saveSelectedUnits(req: Request, res: Response) {
@@ -107,6 +109,7 @@ class LearnerUnitController {
 
             const learnerUnitRepo = AppDataSource.getRepository(LearnerUnit);
             const courseRepo = AppDataSource.getRepository(Course);
+            const userCourseRepo = AppDataSource.getRepository(UserCourse);
 
             const course = await courseRepo.findOne({
                 where: { course_id: Number(course_id) }
@@ -134,14 +137,83 @@ class LearnerUnitController {
                 selectedUnits.map(u => String(u.unit_id))
             );
 
-            const units = (course.units || [])
+            // Prefer learner-specific course JSON (contains mapping/progress fields) when available
+            const userCourse = await userCourseRepo
+                .createQueryBuilder('uc')
+                .leftJoinAndSelect('uc.learner_id', 'learner')
+                .where('learner.learner_id = :learner_id', { learner_id: Number(learner_id) })
+                .andWhere(`uc.course->>'course_id' = :course_id`, { course_id: String(course_id) })
+                .getOne();
+
+            const courseData: any = userCourse?.course || course;
+            const courseUnits: any[] = Array.isArray(courseData?.units) ? courseData.units : [];
+
+            const computeUnitProgressPercent = (unit: any) => {
+                let total = 0;
+                let learnerMapped = 0;
+                let trainerMapped = 0;
+
+                const countBox = (box: any) => {
+                    total += 1;
+                    if (box?.learnerMap) learnerMapped += 1;
+                    if (box?.trainerMap) trainerMapped += 1;
+                };
+
+                // Units can be "unit-only" (evidenceBoxes) or have subUnit[].evidenceBoxes
+                if (Array.isArray(unit?.evidenceBoxes)) {
+                    unit.evidenceBoxes.forEach(countBox);
+                }
+                if (Array.isArray(unit?.subUnit)) {
+                    unit.subUnit.forEach((su: any) => {
+                        if (Array.isArray(su?.evidenceBoxes)) su.evidenceBoxes.forEach(countBox);
+                    });
+                }
+
+                const completion = getUnitCompletionStatus(unit);
+
+                const learnerPercent = total > 0
+                    ? Math.round((learnerMapped / total) * 100)
+                    : (completion.learnerDone ? 100 : 0);
+
+                const trainerPercent = total > 0
+                    ? Math.round((trainerMapped / total) * 100)
+                    : (completion.trainerDone ? 100 : 0);
+
+                return { learnerPercent, trainerPercent, total, learnerMapped, trainerMapped, completion };
+            };
+
+            const units = courseUnits
                 .filter((unit: any) =>
-                    selectedSet.has(String(unit.id || unit.unit_code))
+                    selectedSet.has(String(unit.id || unit.unit_code || unit.unit_ref))
                 )
-                .map((unit: any) => ({
-                    unit_id: unit.id || unit.unit_code,
-                    title: unit.title
-                }));
+                .map((unit: any) => {
+                    const unitId = unit.id || unit.unit_code || unit.unit_ref;
+                    const title = unit.title || unit.unit_title || unit.name || '';
+
+                    const progress = computeUnitProgressPercent(unit);
+
+                    // pass-through fields if present in unit JSON
+                    const assessed_date =
+                        unit.assessed_date ?? unit.assessedDate ?? unit.assessed_at ?? unit.assessedAt ?? unit.assessed ?? null;
+                    const iqa_sign_off =
+                        unit.iqa_sign_off ?? unit.iqaSignOff ?? unit.iqa_signed_off ?? unit.iqaSignedOff ?? null;
+
+                    return {
+                        ...unit,
+                        unit_id: unitId,
+                        title,
+                        // Progress bars
+                        learner_progress_percent: progress.learnerPercent,
+                        trainer_progress_percent: progress.trainerPercent,
+                        // Completion flags
+                        learner_done: progress.completion.learnerDone,
+                        trainer_done: progress.completion.trainerDone,
+                        fully_completed: progress.completion.fullyCompleted,
+                        partially_completed: progress.completion.partiallyCompleted,
+                        assessed_date,
+                        iqa_sign_off,
+                    };
+                });
 
             return res.status(200).json({
                 status: true,
