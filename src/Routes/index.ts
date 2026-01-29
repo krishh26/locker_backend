@@ -40,6 +40,10 @@ import SamplingFormsRoutes from './samplingPlanForm.routes';
 import SamplingQuestionRoutes from './samplingPlanQuestion.routes';
 import SessionTypeRoutes from './SessionTypeRoutes';
 import SurveyRoutes from './SurveyRouter';
+import SystemAdminRoutes from './SystemAdminRouter';
+import AccountManagerRoutes from './AccountManagerRouter';
+import DashboardRoutes from './DashboardRouter';
+import OrganisationRoutes from './OrganisationRouter';
 
 const fileController = new FileController;
 const Routes = express.Router();
@@ -81,6 +85,10 @@ Routes.use("/sample-form", SamplingFormsRoutes)
 Routes.use("/sample-question", SamplingQuestionRoutes)
 Routes.use('/sessionType', SessionTypeRoutes)
 Routes.use('/surveys', SurveyRoutes)
+Routes.use('/system-admin', SystemAdminRoutes)
+Routes.use('/account-manager', AccountManagerRoutes)
+Routes.use('/dashboard', DashboardRoutes)
+Routes.use('/organisations', OrganisationRoutes)
 
 // API routes
 Routes.get("/file", fileController.getFile)

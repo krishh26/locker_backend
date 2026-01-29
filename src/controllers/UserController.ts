@@ -20,7 +20,8 @@ class UserController {
 
     public async CreateUser(req: CustomRequest, res: Response) {
         try {
-            const { user_name, first_name, last_name, email, password, confirmPassword, roles, line_manager_id } = req.body
+            const { user_name, first_name, last_name, email, password, confirmPassword, roles, line_manager_id } = req.body;
+
             if (!user_name || !first_name || !last_name || !email || !password || !roles || !confirmPassword) {
                 return res.status(400).json({
                     message: "All Field Required",
@@ -280,16 +281,41 @@ class UserController {
 
             const role = getHighestPriorityRole(user.roles)
 
+            // Get assignedOrganisationIds for MasterAdmin or AccountManager
+            let assignedOrganisationIds: number[] | null = null;
+            if (user.roles.includes(UserRole.MasterAdmin)) {
+                assignedOrganisationIds = null; // MasterAdmin has access to all
+            } else if (user.roles.includes(UserRole.AccountManager)) {
+                const { AccountManager } = await import("../entity/AccountManager.entity");
+                const { AccountManagerOrganisation } = await import("../entity/AccountManagerOrganisation.entity");
+                const accountManagerRepository = AppDataSource.getRepository(AccountManager);
+                const amoRepository = AppDataSource.getRepository(AccountManagerOrganisation);
+                
+                const accountManager = await accountManagerRepository.findOne({
+                    where: { user_id: user.user_id }
+                });
+                
+                if (accountManager) {
+                    const assignments = await amoRepository.find({
+                        where: { account_manager_id: accountManager.id }
+                    });
+                    assignedOrganisationIds = assignments.map(a => a.organisation_id);
+                } else {
+                    assignedOrganisationIds = [];
+                }
+            }
+
             let accessToken = generateToken({
                 ...user,
                 displayName: user.first_name + " " + user.last_name,
-                role
+                role,
+                assignedOrganisationIds :assignedOrganisationIds
             })
 
             let responce = {
                 password_changed: user.password_changed,
                 accessToken: accessToken,
-                user: { ...user, role }
+                user: { ...user, role, assignedOrganisationIds }
             }
             return res.status(200).json({
                 data: responce,
