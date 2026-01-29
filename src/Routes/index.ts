@@ -44,6 +44,11 @@ import SystemAdminRoutes from './SystemAdminRouter';
 import AccountManagerRoutes from './AccountManagerRouter';
 import DashboardRoutes from './DashboardRouter';
 import OrganisationRoutes from './OrganisationRouter';
+import CentreRoutes from './CentreRouter';
+import AccessControlRoutes from './AccessControlRouter';
+import SubscriptionRoutes from './SubscriptionRouter';
+import FeatureControlRoutes from './FeatureControlRouter';
+import AuditLogRoutes from './AuditLogRouter';
 
 const fileController = new FileController;
 const Routes = express.Router();
@@ -89,6 +94,11 @@ Routes.use('/system-admin', SystemAdminRoutes)
 Routes.use('/account-manager', AccountManagerRoutes)
 Routes.use('/dashboard', DashboardRoutes)
 Routes.use('/organisations', OrganisationRoutes)
+Routes.use('/centres', CentreRoutes)
+Routes.use('/access-control', AccessControlRoutes)
+Routes.use('/subscriptions', SubscriptionRoutes)
+Routes.use('/feature-control', FeatureControlRoutes)
+Routes.use('/audit-logs', AuditLogRoutes)
 
 // API routes
 Routes.get("/file", fileController.getFile)
