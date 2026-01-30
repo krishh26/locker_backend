@@ -9,6 +9,7 @@ import { LearnerCPD } from "../entity/LearnerCpd.entity";
 import { Learner } from "../entity/Learner.entity";
 import XLSX from 'xlsx';
 import PDFDocument from 'pdfkit';
+import { getAccessibleOrganisationIds } from "../util/organisationFilter";
 
 class CpdController {
 
@@ -18,7 +19,7 @@ class CpdController {
 
             const { year, start_date, end_date, cpd_plan, impact_on_you, impact_on_colleagues, impact_on_managers, impact_on_organisation } = req.body
 
-            const existingCPD = await cpdRepository.findOne({ where: { year, user_id: req.user.user_id } })
+            const existingCPD = await cpdRepository.findOne({ where: { year, user_id: { user_id: req.user.user_id } as any } })
 
             if (existingCPD) {
                 return res.status(400).json({
@@ -27,7 +28,7 @@ class CpdController {
                 })
             }
 
-            let cpd = await cpdRepository.create({ user_id: req.user.user_id, year, start_date, end_date, cpd_plan, impact_on_you, impact_on_colleagues, impact_on_managers, impact_on_organisation })
+            let cpd = await cpdRepository.create({ user_id: { user_id: req.user.user_id } as any, year, start_date, end_date, cpd_plan, impact_on_you, impact_on_colleagues, impact_on_managers, impact_on_organisation })
 
             cpd = await cpdRepository.save(cpd)
 
@@ -96,14 +97,35 @@ class CpdController {
             let relations = (req.query.table as string)?.split(',') || [];
             const { user_id } = req.params as any;
 
-            let query: any = {
-                where: { user_id }
-            }
+            // Use query builder to add organization filtering
+            const qb = cpdRepository.createQueryBuilder('cpd')
+                .where('cpd.user_id = :user_id', { user_id });
+
+            // Add relations
             if (relations.length && relations[0] !== "") {
-                query = { ...query, relations }
+                relations.forEach(rel => {
+                    qb.leftJoinAndSelect(`cpd.${rel}`, rel);
+                });
             }
 
-            const cpd = await cpdRepository.find(query);
+            // Add organization filtering through user_id (User → UserOrganisation)
+            if (req.user) {
+                const accessibleIds = getAccessibleOrganisationIds(req.user);
+                if (accessibleIds !== null) {
+                    if (accessibleIds.length === 0) {
+                        return res.status(404).json({
+                            message: "CPD not found",
+                            status: true,
+                            data: []
+                        });
+                    }
+                    qb.leftJoin('cpd.user_id', 'user')
+                      .leftJoin('user.userOrganisations', 'userOrganisation')
+                      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+                }
+            }
+
+            const cpd = await qb.getMany();
 
             if (!cpd || cpd.length === 0) {
                 return res.status(404).json({
@@ -695,7 +717,7 @@ class CpdController {
             
             // Get learner information for header
             const learner = await learnerRepository.findOne({
-                where: { user_id: req.user.user_id },
+                where: { user_id: { user_id: req.user.user_id } as any },
                 relations: ['user_id', 'employer_id'],
             });
             
@@ -789,10 +811,12 @@ class CpdController {
                 });
             }
 
-            const learner = await learnerRepository.findOne({
-                where: { user_id: req.user.user_id },
-                relations: ['user_id', 'employer_id'],
-            });
+            const learner = await learnerRepository
+                .createQueryBuilder('learner')
+                .leftJoinAndSelect('learner.user_id', 'user_id')
+                .leftJoinAndSelect('learner.employer_id', 'employer_id')
+                .where('user_id.user_id = :userId', { userId: req.user.user_id })
+                .getOne();
 
             const doc = new PDFDocument({ margin: 50 });
 

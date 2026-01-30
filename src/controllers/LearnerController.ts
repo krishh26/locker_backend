@@ -18,6 +18,7 @@ import { Course } from "../entity/Course.entity";
 import { getUnitCompletionStatus, unitCompletionStatus } from '../util/unitCompletion';
 import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
 import { In } from "typeorm";
+import { getAccessibleOrganisationIds } from "../util/organisationFilter";
 class LearnerController {
 
     public async CreateLearner(req: CustomRequest, res: Response) {
@@ -204,7 +205,7 @@ class LearnerController {
         }
     }
 
-    public async getLearnerList(req: Request, res: Response): Promise<Response> {
+    public async getLearnerList(req: CustomRequest, res: Response): Promise<Response> {
         try {
             let { user_id, role, course_id, employer_ids, status, trainer_id } = req.query as any;
             status = status?.split(", ") || [];
@@ -284,6 +285,32 @@ class LearnerController {
                     'funding_course.course_name',
                     'funding_course.course_code',
                 ])
+
+            // Add organization filtering through User → UserOrganisation
+            if (req.user) {
+                const accessibleIds = getAccessibleOrganisationIds(req.user);
+                if (accessibleIds !== null) {
+                    if (accessibleIds.length === 0) {
+                        // No organizations assigned - return empty result
+                        return res.status(200).json({
+                            message: "Learner fetched successfully",
+                            status: true,
+                            data: [],
+                            ...(req.query.meta === "true" && {
+                                meta_data: {
+                                    page: req.pagination?.page || 1,
+                                    items: 0,
+                                    page_size: req.pagination?.limit || 10,
+                                    pages: 0
+                                }
+                            })
+                        });
+                    }
+                    // Join with UserOrganisation and filter by organisation_id
+                    qb.leftJoin('user_id.userOrganisations', 'userOrganisation')
+                      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+                }
+            }
 
             if (status.includes("Show only archived users")) {
                 qb
@@ -968,10 +995,12 @@ class LearnerController {
             const learnerRepository = AppDataSource.getRepository(Learner);
             const userCourseRepository = AppDataSource.getRepository(UserCourse);
 
-            const learner = await learnerRepository.findOne({
-                where: { user_id: id },
-                relations: ['funding_band', 'funding_band.course', 'custom_funding_data']
-            })
+            const learner = await learnerRepository
+                .createQueryBuilder('learner')
+                .leftJoinAndSelect('learner.funding_band', 'funding_band')
+                .leftJoinAndSelect('funding_band.course', 'course')
+                .where('learner.user_id = :userId', { userId: id })
+                .getOne();
 
             if (!learner) {
                 return res.status(404).json({
@@ -1072,10 +1101,11 @@ class LearnerController {
             const fundingBandRepository = AppDataSource.getRepository(FundingBand);
 
             // Find the learner by user_id (from params)
-            const learner = await learnerRepository.findOne({
-                where: { user_id: user_id },
-                relations: ['user_id']
-            });
+            const learner = await learnerRepository
+                .createQueryBuilder('learner')
+                .leftJoinAndSelect('learner.user_id', 'user_id')
+                .where('learner.user_id = :userId', { userId: user_id })
+                .getOne();
 
             if (!learner) {
                 return res.status(404).json({
@@ -1652,11 +1682,28 @@ class LearnerController {
             const courseRepository = AppDataSource.getRepository(Course);
             if (type) {
                 if (type === "active_learners") {
-                    const active_learners = await learnerRepository
+                    const qb = learnerRepository
                         .createQueryBuilder("learner")
                         .leftJoinAndSelect("learner.user_id", "user_id")
-                        .where("user_id.status = 'Active'")
-                        .getMany();
+                        .where("user_id.status = 'Active'");
+                    
+                    // Add organization filtering
+                    if (req.user) {
+                        const accessibleIds = getAccessibleOrganisationIds(req.user);
+                        if (accessibleIds !== null) {
+                            if (accessibleIds.length === 0) {
+                                return res.status(200).json({
+                                    message: "Active learners fetched successfully",
+                                    status: true,
+                                    data: [],
+                                });
+                            }
+                            qb.leftJoin('user_id.userOrganisations', 'userOrganisation')
+                              .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+                        }
+                    }
+                    
+                    const active_learners = await qb.getMany();
 
                     return res.status(200).json({
                         message: "Active learners fetched successfully",
