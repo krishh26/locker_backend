@@ -15,13 +15,13 @@ import { Raw, In } from 'typeorm';
 import { AssignmentSignature } from "../entity/AssignmentSignature.entity";
 import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
 import { UserEmployer } from '../entity/UserEmployers.entity';
+import { addUserOrganisationFilter } from "../util/organisationFilter";
 
 class UserController {
 
     public async CreateUser(req: CustomRequest, res: Response) {
         try {
-            const { user_name, first_name, last_name, email, password, confirmPassword, roles, line_manager_id } = req.body;
-
+            const { user_name, first_name, last_name, email, password, confirmPassword, roles, line_manager_id } = req.body
             if (!user_name || !first_name || !last_name || !email || !password || !roles || !confirmPassword) {
                 return res.status(400).json({
                     message: "All Field Required",
@@ -89,6 +89,35 @@ class UserController {
                 await userEmployerRepo.save(mappings);
             }
 
+            // Handle organisation_ids assignment
+            if (Array.isArray(req.body.organisation_ids) && req.body.organisation_ids.length) {
+                const { UserOrganisation } = await import("../entity/UserOrganisation.entity");
+                const { Organisation } = await import("../entity/Organisation.entity");
+                const userOrganisationRepo = AppDataSource.getRepository(UserOrganisation);
+                const organisationRepo = AppDataSource.getRepository(Organisation);
+
+                // Validate that all organisation IDs exist
+                const organisations = await organisationRepo.find({
+                    where: { id: In(req.body.organisation_ids) }
+                });
+
+                if (organisations.length !== req.body.organisation_ids.length) {
+                    return res.status(400).json({
+                        message: "One or more organisation IDs are invalid",
+                        status: false
+                    });
+                }
+
+                const organisationMappings = req.body.organisation_ids.map((organisation_id: number) =>
+                    userOrganisationRepo.create({
+                        user: { user_id: users.user_id },
+                        organisation: { id: organisation_id }
+                    })
+                );
+
+                await userOrganisationRepo.save(organisationMappings);
+            }
+
             res.status(200).json({
                 message: "User create successfully",
                 status: true,
@@ -109,23 +138,19 @@ class UserController {
     public async GetUser(req: CustomRequest, res: Response) {
         try {
             const userRepository = AppDataSource.getRepository(User)
-            const id: number = parseInt(req.user.user_id);
+            const id: number = parseInt(req.user.user_id.toString());
 
             const user = await userRepository.findOne({
                 where: { user_id: id },
                 relations: {
                     userEmployers: {
                         employer: true
+                    },
+                    userOrganisations: {
+                        organisation: true
                     }
                 }
             });
-
-            const assignedEmployers = user.userEmployers?.map(ue => ({
-                employer_id: ue.employer.employer_id,
-                employer_name: ue.employer.employer_name
-            })) || [];
-
-            delete user.password;
 
             if (!user) {
                 return res.status(404).json({
@@ -134,12 +159,25 @@ class UserController {
                 });
             }
 
+            const assignedEmployers = user.userEmployers?.map(ue => ({
+                employer_id: ue.employer.employer_id,
+                employer_name: ue.employer.employer_name
+            })) || [];
+
+            const assignedOrganisations = user.userOrganisations?.map(uo => ({
+                id: uo.organisation.id,
+                name: uo.organisation.name
+            })) || [];
+
+            delete user.password;
+
             return res.status(200).json({
                 message: "User fetched successfully",
-                status: false,
+                status: true,
                 data: {
                     ...user,
-                    assigned_employers: assignedEmployers
+                    assigned_employers: assignedEmployers,
+                    assigned_organisations: assignedOrganisations
                 }
             })
 
@@ -218,6 +256,43 @@ class UserController {
                 await userEmployerRepo.save(mappings);
             }
 
+            // Handle organisation_ids assignment
+            if (Array.isArray(req.body.organisation_ids)) {
+                const { UserOrganisation } = await import("../entity/UserOrganisation.entity");
+                const { Organisation } = await import("../entity/Organisation.entity");
+                const userOrganisationRepo = AppDataSource.getRepository(UserOrganisation);
+                const organisationRepo = AppDataSource.getRepository(Organisation);
+
+                // Remove old mappings
+                await userOrganisationRepo.delete({
+                    user: { user_id: userId }
+                });
+
+                // Insert new mappings if organisation_ids array is not empty
+                if (req.body.organisation_ids.length > 0) {
+                    // Validate that all organisation IDs exist
+                    const organisations = await organisationRepo.find({
+                        where: { id: In(req.body.organisation_ids) }
+                    });
+
+                    if (organisations.length !== req.body.organisation_ids.length) {
+                        return res.status(400).json({
+                            message: "One or more organisation IDs are invalid",
+                            status: false
+                        });
+                    }
+
+                    const organisationMappings = req.body.organisation_ids.map((organisation_id: number) =>
+                        userOrganisationRepo.create({
+                            user: { user_id: userId },
+                            organisation: { id: organisation_id }
+                        })
+                    );
+
+                    await userOrganisationRepo.save(organisationMappings);
+                }
+            }
+
             const updatedUser = await userRepository.save(user)
 
             return res.status(200).json({
@@ -281,11 +356,12 @@ class UserController {
 
             const role = getHighestPriorityRole(user.roles)
 
-            // Get assignedOrganisationIds for MasterAdmin or AccountManager
+            // Get assignedOrganisationIds for all users
             let assignedOrganisationIds: number[] | null = null;
             if (user.roles.includes(UserRole.MasterAdmin)) {
                 assignedOrganisationIds = null; // MasterAdmin has access to all
             } else if (user.roles.includes(UserRole.AccountManager)) {
+                // AccountManager gets organizations from AccountManagerOrganisation
                 const { AccountManager } = await import("../entity/AccountManager.entity");
                 const { AccountManagerOrganisation } = await import("../entity/AccountManagerOrganisation.entity");
                 const accountManagerRepository = AppDataSource.getRepository(AccountManager);
@@ -303,13 +379,23 @@ class UserController {
                 } else {
                     assignedOrganisationIds = [];
                 }
+            } else {
+                // For all other users, get organizations from UserOrganisation
+                const { UserOrganisation } = await import("../entity/UserOrganisation.entity");
+                const userOrganisationRepository = AppDataSource.getRepository(UserOrganisation);
+                
+                const userOrganisations = await userOrganisationRepository.find({
+                    where: { user_id: user.user_id }
+                });
+                
+                assignedOrganisationIds = userOrganisations.map(uo => uo.organisation_id);
             }
 
             let accessToken = generateToken({
                 ...user,
                 displayName: user.first_name + " " + user.last_name,
                 role,
-                assignedOrganisationIds :assignedOrganisationIds
+                assignedOrganisationIds
             })
 
             let responce = {
@@ -517,13 +603,18 @@ class UserController {
         }
     }
 
-    public async GetUserList(req: any, res: Response) {
+    public async GetUserList(req: CustomRequest, res: Response) {
         try {
             const userRepository = AppDataSource.getRepository(User)
             const qb = userRepository.createQueryBuilder("user")
                 .leftJoinAndSelect('user.line_manager', 'line_manager')
                 .leftJoinAndSelect('user.userEmployers', 'userEmployers')
                 .leftJoinAndSelect('userEmployers.employer', 'employer');
+
+            // Add organization filtering
+            if (req.user) {
+                addUserOrganisationFilter(qb, req.user);
+            }
 
             if (req.query.role) {
                 qb.andWhere(":role = ANY(user.roles)", { role: req.query.role });

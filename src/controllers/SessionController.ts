@@ -4,6 +4,7 @@ import { AppDataSource } from '../data-source';
 import { Session } from '../entity/Session.entity';
 import { SendNotification } from '../util/socket/notification';
 import { NotificationType, SocketDomain } from '../util/constants';
+import { getAccessibleOrganisationIds } from '../util/organisationFilter';
 
 class SessionController {
 
@@ -178,6 +179,30 @@ class SessionController {
                 }
             }
 
+            // Add organization filtering through trainer (User → UserOrganisation)
+            if (req.user) {
+                const accessibleIds = getAccessibleOrganisationIds(req.user);
+                if (accessibleIds !== null) {
+                    if (accessibleIds.length === 0) {
+                        return res.status(200).json({
+                            message: "Sessions fetched successfully",
+                            status: true,
+                            data: [],
+                            ...(req.query.meta === "true" && {
+                                meta_data: {
+                                    page: req.pagination.page,
+                                    items: 0,
+                                    page_size: req.pagination.limit,
+                                    pages: 0
+                                }
+                            })
+                        });
+                    }
+                    qb.leftJoin('trainer.userOrganisations', 'userOrganisation')
+                      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+                }
+            }
+
             // Add sorting for startDate
             const sortOrder = sortBy === 'asc' ? 'ASC' : 'DESC'; // Default to DESC if not specified
 
@@ -216,7 +241,7 @@ class SessionController {
             const sessionRepository = AppDataSource.getRepository(Session)
             const { id } = req.params;
 
-            const session = await sessionRepository.createQueryBuilder('session')
+            const qb = sessionRepository.createQueryBuilder('session')
                 .leftJoinAndSelect('session.trainer_id', 'trainer')
                 .leftJoinAndSelect('session.learners', 'learner')
                 .where('session.session_id = :id', { id })
@@ -235,8 +260,23 @@ class SessionController {
                     'learner.learner_id',
                     'learner.user_name',
                     'learner.email'
-                ])
-                .getOne();
+                ]);
+
+            // Add organization filtering through trainer (User → UserOrganisation)
+            if (req.user) {
+                const accessibleIds = getAccessibleOrganisationIds(req.user);
+                if (accessibleIds !== null && accessibleIds.length > 0) {
+                    qb.leftJoin('trainer.userOrganisations', 'userOrganisation')
+                      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+                } else if (accessibleIds !== null && accessibleIds.length === 0) {
+                    return res.status(404).json({
+                        message: "Session not found",
+                        status: false
+                    });
+                }
+            }
+
+            const session = await qb.getOne();
 
             if (!session) {
                 return res.status(404).json({
@@ -286,6 +326,22 @@ class SessionController {
 
             if (learner_id) {
                 qb.andWhere('learner.learner_id = :learner_id', { learner_id });
+            }
+
+            // Add organization filtering through trainer (User → UserOrganisation)
+            if (req.user) {
+                const accessibleIds = getAccessibleOrganisationIds(req.user);
+                if (accessibleIds !== null) {
+                    if (accessibleIds.length === 0) {
+                        return res.status(200).json({
+                            message: "Sessions fetched successfully",
+                            status: true,
+                            data: []
+                        });
+                    }
+                    qb.leftJoin('trainer.userOrganisations', 'userOrganisation')
+                      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+                }
             }
 
             const sessions = await qb

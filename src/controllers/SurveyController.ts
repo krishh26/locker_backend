@@ -22,6 +22,7 @@ import { User } from '../entity/User.entity';
 import { Notification } from '../entity/Notification.entity';
 import { SendEmailTemplet } from '../util/nodemailer';
 import { generateSurveyAllocationEmailHTML } from '../util/mailSend';
+import { getAccessibleOrganisationIds } from '../util/organisationFilter';
 
 type ErrorDetail = { field?: string; message: string };
 
@@ -50,6 +51,32 @@ class SurveyController {
 
             if (organizationId) {
                 qb.andWhere('survey.organizationId = :organizationId', { organizationId });
+            }
+
+            // Add organization filtering (Survey has organizationId field)
+            if (req.user) {
+                const accessibleIds = getAccessibleOrganisationIds(req.user);
+                if (accessibleIds !== null) {
+                    if (accessibleIds.length === 0) {
+                        return res.status(200).json({
+                            message: 'Surveys retrieved successfully',
+                            status: true,
+                            data: {
+                                surveys: [],
+                                pagination: {
+                                    page: Number(req.pagination?.page || 1),
+                                    limit: Number(req.pagination?.limit || 10),
+                                    total: 0,
+                                    totalPages: 0,
+                                },
+                            },
+                        });
+                    }
+                    // Filter by organizationId (convert to string for comparison)
+                    qb.andWhere('survey.organizationId IN (:...orgIds)', { 
+                        orgIds: accessibleIds.map(id => id.toString()) 
+                    });
+                }
             }
 
             if (search) {

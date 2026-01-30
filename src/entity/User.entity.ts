@@ -2,6 +2,7 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateCol
 import { UserRole, UserStatus } from '../util/constants';
 import { Employer } from './Employer.entity';
 import { UserEmployer } from './UserEmployers.entity';
+import { UserOrganisation } from './UserOrganisation.entity';
 
 @Entity('users')
 export class User {
@@ -63,6 +64,9 @@ export class User {
 
   @OneToMany(() => UserEmployer, ue => ue.user)
   userEmployers: UserEmployer[];
+
+  @OneToMany(() => UserOrganisation, uo => uo.user)
+  userOrganisations: UserOrganisation[];
 
   @DeleteDateColumn({ type: 'timestamp', nullable: true })
   deleted_at: Date;
