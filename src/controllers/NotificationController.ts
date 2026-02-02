@@ -2,7 +2,6 @@ import { Response } from "express";
 import { CustomRequest } from "../util/Interface/expressInterface";
 import { AppDataSource } from "../data-source";
 import { Notification } from "../entity/Notification.entity";
-import { getAccessibleOrganisationIds } from "../util/organisationFilter";
 
 class NotificationController {
 
@@ -11,29 +10,7 @@ class NotificationController {
             const notifictionRepository = AppDataSource.getRepository(Notification)
             const userId = req.user.user_id;
 
-            // Use query builder to add organization filtering
-            const qb = notifictionRepository.createQueryBuilder('notification')
-                .leftJoin('notification.user_id', 'user')
-                .where('user.user_id = :userId', { userId });
-
-            // Add organization filtering - ensure user belongs to accessible organizations
-            if (req.user) {
-                const accessibleIds = getAccessibleOrganisationIds(req.user);
-                if (accessibleIds !== null && accessibleIds.length > 0) {
-                    qb.leftJoin('user.userOrganisations', 'userOrganisation')
-                      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
-                } else if (accessibleIds !== null && accessibleIds.length === 0) {
-                    return res.status(200).json({
-                        data: [],
-                        message: 'Notification fetched successfully',
-                        status: true,
-                    });
-                }
-            }
-
-            const notification = await qb
-                .orderBy('notification.created_at', 'DESC')
-                .getMany();
+            const notification = await notifictionRepository.find({ where: { user_id: userId }, order: { created_at: "DESC" } })
 
             res.status(200).json({
                 data: notification,
@@ -84,7 +61,7 @@ class NotificationController {
 
 
             await notificationRepository.delete({
-                user_id: { user_id: req.user.user_id },
+                user_id: req.user.user_id,
             });
 
             res.status(200).json({
@@ -132,12 +109,7 @@ class NotificationController {
         try {
             const notificationRepository = AppDataSource.getRepository(Notification);
 
-            const updateResult = await notificationRepository
-                .createQueryBuilder()
-                .update(Notification)
-                .set({ read: true })
-                .where('user_id = :userId AND read = :read', { userId: req.user.user_id, read: false })
-                .execute();
+            const updateResult = await notificationRepository.update({ user_id: req.user.user_id, read: false }, { read: true });
 
             console.log(updateResult)
             if (updateResult.affected === 0) {

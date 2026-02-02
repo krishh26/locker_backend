@@ -324,15 +324,8 @@ class CentreController {
 
     public async AssignAdminToCentre(req: CustomRequest, res: Response) {
         try {
-            const centreId = Number(req.params.id);
+            const centreId = parseInt(req.params.id);
             const { user_id } = req.body;
-
-            if (!centreId || isNaN(centreId)) {
-                return res.status(400).json({
-                    message: "Valid centre id is required",
-                    status: false
-                });
-            }
 
             if (!user_id) {
                 return res.status(400).json({
@@ -345,7 +338,8 @@ class CentreController {
             const userRepository = AppDataSource.getRepository(User);
 
             const centre = await centreRepository.findOne({
-                where: { id: centreId }
+                where: { id: centreId },
+                relations: ['admins']
             });
 
             if (!centre) {
@@ -366,39 +360,20 @@ class CentreController {
                 });
             }
 
-            const existingAdmins = await centreRepository
-                .createQueryBuilder()
-                .relation(Centre, "admins")
-                .of(centreId)
-                .loadMany<User>();
-
-            const alreadyAssigned = existingAdmins.some(
-                admin => admin.user_id === user_id
-            );
-
-            if (alreadyAssigned) {
-                return res.status(409).json({
-                    message: "User is already assigned as admin to this centre",
-                    status: false
-                });
+            // Add user to admins if not already present
+            if (!centre.admins || !centre.admins.some(admin => admin.user_id === user_id)) {
+                if (!centre.admins) centre.admins = [];
+                centre.admins.push(user);
+                await centreRepository.save(centre);
             }
-
-            await centreRepository
-                .createQueryBuilder()
-                .relation(Centre, "admins")
-                .of(centreId)
-                .add(user_id);
 
             return res.status(200).json({
                 message: "Admin assigned to centre successfully",
                 status: true,
-                data: {
-                    centre_id: centreId,
-                    user_id
-                }
+                data: { centre_id: centreId, user_id }
             });
 
-        } catch (error: any) {
+        } catch (error) {
             return res.status(500).json({
                 message: "Internal Server Error",
                 status: false,

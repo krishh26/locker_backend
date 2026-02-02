@@ -105,6 +105,7 @@ class OrganisationController {
                 .where("organisation.deleted_at IS NULL");
 
             // Filter by accessible organisations
+            console.log(accessibleIds)
             if (accessibleIds !== null) {
                 if (accessibleIds.length === 0) {
                     return res.status(200).json({
@@ -184,7 +185,7 @@ class OrganisationController {
 
             const organisation = await organisationRepository.findOne({
                 where: { id: organisationId },
-                relations: ['centres', 'centres.admins', 'userOrganisations', 'userOrganisations.user']
+                relations: ['centres']
             });
 
             if (!organisation) {
@@ -194,24 +195,10 @@ class OrganisationController {
                 });
             }
 
-            const admins = (organisation.userOrganisations ?? [])
-                .map((uo) => uo.user)
-                .filter(Boolean)
-                .map((u) => ({
-                    user_id: u.user_id,
-                    first_name: u.first_name,
-                    last_name: u.last_name,
-                    email: u.email,
-                    roles: u.roles ?? []
-                }));
-
-            const { userOrganisations: _uo, ...rest } = organisation;
-            const data = { ...rest, admins };
-
             return res.status(200).json({
                 message: "Organisation retrieved successfully",
                 status: true,
-                data
+                data: organisation
             });
 
         } catch (error) {
@@ -457,25 +444,8 @@ class OrganisationController {
                 await userRepository.save(user);
             }
 
-            // Create UserOrganisation record to link user to organization
-            const { UserOrganisation } = await import("../entity/UserOrganisation.entity");
-            const userOrganisationRepository = AppDataSource.getRepository(UserOrganisation);
-            
-            // Check if UserOrganisation record already exists
-            const existingUserOrg = await userOrganisationRepository.findOne({
-                where: { 
-                    user_id: user.user_id,
-                    organisation_id: organisationId
-                }
-            });
-
-            if (!existingUserOrg) {
-                const userOrganisation = userOrganisationRepository.create({
-                    user: { user_id: user.user_id },
-                    organisation: { id: organisationId }
-                });
-                await userOrganisationRepository.save(userOrganisation);
-            }
+            // Note: You may want to create a junction table for organisation admins
+            // For now, we'll just ensure the user has Admin role
 
             return res.status(200).json({
                 message: "Admin assigned to organisation successfully",
@@ -538,21 +508,8 @@ class OrganisationController {
                 });
             }
 
-            // Delete UserOrganisation record to unlink user from organization
-            const { UserOrganisation } = await import("../entity/UserOrganisation.entity");
-            const userOrganisationRepository = AppDataSource.getRepository(UserOrganisation);
-            
-            await userOrganisationRepository.delete({
-                user_id: user.user_id,
-                organisation_id: organisationId
-            });
-
-            // Remove Admin role if present (only if user has no other organization assignments)
-            const remainingAssignments = await userOrganisationRepository.count({
-                where: { user_id: user.user_id }
-            });
-
-            if (user.roles.includes(UserRole.Admin) && remainingAssignments === 0) {
+            // Remove Admin role if present
+            if (user.roles.includes(UserRole.Admin)) {
                 user.roles = user.roles.filter(role => role !== UserRole.Admin);
                 await userRepository.save(user);
             }
@@ -563,66 +520,6 @@ class OrganisationController {
                 data: { organisation_id: organisationId, user_id }
             });
 
-        } catch (error) {
-            return res.status(500).json({
-                message: "Internal Server Error",
-                status: false,
-                error: error.message
-            });
-        }
-    }
-
-    public async SetOrganisationAdmins(req: CustomRequest, res: Response) {
-        try {
-            if (req.user.role !== UserRole.MasterAdmin) {
-                return res.status(403).json({
-                    message: "Only MasterAdmin can set organisation admins",
-                    status: false
-                });
-            }
-
-            const organisationId = parseInt(req.params.id);
-            const user_ids: number[] = Array.isArray(req.body.user_ids) ? req.body.user_ids : [];
-
-            const organisationRepository = AppDataSource.getRepository(Organisation);
-            const { User } = await import("../entity/User.entity");
-            const userRepository = AppDataSource.getRepository(User);
-            const { UserOrganisation } = await import("../entity/UserOrganisation.entity");
-            const userOrganisationRepository = AppDataSource.getRepository(UserOrganisation);
-
-            const organisation = await organisationRepository.findOne({
-                where: { id: organisationId }
-            });
-
-            if (!organisation) {
-                return res.status(404).json({
-                    message: "Organisation not found",
-                    status: false
-                });
-            }
-
-            await userOrganisationRepository.delete({ organisation_id: organisationId });
-
-            if (user_ids.length > 0) {
-                const users = await userRepository.find({ where: { user_id: In(user_ids) } });
-                for (const user of users) {
-                    if (!user.roles.includes(UserRole.Admin)) {
-                        user.roles = [...user.roles, UserRole.Admin];
-                        await userRepository.save(user);
-                    }
-                    const userOrganisation = userOrganisationRepository.create({
-                        user: { user_id: user.user_id },
-                        organisation: { id: organisationId }
-                    });
-                    await userOrganisationRepository.save(userOrganisation);
-                }
-            }
-
-            return res.status(200).json({
-                message: "Organisation admins updated successfully",
-                status: true,
-                data: { organisation_id: organisationId, user_ids }
-            });
         } catch (error) {
             return res.status(500).json({
                 message: "Internal Server Error",

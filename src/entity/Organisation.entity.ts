@@ -2,7 +2,6 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateCol
 import { AccountManagerOrganisation } from './AccountManagerOrganisation.entity';
 import { Centre } from './Centre.entity';
 import { Subscription } from './Subscription.entity';
-import { UserOrganisation } from './UserOrganisation.entity';
 
 export enum OrganisationStatus {
     Active = 'active',
@@ -32,9 +31,6 @@ export class Organisation {
 
     @OneToMany(() => AccountManagerOrganisation, amo => amo.organisation)
     accountManagerOrganisations: AccountManagerOrganisation[];
-
-    @OneToMany(() => UserOrganisation, uo => uo.organisation)
-    userOrganisations: UserOrganisation[];
 
     @OneToMany(() => Subscription, subscription => subscription.organisation)
     subscriptions: Subscription[];
