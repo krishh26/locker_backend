@@ -17,5 +17,6 @@ FeatureControlRoutes.post('/check-access', authorizeRoles(), trimMiddleware, Con
 FeatureControlRoutes.post('/check-usage', authorizeRoles(), trimMiddleware, Controller.CheckUsageCount);
 FeatureControlRoutes.post('/block-action', authorizeRoles(), trimMiddleware, Controller.BlockRestrictedAction);
 FeatureControlRoutes.post('/read-only-mode', authorizeRoles(UserRole.MasterAdmin), trimMiddleware, Controller.EnableReadOnlyMode);
+FeatureControlRoutes.get('/features/:id/plans', authorizeRoles(), Controller.GetFeaturePlans);
 
 export default FeatureControlRoutes;
