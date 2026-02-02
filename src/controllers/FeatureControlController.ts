@@ -601,6 +601,56 @@ class FeatureControlController {
             });
         }
     }
+
+    public async GetFeaturePlans(req: CustomRequest, res: Response) {
+        try {
+            const featureId = parseInt(req.params.id, 10);
+            if (isNaN(featureId)) {
+                return res.status(400).json({
+                    message: "Invalid feature ID",
+                    status: false
+                });
+            }
+
+            const featureRepository = AppDataSource.getRepository(Feature);
+            const featurePlanRepository = AppDataSource.getRepository(FeaturePlan);
+
+            const feature = await featureRepository.findOne({
+                where: { id: featureId }
+            });
+
+            if (!feature) {
+                return res.status(404).json({
+                    message: "Feature not found",
+                    status: false
+                });
+            }
+
+            const featurePlans = await featurePlanRepository.find({
+                where: { feature_id: featureId },
+                relations: ['plan']
+            });
+
+            const data = featurePlans.map((fp) => ({
+                planId: fp.plan_id,
+                planName: fp.plan?.name ?? "Unknown",
+                enabled: fp.enabled,
+                limitValue: fp.limit_value ?? null
+            }));
+
+            return res.status(200).json({
+                message: "Feature plans retrieved successfully",
+                status: true,
+                data
+            });
+        } catch (error) {
+            return res.status(500).json({
+                message: "Internal Server Error",
+                status: false,
+                error: error.message
+            });
+        }
+    }
 }
 
 export default FeatureControlController;
