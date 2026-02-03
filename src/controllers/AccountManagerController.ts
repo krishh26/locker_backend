@@ -614,6 +614,75 @@ class AccountManagerController {
             });
         }
     }
+
+    public async DeleteAccountManager(req: CustomRequest, res: Response) {
+        try {
+            if (req.user.role !== UserRole.MasterAdmin) {
+                return res.status(403).json({
+                    message: "Only MasterAdmin can delete account managers",
+                    status: false
+                });
+            }
+
+            const managerId = parseInt(req.params.id);
+            const accountManagerRepository = AppDataSource.getRepository(AccountManager);
+            const amoRepository = AppDataSource.getRepository(AccountManagerOrganisation);
+            const userRepository = AppDataSource.getRepository(User);
+
+            const accountManager = await accountManagerRepository.findOne({
+                where: { id: managerId, deleted_at: null as any }
+            });
+
+            if (!accountManager) {
+                return res.status(404).json({
+                    message: "Account manager not found",
+                    status: false
+                });
+            }
+
+            const user = await userRepository.findOne({
+                where: { user_id: accountManager.user_id }
+            });
+
+            if (!user) {
+                return res.status(404).json({
+                    message: "User not found",
+                    status: false
+                });
+            }
+
+            // Remove organisation assignments
+            await amoRepository.delete({ account_manager_id: managerId });
+
+            // Soft delete account manager and user
+            await accountManagerRepository.softDelete(managerId);
+            await userRepository.softDelete(accountManager.user_id);
+
+            await AuditLogController.createAuditLog(
+                AuditActionType.AccountManagerAction,
+                req.user.user_id || null,
+                'AccountManager',
+                managerId,
+                null,
+                null,
+                { action: 'delete', email: user.email },
+                req.ip,
+                req.get('user-agent')
+            );
+
+            return res.status(200).json({
+                message: "Account manager deleted successfully",
+                status: true
+            });
+
+        } catch (error) {
+            return res.status(500).json({
+                message: "Internal Server Error",
+                status: false,
+                error: error.message
+            });
+        }
+    }
 }
 
 export default AccountManagerController;

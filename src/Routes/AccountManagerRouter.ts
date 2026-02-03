@@ -17,5 +17,6 @@ AccountManagerRoutes.post('/:id/deactivate', authorizeRoles(UserRole.MasterAdmin
 AccountManagerRoutes.post('/assign-organisations', authorizeRoles(UserRole.MasterAdmin), trimMiddleware, Controller.AssignOrganisations);
 AccountManagerRoutes.post('/remove-organisation', authorizeRoles(UserRole.MasterAdmin), trimMiddleware, Controller.RemoveOrganisationAssignment);
 AccountManagerRoutes.get('/:id/organisations', authorizeRoles(), Controller.GetAssignedOrganisations);
+AccountManagerRoutes.delete('/:id', authorizeRoles(UserRole.MasterAdmin), Controller.DeleteAccountManager);
 
 export default AccountManagerRoutes;
