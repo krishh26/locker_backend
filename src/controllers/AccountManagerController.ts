@@ -9,6 +9,8 @@ import { bcryptpassword } from "../util/bcrypt";
 import AuditLogController from "./AuditLogController";
 import { AuditActionType } from "../entity/AuditLog.entity";
 import { In } from "typeorm";
+import { SendNotification } from "../util/socket/notification";
+import { NotificationType } from "../util/constants";
 
 class AccountManagerController {
     public async CreateAccountManager(req: CustomRequest, res: Response) {
@@ -520,6 +522,14 @@ class AccountManagerController {
                 req.get('user-agent')
             );
 
+            // Notification 
+            await SendNotification(accountManager.user_id, {
+                    data: {
+                        title: "Organisations assigned",
+                        message: `You have been assigned to ${organisationIds.length} organisation(s)`,
+                        type: NotificationType.Notification
+                    }
+                })
             return res.status(200).json({
                 message: "Organisations assigned successfully",
                 status: true,
