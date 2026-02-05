@@ -10,17 +10,32 @@ import { AccountManagerOrganisation } from "../entity/AccountManagerOrganisation
 import { Subscription } from "../entity/Subscription.entity";
 import { AuditLog } from "../entity/AuditLog.entity";
 
-class DashboardController {
-    // Helper to get accessible organisation IDs
-    private getAccessibleOrganisationIds(user: any): number[] | null {
-        if (user.role === UserRole.MasterAdmin) {
+const getAccessibleOrganisationIds = async (user: any) => {
+      if (user.role === UserRole.MasterAdmin) {
             return null; // null means all organisations
         }
-        if (user.role === UserRole.AccountManager && user.assignedOrganisationIds) {
-            return user.assignedOrganisationIds;
+        
+        if (user.role === UserRole.AccountManager) {
+            // Fetch fresh from database instead of using JWT token data
+            const accountManagerRepository = AppDataSource.getRepository(AccountManager);
+            const amoRepository = AppDataSource.getRepository(AccountManagerOrganisation);
+            
+            const accountManager = await accountManagerRepository.findOne({
+                where: { user_id: user.user_id }
+            });
+            
+            if (accountManager) {
+                const assignments = await amoRepository.find({
+                    where: { account_manager_id: accountManager.id }
+                });
+                return assignments.map(a => a.organisation_id);
+            }
+            return [];
         }
         return [];
-    }
+}
+
+class DashboardController {
 
     public async GetSystemSummary(req: CustomRequest, res: Response) {
         try {
@@ -29,7 +44,7 @@ class DashboardController {
             const userRepository = AppDataSource.getRepository(User);
             const subscriptionRepository = AppDataSource.getRepository(Subscription);
 
-            const accessibleIds = this.getAccessibleOrganisationIds(req.user);
+            const accessibleIds = await getAccessibleOrganisationIds(req.user);
 
             let orgQuery = organisationRepository.createQueryBuilder("org")
                 .where("org.deleted_at IS NULL");
@@ -102,7 +117,7 @@ class DashboardController {
     public async GetOrganisationMetrics(req: CustomRequest, res: Response) {
         try {
             const organisationRepository = AppDataSource.getRepository(Organisation);
-            const accessibleIds = this.getAccessibleOrganisationIds(req.user);
+            const accessibleIds = await getAccessibleOrganisationIds(req.user);
 
             let query = organisationRepository.createQueryBuilder("org")
                 .where("org.deleted_at IS NULL");
@@ -231,7 +246,7 @@ class DashboardController {
     public async GetActivityMetrics(req: CustomRequest, res: Response) {
         try {
             const auditLogRepository = AppDataSource.getRepository(AuditLog);
-            const accessibleIds = this.getAccessibleOrganisationIds(req.user);
+            const accessibleIds = await getAccessibleOrganisationIds(req.user);
 
             let query = auditLogRepository.createQueryBuilder("log");
 
@@ -297,7 +312,7 @@ class DashboardController {
             const userRepository = AppDataSource.getRepository(User);
             const subscriptionRepository = AppDataSource.getRepository(Subscription);
 
-            const accessibleIds = this.getAccessibleOrganisationIds(req.user);
+            const accessibleIds = await getAccessibleOrganisationIds(req.user);
 
             let orgQuery = organisationRepository.createQueryBuilder("org")
                 .where("org.deleted_at IS NULL");

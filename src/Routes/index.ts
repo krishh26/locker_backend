@@ -49,6 +49,8 @@ import AccessControlRoutes from './AccessControlRouter';
 import SubscriptionRoutes from './SubscriptionRouter';
 import FeatureControlRoutes from './FeatureControlRouter';
 import AuditLogRoutes from './AuditLogRouter';
+import Payment from './PaymentRouter';
+import PaymentRoutes from './PaymentRouter';
 
 const fileController = new FileController;
 const Routes = express.Router();
@@ -99,6 +101,7 @@ Routes.use('/access-control', AccessControlRoutes)
 Routes.use('/subscriptions', SubscriptionRoutes)
 Routes.use('/feature-control', FeatureControlRoutes)
 Routes.use('/audit-logs', AuditLogRoutes)
+Routes.use('/payments', PaymentRoutes)
 
 // API routes
 Routes.get("/file", fileController.getFile)

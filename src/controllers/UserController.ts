@@ -281,41 +281,16 @@ class UserController {
 
             const role = getHighestPriorityRole(user.roles)
 
-            // Get assignedOrganisationIds for MasterAdmin or AccountManager
-            let assignedOrganisationIds: number[] | null = null;
-            if (user.roles.includes(UserRole.MasterAdmin)) {
-                assignedOrganisationIds = null; // MasterAdmin has access to all
-            } else if (user.roles.includes(UserRole.AccountManager)) {
-                const { AccountManager } = await import("../entity/AccountManager.entity");
-                const { AccountManagerOrganisation } = await import("../entity/AccountManagerOrganisation.entity");
-                const accountManagerRepository = AppDataSource.getRepository(AccountManager);
-                const amoRepository = AppDataSource.getRepository(AccountManagerOrganisation);
-                
-                const accountManager = await accountManagerRepository.findOne({
-                    where: { user_id: user.user_id }
-                });
-                
-                if (accountManager) {
-                    const assignments = await amoRepository.find({
-                        where: { account_manager_id: accountManager.id }
-                    });
-                    assignedOrganisationIds = assignments.map(a => a.organisation_id);
-                } else {
-                    assignedOrganisationIds = [];
-                }
-            }
-
             let accessToken = generateToken({
                 ...user,
                 displayName: user.first_name + " " + user.last_name,
-                role,
-                assignedOrganisationIds :assignedOrganisationIds
+                role
             })
 
             let responce = {
                 password_changed: user.password_changed,
                 accessToken: accessToken,
-                user: { ...user, role, assignedOrganisationIds }
+                user: { ...user, role }
             }
             return res.status(200).json({
                 data: responce,
