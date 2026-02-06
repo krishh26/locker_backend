@@ -8,6 +8,7 @@ import { UserForm } from "../entity/UserForm.entity";
 import { LearnerPlan } from "../entity/LearnerPlan.entity";
 import { SendEmailTemplet } from "../util/nodemailer";
 import { uploadToS3, uploadMultipleFilesToS3 } from "../util/aws";
+import { getAccessibleOrganisationIds } from "../util/organisationFilter";
 
 class FormController {
 
@@ -162,6 +163,34 @@ class FormController {
             }
             if (req.query.user_id) {
                 qb.innerJoin('form.users', 'user', 'user.user_id = :user_id', { user_id: req.query.user_id })
+            }
+
+            // Add organization filtering through form.users (User → UserOrganisation)
+            if (req.user) {
+                const accessibleIds = await getAccessibleOrganisationIds(req.user);
+                if (accessibleIds !== null) {
+                    if (accessibleIds.length === 0) {
+                        return res.status(200).json({
+                            message: 'Form retrieved successfully',
+                            status: true,
+                            data: [],
+                            ...(req.query.meta === "true" && {
+                                meta_data: {
+                                    page: req.pagination.page,
+                                    items: 0,
+                                    page_size: req.pagination.limit,
+                                    pages: 0
+                                }
+                            })
+                        });
+                    }
+                    // Join with users and filter by organization
+                    if (!req.query.user_id) {
+                        qb.innerJoin('form.users', 'formUser');
+                    }
+                    qb.leftJoin('formUser.userOrganisations', 'userOrganisation')
+                      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+                }
             }
 
             const [forms, count] = await qb

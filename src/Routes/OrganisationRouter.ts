@@ -17,5 +17,6 @@ OrganisationRoutes.post('/:id/activate', authorizeRoles(UserRole.MasterAdmin), C
 OrganisationRoutes.post('/:id/suspend', authorizeRoles(UserRole.MasterAdmin), Controller.SuspendOrganisation);
 OrganisationRoutes.post('/:id/assign-admin', authorizeRoles(UserRole.MasterAdmin), trimMiddleware, Controller.AssignAdminToOrganisation);
 OrganisationRoutes.post('/:id/remove-admin', authorizeRoles(UserRole.MasterAdmin), trimMiddleware, Controller.RemoveAdminFromOrganisation);
+OrganisationRoutes.put('/:id/admins', authorizeRoles(UserRole.MasterAdmin), trimMiddleware, Controller.SetOrganisationAdmins);
 
 export default OrganisationRoutes;

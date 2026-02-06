@@ -10,6 +10,7 @@ import { Learner } from "../entity/Learner.entity";
 import { User } from "../entity/User.entity";
 import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
 import { AssessmentStatus } from "../util/constants";
+import { getAccessibleOrganisationIds } from "../util/organisationFilter";
 class AssignmentController {
     /**
      * Check if user is authorized to access an assignment
@@ -86,6 +87,26 @@ class AssignmentController {
                     "LOWER(a.file->>'name') LIKE :search",
                     { search: `%${search.toLowerCase()}%` }
                 );
+            }
+
+            // Add organization filtering through learner (User → UserOrganisation)
+            if (req.user) {
+                const accessibleIds = await getAccessibleOrganisationIds(req.user);
+                if (accessibleIds !== null) {
+                    if (accessibleIds.length === 0) {
+                        return res.status(200).json({
+                            message: "Assignments fetched successfully",
+                            status: true,
+                            data: [],
+                            total: 0,
+                            page: Number(page),
+                            limit: Number(limit),
+                            pages: 0
+                        });
+                    }
+                    qb.leftJoin('learnerUser.userOrganisations', 'userOrganisation')
+                      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+                }
             }
 
             // Pagination
@@ -417,6 +438,21 @@ class AssignmentController {
                     "(assignment.title ILIKE :search OR assignment.description ILIKE :search)",
                     { search: `%${search}%` }
                 );
+            }
+
+            // Add organization filtering through user (learner) → UserOrganisation
+            if (req.user) {
+                const accessibleIds = await getAccessibleOrganisationIds(req.user);
+                if (accessibleIds !== null) {
+                    if (accessibleIds.length === 0) {
+                        return res.status(200).json({
+                            status: true,
+                            data: [],
+                        });
+                    }
+                    assignmentQB.leftJoin('user.userOrganisations', 'userOrganisation')
+                                 .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+                }
             }
 
             const [assignments, count] = await assignmentQB.getManyAndCount();
@@ -823,6 +859,29 @@ class AssignmentController {
                     message: "You are not authorized to view this assignment",
                     status: false,
                 });
+            }
+
+            // Add organization filtering check
+            if (req.user) {
+                const accessibleIds = await getAccessibleOrganisationIds(req.user);
+                if (accessibleIds !== null) {
+                    // Check if assignment's user (learner) belongs to accessible organizations
+                    const { UserOrganisation } = await import("../entity/UserOrganisation.entity");
+                    const userOrganisationRepo = AppDataSource.getRepository(UserOrganisation);
+                    const userOrganisations = await userOrganisationRepo.find({
+                        where: { user_id: assignment.user.user_id }
+                    });
+                    const userOrgIds = userOrganisations.map(uo => uo.organisation_id);
+                    
+                    // Check if user has any organization in common with accessible organizations
+                    const hasAccess = userOrgIds.some(orgId => accessibleIds.includes(orgId));
+                    if (!hasAccess && accessibleIds.length > 0) {
+                        return res.status(403).json({
+                            message: "You are not authorized to view this assignment",
+                            status: false,
+                        });
+                    }
+                }
             }
 
             // add mapping all details including course id

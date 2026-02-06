@@ -15,13 +15,14 @@ import { Raw, In } from 'typeorm';
 import { AssignmentSignature } from "../entity/AssignmentSignature.entity";
 import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
 import { UserEmployer } from '../entity/UserEmployers.entity';
+import { addUserOrganisationFilter } from "../util/organisationFilter";
+import { getAccessibleOrganisationIds } from '../util/organisationFilter';
 
 class UserController {
 
     public async CreateUser(req: CustomRequest, res: Response) {
         try {
-            const { user_name, first_name, last_name, email, password, confirmPassword, roles, line_manager_id } = req.body;
-
+            const { user_name, first_name, last_name, email, password, confirmPassword, roles, line_manager_id } = req.body
             if (!user_name || !first_name || !last_name || !email || !password || !roles || !confirmPassword) {
                 return res.status(400).json({
                     message: "All Field Required",
@@ -89,6 +90,35 @@ class UserController {
                 await userEmployerRepo.save(mappings);
             }
 
+            // Handle organisation_ids assignment
+            if (Array.isArray(req.body.organisation_ids) && req.body.organisation_ids.length) {
+                const { UserOrganisation } = await import("../entity/UserOrganisation.entity");
+                const { Organisation } = await import("../entity/Organisation.entity");
+                const userOrganisationRepo = AppDataSource.getRepository(UserOrganisation);
+                const organisationRepo = AppDataSource.getRepository(Organisation);
+
+                // Validate that all organisation IDs exist
+                const organisations = await organisationRepo.find({
+                    where: { id: In(req.body.organisation_ids) }
+                });
+
+                if (organisations.length !== req.body.organisation_ids.length) {
+                    return res.status(400).json({
+                        message: "One or more organisation IDs are invalid",
+                        status: false
+                    });
+                }
+
+                const organisationMappings = req.body.organisation_ids.map((organisation_id: number) =>
+                    userOrganisationRepo.create({
+                        user: { user_id: users.user_id },
+                        organisation: { id: organisation_id }
+                    })
+                );
+
+                await userOrganisationRepo.save(organisationMappings);
+            }
+
             res.status(200).json({
                 message: "User create successfully",
                 status: true,
@@ -109,23 +139,19 @@ class UserController {
     public async GetUser(req: CustomRequest, res: Response) {
         try {
             const userRepository = AppDataSource.getRepository(User)
-            const id: number = parseInt(req.user.user_id);
+            const id: number = parseInt(req.user.user_id.toString());
 
             const user = await userRepository.findOne({
                 where: { user_id: id },
                 relations: {
                     userEmployers: {
                         employer: true
+                    },
+                    userOrganisations: {
+                        organisation: true
                     }
                 }
             });
-
-            const assignedEmployers = user.userEmployers?.map(ue => ({
-                employer_id: ue.employer.employer_id,
-                employer_name: ue.employer.employer_name
-            })) || [];
-
-            delete user.password;
 
             if (!user) {
                 return res.status(404).json({
@@ -134,12 +160,25 @@ class UserController {
                 });
             }
 
+            const assignedEmployers = user.userEmployers?.map(ue => ({
+                employer_id: ue.employer.employer_id,
+                employer_name: ue.employer.employer_name
+            })) || [];
+
+            const assignedOrganisations = user.userOrganisations?.map(uo => ({
+                id: uo.organisation.id,
+                name: uo.organisation.name
+            })) || [];
+
+            delete user.password;
+
             return res.status(200).json({
                 message: "User fetched successfully",
-                status: false,
+                status: true,
                 data: {
                     ...user,
-                    assigned_employers: assignedEmployers
+                    assigned_employers: assignedEmployers,
+                    assigned_organisations: assignedOrganisations
                 }
             })
 
@@ -216,6 +255,43 @@ class UserController {
                 );
 
                 await userEmployerRepo.save(mappings);
+            }
+
+            // Handle organisation_ids assignment
+            if (Array.isArray(req.body.organisation_ids)) {
+                const { UserOrganisation } = await import("../entity/UserOrganisation.entity");
+                const { Organisation } = await import("../entity/Organisation.entity");
+                const userOrganisationRepo = AppDataSource.getRepository(UserOrganisation);
+                const organisationRepo = AppDataSource.getRepository(Organisation);
+
+                // Remove old mappings
+                await userOrganisationRepo.delete({
+                    user: { user_id: userId }
+                });
+
+                // Insert new mappings if organisation_ids array is not empty
+                if (req.body.organisation_ids.length > 0) {
+                    // Validate that all organisation IDs exist
+                    const organisations = await organisationRepo.find({
+                        where: { id: In(req.body.organisation_ids) }
+                    });
+
+                    if (organisations.length !== req.body.organisation_ids.length) {
+                        return res.status(400).json({
+                            message: "One or more organisation IDs are invalid",
+                            status: false
+                        });
+                    }
+
+                    const organisationMappings = req.body.organisation_ids.map((organisation_id: number) =>
+                        userOrganisationRepo.create({
+                            user: { user_id: userId },
+                            organisation: { id: organisation_id }
+                        })
+                    );
+
+                    await userOrganisationRepo.save(organisationMappings);
+                }
             }
 
             const updatedUser = await userRepository.save(user)
@@ -492,13 +568,18 @@ class UserController {
         }
     }
 
-    public async GetUserList(req: any, res: Response) {
+    public async GetUserList(req: CustomRequest, res: Response) {
         try {
             const userRepository = AppDataSource.getRepository(User)
             const qb = userRepository.createQueryBuilder("user")
                 .leftJoinAndSelect('user.line_manager', 'line_manager')
                 .leftJoinAndSelect('user.userEmployers', 'userEmployers')
                 .leftJoinAndSelect('userEmployers.employer', 'employer');
+
+            // Add organization filtering
+            if (req.user) {
+                await addUserOrganisationFilter(qb, req.user);
+            }
 
             if (req.query.role) {
                 qb.andWhere(":role = ANY(user.roles)", { role: req.query.role });
@@ -512,7 +593,7 @@ class UserController {
                 qb.andWhere("((user.email ILIKE :keyword OR user.user_name ILIKE :keyword OR user.first_name ILIKE :keyword OR user.last_name ILIKE :keyword) AND (ARRAY_LENGTH(user.roles, 1) != 1 OR 'Learner' <> ANY(user.roles)))", { keyword: `%${req.query.keyword}%` });
             }
             else {
-                qb.andWhere("ARRAY_LENGTH(user.roles, 1) != 1 OR 'Learner' <> ANY(user.roles)")
+                qb.andWhere("(ARRAY_LENGTH(user.roles, 1) != 1 OR 'Learner' <> ANY(user.roles))")   
             }
 
             if (req.query.meta === "true") {
@@ -573,6 +654,113 @@ class UserController {
                 })
             })
 
+
+        } catch (error) {
+            return res.status(500).json({
+                message: "Internal Server Error",
+                status: false,
+                error: error.message
+            })
+        }
+    }
+
+    public async GetUserById(req: CustomRequest, res: Response) {
+        try {
+            const userRepository = AppDataSource.getRepository(User)
+            const userId: number = parseInt(req.params.id);
+
+            if (isNaN(userId)) {
+                return res.status(400).json({
+                    message: "Invalid user ID",
+                    status: false
+                });
+            }
+
+            const user = await userRepository.findOne({
+                where: { user_id: userId },
+                relations: {
+                    line_manager: true,
+                    userEmployers: {
+                        employer: true
+                    },
+                    userOrganisations: {
+                        organisation: true
+                    }
+                }
+            });
+
+            if (!user) {
+                return res.status(404).json({
+                    message: "User does not exist",
+                    status: false
+                });
+            }
+
+            // Add organization filtering - only return user if accessible
+            if (req.user) {
+                const accessibleIds = await getAccessibleOrganisationIds(req.user);
+                
+                if (accessibleIds !== null) {
+                    // Not MasterAdmin - check if user belongs to accessible orgs
+                    const userOrgIds = user.userOrganisations?.map(uo => uo.organisation.id) || [];
+                    
+                    if (userOrgIds.length > 0) {
+                        const hasAccess = userOrgIds.some(orgId => accessibleIds.includes(orgId));
+                        if (!hasAccess) {
+                            return res.status(403).json({
+                                message: "You do not have access to this user",
+                                status: false
+                            });
+                        }
+                    } else if (accessibleIds.length > 0) {
+                        // User has no org assignment but requester has orgs - deny access
+                        return res.status(403).json({
+                            message: "You do not have access to this user",
+                            status: false
+                        });
+                    }
+                }
+            }
+
+            const assignedEmployers = user.userEmployers?.map(ue => ({
+                employer_id: ue.employer.employer_id,
+                employer_name: ue.employer.employer_name
+            })) || [];
+
+            const assignedOrganisations = user.userOrganisations?.map(uo => ({
+                id: uo.organisation.id,
+                name: uo.organisation.name
+            })) || [];
+
+            // Add calculated fields for trainers
+            let additionalFields = {};
+            if (user.roles && user.roles.includes(UserRole.Trainer)) {
+                const userCourseRepository = AppDataSource.getRepository(UserCourse);
+                
+                const activeLearnerCount = await userCourseRepository
+                    .createQueryBuilder('uc')
+                    .leftJoin('uc.learner_id', 'learner')
+                    .where('uc.trainer_id = :trainerId', { trainerId: user.user_id })
+                    .andWhere('learner.deleted_at IS NULL')
+                    .getCount();
+
+                additionalFields = {
+                    number_of_active_learners: activeLearnerCount
+                };
+            }
+
+            delete user.password;
+
+            return res.status(200).json({
+                message: "User fetched successfully",
+                status: true,
+                data: {
+                    ...user,
+                    ...additionalFields,
+                    assigned_employers: assignedEmployers,
+                    assigned_organisations: assignedOrganisations
+                }
+            })
 
         } catch (error) {
             return res.status(500).json({

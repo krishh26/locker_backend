@@ -22,7 +22,7 @@ class BroadcastController {
             }
 
             const broadcast = broadcastRepository.create({
-                user_id: req.user.user_id,
+                user_id: { user_id: req.user.user_id },
                 title,
                 description,
             });
