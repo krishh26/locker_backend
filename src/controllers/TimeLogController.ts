@@ -3,6 +3,7 @@ import { CustomRequest } from '../util/Interface/expressInterface';
 import { AppDataSource } from '../data-source';
 import { TimeLog } from '../entity/TimeLog.entity';
 import { getOTJSummary } from '../util/services/otj.service';
+import { getAccessibleOrganisationIds } from '../util/organisationFilter';
 
 class TimeLogController {
     public async createTimeLog(req: CustomRequest, res: Response): Promise<Response> {
@@ -174,6 +175,31 @@ class TimeLogController {
                     endDate
                 });
             }
+
+            // Add organization filtering through user_id (User → UserOrganisation)
+            if (req.user) {
+                const accessibleIds = await getAccessibleOrganisationIds(req.user);
+                if (accessibleIds !== null) {
+                    if (accessibleIds.length === 0) {
+                        return res.status(200).json({
+                            message: "Time logs fetched successfully",
+                            status: true,
+                            data: [],
+                            ...((req.query.meta === "true" && pagination) && {
+                                meta_data: {
+                                    page: req.pagination.page,
+                                    items: 0,
+                                    page_size: req.pagination.limit,
+                                    pages: 0
+                                }
+                            })
+                        });
+                    }
+                    qb.leftJoin('user_id.userOrganisations', 'userOrganisation')
+                      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+                }
+            }
+
             if (pagination) {
                 qb.skip(req.pagination.skip).take(Number(req.pagination.limit))
             }
@@ -236,6 +262,25 @@ class TimeLogController {
             }
             if (type) {
                 qb.andWhere('timelog.type = :type', { type })
+            }
+
+            // Add organization filtering through user_id (User → UserOrganisation)
+            if (req.user) {
+                const accessibleIds = await getAccessibleOrganisationIds(req.user);
+                if (accessibleIds !== null && accessibleIds.length > 0) {
+                    qb.leftJoin('user_id.userOrganisations', 'userOrganisation')
+                      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+                } else if (accessibleIds !== null && accessibleIds.length === 0) {
+                    return res.status(200).json({
+                        message: "Time logs fetched successfully",
+                        status: true,
+                        data: {
+                            thisWeek: '00:00',
+                            thisMonth: '00:00',
+                            total: '00:00'
+                        },
+                    });
+                }
             }
 
             const [timeLogs, count] = await qb

@@ -8,6 +8,7 @@ import { deleteFromS3, uploadToS3 } from "../util/aws";
 import { Course } from "../entity/Course.entity";
 import { sendDataToUser } from "../socket/socket";
 import { User } from "../entity/User.entity";
+import { getAccessibleOrganisationIds } from "../util/organisationFilter";
 
 class ForumController {
     constructor() {
@@ -194,6 +195,30 @@ class ForumController {
                     'sender.user_name',
                     'sender.avatar',
                 ])
+
+            // Add organization filtering through sender (User → UserOrganisation)
+            if (req.user) {
+                const accessibleIds = await getAccessibleOrganisationIds(req.user);
+                if (accessibleIds !== null) {
+                    if (accessibleIds.length === 0) {
+                        return res.status(200).json({
+                            message: 'Messages retrieved successfully',
+                            status: true,
+                            data: [],
+                            ...(req.query.meta === "true" && {
+                                meta_data: {
+                                    page: req.pagination.page,
+                                    items: 0,
+                                    page_size: req.pagination.limit,
+                                    pages: 0
+                                }
+                            })
+                        });
+                    }
+                    qb.leftJoin('sender.userOrganisations', 'userOrganisation')
+                      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+                }
+            }
 
             const [forum, count] = await qb
                 .skip(Number(req.pagination.skip))

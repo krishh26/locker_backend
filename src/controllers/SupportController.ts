@@ -5,6 +5,7 @@ import { Support, SupportStatus } from "../entity/Support.entity";
 import { User } from "../entity/User.entity";
 import { SocketDomain } from "../util/constants";
 import { SendNotifications } from "../util/socket/notification";
+import { getAccessibleOrganisationIds } from "../util/organisationFilter";
 
 class SupportController {
     public async createSupport(req: CustomRequest, res: Response) {
@@ -132,6 +133,30 @@ class SupportController {
 
             if (request_id) {
                 qb.andWhere('request.user_id = :request_id', { request_id: request_id });
+            }
+
+            // Add organization filtering through request_id (User → UserOrganisation)
+            if (req.user) {
+                const accessibleIds = await getAccessibleOrganisationIds(req.user);
+                if (accessibleIds !== null) {
+                    if (accessibleIds.length === 0) {
+                        return res.status(200).json({
+                            message: 'Support requests retrieved successfully',
+                            status: true,
+                            data: [],
+                            ...(meta === 'true' && {
+                                meta_data: {
+                                    page: req.pagination.page,
+                                    items: 0,
+                                    page_size: req.pagination.limit,
+                                    pages: 0,
+                                },
+                            }),
+                        });
+                    }
+                    qb.leftJoin('request.userOrganisations', 'userOrganisation')
+                      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+                }
             }
 
             const [supports, count] = await qb
