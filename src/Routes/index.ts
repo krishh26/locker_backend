@@ -29,6 +29,7 @@ import learnerPlanDocumentRoutes from './LearnerPlanDocumentRouter';
 import FundingBandRoutes from './FundingBandRouter';
 import RiskRatingRoutes from './RiskRatingRouter';
 import wellbeingRoutes from './WellbeingResourceRouter';
+import supplementaryTrainingRoutes from './SupplementaryTrainingRouter';
 import iqaQuestionRoutes from './IQAQuestionRouter';
 import safeguardingContactRoutes from './SafeguardingContactRouter';
 import acknowledgementRoutes from './AcknowledgementRouter';
@@ -81,6 +82,7 @@ Routes.use("/learner-document", learnerPlanDocumentRoutes)
 Routes.use("/funding-band", FundingBandRoutes)
 Routes.use("/risk-rating", RiskRatingRoutes)
 Routes.use("/wellbeing", wellbeingRoutes)
+Routes.use("/supplementary-training", supplementaryTrainingRoutes)
 Routes.use("/iqa-questions", iqaQuestionRoutes)
 Routes.use("/safeguarding-contact", safeguardingContactRoutes)
 Routes.use("/acknowledgement", acknowledgementRoutes)
