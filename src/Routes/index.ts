@@ -52,6 +52,7 @@ import FeatureControlRoutes from './FeatureControlRouter';
 import AuditLogRoutes from './AuditLogRouter';
 import Payment from './PaymentRouter';
 import PaymentRoutes from './PaymentRouter';
+import ParterRoutes from './partner.routes';
 
 const fileController = new FileController;
 const Routes = express.Router();
@@ -104,6 +105,7 @@ Routes.use('/subscriptions', SubscriptionRoutes)
 Routes.use('/feature-control', FeatureControlRoutes)
 Routes.use('/audit-logs', AuditLogRoutes)
 Routes.use('/payments', PaymentRoutes)
+Routes.use('/partner', ParterRoutes)
 
 // API routes
 Routes.get("/file", fileController.getFile)
