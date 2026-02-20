@@ -6,39 +6,7 @@ import { UserRole } from "../util/constants";
 import { In } from "typeorm";
 import AuditLogController from "./AuditLogController";
 import { AuditActionType } from "../entity/AuditLog.entity";
-import { AccountManager } from "../entity/AccountManager.entity";
-import { AccountManagerOrganisation } from "../entity/AccountManagerOrganisation.entity";
-
-const getAccessibleOrganisationIds = async (user: any) => {
-      if (user.role === UserRole.MasterAdmin) {
-            return null; // null means all organisations
-        }
-        
-        if (user.role === UserRole.AccountManager) {
-            // Fetch fresh from database instead of using JWT token data
-            const accountManagerRepository = AppDataSource.getRepository(AccountManager);
-            const amoRepository = AppDataSource.getRepository(AccountManagerOrganisation);
-            
-            const accountManager = await accountManagerRepository.findOne({
-                where: { user_id: user.user_id }
-            });
-            
-            if (accountManager) {
-                const assignments = await amoRepository.find({
-                    where: { account_manager_id: accountManager.id }
-                });
-                return assignments.map(a => a.organisation_id);
-            }
-            return [];
-        }
-        return [];
-}
-// Helper method to check if user can access organisation
-const canAccessOrganisation = async (user: any, organisationId: number) => {
-    const accessibleIds = await getAccessibleOrganisationIds(user);
-    if (accessibleIds === null) return true; // MasterAdmin can access all
-    return accessibleIds.includes(organisationId);
-}
+import { getAccessibleOrganisationIds, canAccessOrganisation } from "../util/organisationFilter";
 class OrganisationController {
     // Helper method to get accessible organisation IDs for user
 
@@ -201,7 +169,7 @@ class OrganisationController {
 
             const organisation = await organisationRepository.findOne({
                 where: { id: organisationId },
-                relations: ['centres', 'centres.admins', 'userOrganisations', 'userOrganisations.user']
+                relations: ['centres', 'userOrganisations', 'userOrganisations.user']
             });
 
             if (!organisation) {
@@ -468,9 +436,12 @@ class OrganisationController {
                 });
             }
 
-            // Add Admin role if not present
-            if (!user.roles.includes(UserRole.Admin)) {
-                user.roles = [...user.roles, UserRole.Admin];
+            // Add OrganisationAdmin and Admin roles if not present (so JWT gets OrganisationAdmin for scoping)
+            const rolesToAdd: UserRole[] = [];
+            if (!user.roles.includes(UserRole.OrganisationAdmin)) rolesToAdd.push(UserRole.OrganisationAdmin);
+            if (!user.roles.includes(UserRole.Admin)) rolesToAdd.push(UserRole.Admin);
+            if (rolesToAdd.length > 0) {
+                user.roles = [...user.roles, ...rolesToAdd];
                 await userRepository.save(user);
             }
 
@@ -564,14 +535,17 @@ class OrganisationController {
                 organisation_id: organisationId
             });
 
-            // Remove Admin role if present (only if user has no other organization assignments)
+            // Remove OrganisationAdmin and Admin roles if user has no other organisation assignments
             const remainingAssignments = await userOrganisationRepository.count({
                 where: { user_id: user.user_id }
             });
 
-            if (user.roles.includes(UserRole.Admin) && remainingAssignments === 0) {
-                user.roles = user.roles.filter(role => role !== UserRole.Admin);
-                await userRepository.save(user);
+            if (remainingAssignments === 0) {
+                const hadOrgAdmin = user.roles.includes(UserRole.OrganisationAdmin) || user.roles.includes(UserRole.Admin);
+                if (hadOrgAdmin) {
+                    user.roles = user.roles.filter(role => role !== UserRole.OrganisationAdmin && role !== UserRole.Admin);
+                    await userRepository.save(user);
+                }
             }
 
             return res.status(200).json({
@@ -618,13 +592,23 @@ class OrganisationController {
                 });
             }
 
+            // Get user_ids currently assigned to this org (to clean up roles when removed)
+            const existingRows = await userOrganisationRepository.find({
+                where: { organisation_id: organisationId },
+                select: ['user_id']
+            });
+            const previousUserIds = [...new Set(existingRows.map(r => r.user_id))];
+
             await userOrganisationRepository.delete({ organisation_id: organisationId });
 
             if (user_ids.length > 0) {
                 const users = await userRepository.find({ where: { user_id: In(user_ids) } });
                 for (const user of users) {
-                    if (!user.roles.includes(UserRole.Admin)) {
-                        user.roles = [...user.roles, UserRole.Admin];
+                    const rolesToAdd: UserRole[] = [];
+                    if (!user.roles.includes(UserRole.OrganisationAdmin)) rolesToAdd.push(UserRole.OrganisationAdmin);
+                    if (!user.roles.includes(UserRole.Admin)) rolesToAdd.push(UserRole.Admin);
+                    if (rolesToAdd.length > 0) {
+                        user.roles = [...user.roles, ...rolesToAdd];
                         await userRepository.save(user);
                     }
                     const userOrganisation = userOrganisationRepository.create({
@@ -632,6 +616,19 @@ class OrganisationController {
                         organisation: { id: organisationId }
                     });
                     await userOrganisationRepository.save(userOrganisation);
+                }
+            }
+
+            // Remove OrganisationAdmin/Admin from users who were removed from this org and have no other orgs
+            const removedUserIds = previousUserIds.filter(id => !user_ids.includes(id));
+            for (const uid of removedUserIds) {
+                const remaining = await userOrganisationRepository.count({ where: { user_id: uid } });
+                if (remaining === 0) {
+                    const u = await userRepository.findOne({ where: { user_id: uid } });
+                    if (u && (u.roles.includes(UserRole.OrganisationAdmin) || u.roles.includes(UserRole.Admin))) {
+                        u.roles = u.roles.filter(role => role !== UserRole.OrganisationAdmin && role !== UserRole.Admin);
+                        await userRepository.save(u);
+                    }
                 }
             }
 

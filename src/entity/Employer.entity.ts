@@ -1,5 +1,6 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, DeleteDateColumn, ManyToOne, JoinColumn, OneToOne } from 'typeorm';
 import { User } from './User.entity';
+import { Organisation } from './Organisation.entity';
 
 @Entity('employer')
 export class Employer {
@@ -12,6 +13,13 @@ export class Employer {
   @OneToOne(() => User, user => user.employer)
   @JoinColumn()
   user: User;
+
+  @ManyToOne(() => Organisation, { nullable: true })
+  @JoinColumn({ name: 'organisation_id', referencedColumnName: 'id' })
+  organisation: Organisation;
+
+  @Column({ type: 'int', nullable: true })
+  organisation_id: number;
 
   @Column({ type: 'varchar' })
   employer_name: string;

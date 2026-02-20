@@ -9,7 +9,7 @@ import { LearnerCPD } from "../entity/LearnerCpd.entity";
 import { Learner } from "../entity/Learner.entity";
 import XLSX from 'xlsx';
 import PDFDocument from 'pdfkit';
-import { getAccessibleOrganisationIds } from "../util/organisationFilter";
+import { applyLearnerScope, canAccessOrganisation } from "../util/organisationFilter";
 
 class CpdController {
 
@@ -108,21 +108,10 @@ class CpdController {
                 });
             }
 
-            // Add organization filtering through user_id (User → UserOrganisation)
+            // Filter via learner scope (CPD belongs to learner user)
             if (req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user);
-                if (accessibleIds !== null) {
-                    if (accessibleIds.length === 0) {
-                        return res.status(404).json({
-                            message: "CPD not found",
-                            status: true,
-                            data: []
-                        });
-                    }
-                    qb.leftJoin('cpd.user_id', 'user')
-                      .leftJoin('user.userOrganisations', 'userOrganisation')
-                      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
-                }
+                qb.leftJoin(Learner, 'learner', 'learner.user_id = cpd.user_id');
+                await applyLearnerScope(qb, req.user, 'learner');
             }
 
             const cpd = await qb.getMany();

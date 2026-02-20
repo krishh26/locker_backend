@@ -14,6 +14,7 @@ import { NotificationType, SocketDomain, UserRole, CourseType, CourseStatus } fr
 import { convertDataToJson } from "../util/convertDataToJson";
 import { EnhancedUnit, LearningOutcome, AssessmentCriterion } from "../types/courseBuilder.types";
 import { In, Raw } from 'typeorm';
+import { applyLearnerScope } from "../util/organisationFilter";
 
 const enhanceCourseData = (course: any) => {
     return {
@@ -466,11 +467,17 @@ class CourseController {
         }
     }
 
-    public async getAllCourse(req: Request, res: Response): Promise<Response> {
+    public async getAllCourse(req: CustomRequest, res: Response): Promise<Response> {
         try {
             const courseRepository = AppDataSource.getRepository(Course);
 
             const qb = courseRepository.createQueryBuilder("course")
+                .innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
+                .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id');
+
+            if (req.user) {
+                await applyLearnerScope(qb, req.user, 'learner');
+            }
 
             if (req.query.keyword) {
                 qb.andWhere("(course.course_name ILIKE :keyword)", { keyword: `%${req.query.keyword}%` });
@@ -481,6 +488,8 @@ class CourseController {
             }
 
             const [courses, count] = await qb
+                .select('course')
+                .distinct(true)
                 .skip(Number(req.pagination.skip))
                 .take(Number(req.pagination.limit))
                 .orderBy("course.course_id", "ASC")

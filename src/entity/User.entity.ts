@@ -3,6 +3,7 @@ import { UserRole, UserStatus } from '../util/constants';
 import { Employer } from './Employer.entity';
 import { UserEmployer } from './UserEmployers.entity';
 import { UserOrganisation } from './UserOrganisation.entity';
+import { UserCentre } from './UserCentre.entity';
 
 @Entity('users')
 export class User {
@@ -65,8 +66,11 @@ export class User {
   @OneToMany(() => UserEmployer, ue => ue.user)
   userEmployers: UserEmployer[];
 
-  @OneToMany(() => UserOrganisation, uo => uo.user)
+  @OneToMany(() => UserOrganisation,  uo => uo.user)
   userOrganisations: UserOrganisation[];
+
+  @OneToMany(() => UserCentre, uc => uc.user)
+  userCentres: UserCentre[];
 
   @DeleteDateColumn({ type: 'timestamp', nullable: true })
   deleted_at: Date;

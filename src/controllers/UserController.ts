@@ -149,6 +149,9 @@ class UserController {
                     },
                     userOrganisations: {
                         organisation: true
+                    },
+                    userCentres: {
+                        centre: true
                     }
                 }
             });
@@ -170,6 +173,10 @@ class UserController {
                 name: uo.organisation.name
             })) || [];
 
+            const assignedCentres = user.userCentres?.map(uc => ({
+                id: uc.centre.id,
+                name: uc.centre.name
+            })) || [];
             delete user.password;
 
             return res.status(200).json({
@@ -178,7 +185,8 @@ class UserController {
                 data: {
                     ...user,
                     assigned_employers: assignedEmployers,
-                    assigned_organisations: assignedOrganisations
+                    assigned_organisations: assignedOrganisations,
+                    assigned_centers: assignedCentres
                 }
             })
 
@@ -685,6 +693,9 @@ class UserController {
                     },
                     userOrganisations: {
                         organisation: true
+                    },
+                    userCentres: {
+                        centre: true
                     }
                 }
             });
@@ -732,6 +743,11 @@ class UserController {
                 name: uo.organisation.name
             })) || [];
 
+            const assignedCentres = user.userCentres?.map(uc => ({
+                id: uc.centre.id,
+                name: uc.centre.name
+            })) || [];
+
             // Add calculated fields for trainers
             let additionalFields = {};
             if (user.roles && user.roles.includes(UserRole.Trainer)) {
@@ -758,7 +774,8 @@ class UserController {
                     ...user,
                     ...additionalFields,
                     assigned_employers: assignedEmployers,
-                    assigned_organisations: assignedOrganisations
+                    assigned_organisations: assignedOrganisations,
+                    assigned_centers: assignedCentres
                 }
             })
 

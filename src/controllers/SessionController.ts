@@ -4,7 +4,7 @@ import { AppDataSource } from '../data-source';
 import { Session } from '../entity/Session.entity';
 import { SendNotification } from '../util/socket/notification';
 import { NotificationType, SocketDomain } from '../util/constants';
-import { getAccessibleOrganisationIds } from '../util/organisationFilter';
+import { applyLearnerScope } from '../util/organisationFilter';
 
 class SessionController {
 
@@ -179,28 +179,9 @@ class SessionController {
                 }
             }
 
-            // Add organization filtering through trainer (User → UserOrganisation)
+            // Filter via learner scope (organisation + centre)
             if (req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user);
-                if (accessibleIds !== null) {
-                    if (accessibleIds.length === 0) {
-                        return res.status(200).json({
-                            message: "Sessions fetched successfully",
-                            status: true,
-                            data: [],
-                            ...(req.query.meta === "true" && {
-                                meta_data: {
-                                    page: req.pagination.page,
-                                    items: 0,
-                                    page_size: req.pagination.limit,
-                                    pages: 0
-                                }
-                            })
-                        });
-                    }
-                    qb.leftJoin('trainer.userOrganisations', 'userOrganisation')
-                      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
-                }
+                await applyLearnerScope(qb, req.user, 'learner');
             }
 
             // Add sorting for startDate
@@ -262,18 +243,9 @@ class SessionController {
                     'learner.email'
                 ]);
 
-            // Add organization filtering through trainer (User → UserOrganisation)
+            // Filter via learner scope
             if (req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user);
-                if (accessibleIds !== null && accessibleIds.length > 0) {
-                    qb.leftJoin('trainer.userOrganisations', 'userOrganisation')
-                      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
-                } else if (accessibleIds !== null && accessibleIds.length === 0) {
-                    return res.status(404).json({
-                        message: "Session not found",
-                        status: false
-                    });
-                }
+                await applyLearnerScope(qb, req.user, 'learner');
             }
 
             const session = await qb.getOne();
@@ -328,20 +300,9 @@ class SessionController {
                 qb.andWhere('learner.learner_id = :learner_id', { learner_id });
             }
 
-            // Add organization filtering through trainer (User → UserOrganisation)
+            // Filter via learner scope
             if (req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user);
-                if (accessibleIds !== null) {
-                    if (accessibleIds.length === 0) {
-                        return res.status(200).json({
-                            message: "Sessions fetched successfully",
-                            status: true,
-                            data: []
-                        });
-                    }
-                    qb.leftJoin('trainer.userOrganisations', 'userOrganisation')
-                      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
-                }
+                await applyLearnerScope(qb, req.user, 'learner');
             }
 
             const sessions = await qb

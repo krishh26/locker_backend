@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import { AppDataSource } from "../data-source";
 import { AuditLog, AuditActionType } from "../entity/AuditLog.entity";
 import { CustomRequest } from "../util/Interface/expressInterface";
-import { UserRole } from "../util/constants";
+import { getAccessibleOrganisationIds, getAccessibleCentreIds, canAccessOrganisation, canAccessCentre } from "../util/organisationFilter";
 import { In } from "typeorm";
 
 class AuditLogController {
@@ -160,7 +160,8 @@ class AuditLogController {
     public async GetAuditLogs(req: CustomRequest, res: Response) {
         try {
             const auditLogRepository = AppDataSource.getRepository(AuditLog);
-            const accessibleIds = req.user.role === UserRole.MasterAdmin ? null : (req.user.assignedOrganisationIds || []);
+            const accessibleIds = await getAccessibleOrganisationIds(req.user);
+            const accessibleCentreIds = await getAccessibleCentreIds(req.user);
 
             let queryBuilder = auditLogRepository.createQueryBuilder("log")
                 .leftJoinAndSelect("log.user", "user")
@@ -186,6 +187,14 @@ class AuditLogController {
                     });
                 }
                 queryBuilder.andWhere("(log.organisation_id IN (:...ids) OR log.organisation_id IS NULL)", { ids: accessibleIds });
+            }
+            // Centre-level filter: restrict to accessible centres (or logs with no centre)
+            if (accessibleCentreIds !== null) {
+                if (accessibleCentreIds.length === 0) {
+                    queryBuilder.andWhere("log.centre_id IS NULL");
+                } else {
+                    queryBuilder.andWhere("(log.centre_id IS NULL OR log.centre_id IN (:...centreIds))", { centreIds: accessibleCentreIds });
+                }
             }
 
             // Filter by organisationId
@@ -263,7 +272,6 @@ class AuditLogController {
         try {
             const logId = parseInt(req.params.id);
             const auditLogRepository = AppDataSource.getRepository(AuditLog);
-            const accessibleIds = req.user.role === UserRole.MasterAdmin ? null : (req.user.assignedOrganisationIds || []);
 
             const log = await auditLogRepository.findOne({
                 where: { id: logId },
@@ -277,9 +285,18 @@ class AuditLogController {
                 });
             }
 
-            // Check access permission
-            if (accessibleIds !== null) {
-                if (log.organisation_id && !accessibleIds.includes(log.organisation_id)) {
+            if (log.organisation_id !== null) {
+                const canAccessOrg = await canAccessOrganisation(req.user, log.organisation_id);
+                if (!canAccessOrg) {
+                    return res.status(403).json({
+                        message: "You do not have access to this audit log",
+                        status: false
+                    });
+                }
+            }
+            if (log.centre_id !== null) {
+                const canAccessCent = await canAccessCentre(req.user, log.centre_id);
+                if (!canAccessCent) {
                     return res.status(403).json({
                         message: "You do not have access to this audit log",
                         status: false

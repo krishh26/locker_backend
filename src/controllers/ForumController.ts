@@ -8,7 +8,7 @@ import { deleteFromS3, uploadToS3 } from "../util/aws";
 import { Course } from "../entity/Course.entity";
 import { sendDataToUser } from "../socket/socket";
 import { User } from "../entity/User.entity";
-import { getAccessibleOrganisationIds } from "../util/organisationFilter";
+import { getAccessibleOrganisationIds, getAccessibleCentreAdminUserIds } from "../util/organisationFilter";
 
 class ForumController {
     constructor() {
@@ -217,6 +217,20 @@ class ForumController {
                     }
                     qb.leftJoin('sender.userOrganisations', 'userOrganisation')
                       .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+                }
+                const centreAdminUserIds = await getAccessibleCentreAdminUserIds(req.user);
+                if (centreAdminUserIds !== null) {
+                    if (centreAdminUserIds.length === 0) {
+                        return res.status(200).json({
+                            message: 'Messages retrieved successfully',
+                            status: true,
+                            data: [],
+                            ...(req.query.meta === "true" && {
+                                meta_data: { page: req.pagination.page, items: 0, page_size: req.pagination.limit, pages: 0 }
+                            })
+                        });
+                    }
+                    qb.andWhere('sender.user_id IN (:...centreAdminUserIds)', { centreAdminUserIds });
                 }
             }
 

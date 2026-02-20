@@ -4,6 +4,8 @@ import { Session } from './Session.entity';
 import { Employer } from './Employer.entity';
 import { FundingBand } from './FundingBand.entity';
 import { Gender } from '../util/constants';
+import { Organisation } from './Organisation.entity';
+import { Centre } from './Centre.entity';
 
 @Entity('learner')
 export class Learner {
@@ -180,7 +182,21 @@ export class Learner {
   // @Column({ type: 'varchar', nullable: true })
   // external_data_code: string;
 
-  @ManyToOne(() => Employer)
+  @ManyToOne(() => Organisation, { nullable: true })
+  @JoinColumn({ name: 'organisation_id', referencedColumnName: 'id' })
+  organisation: Organisation;
+
+  @Column({ type: 'int', nullable: true })
+  organisation_id: number;
+
+  @ManyToOne(() => Centre, { nullable: true })
+  @JoinColumn({ name: 'centre_id', referencedColumnName: 'id' })
+  centre: Centre;
+
+  @Column({ type: 'int', nullable: true })
+  centre_id: number;
+
+  @ManyToOne(() => Employer, { nullable: true })
   @JoinColumn({ name: 'employer_id', referencedColumnName: 'employer_id' })
   employer_id: Employer;
 

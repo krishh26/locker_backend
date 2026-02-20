@@ -1,7 +1,6 @@
 import { Request, Response } from "express";
 import { AppDataSource } from "../data-source";
 import { CustomRequest } from "../util/Interface/expressInterface";
-import { UserRole } from "../util/constants";
 import { Organisation } from "../entity/Organisation.entity";
 import { Centre } from "../entity/Centre.entity";
 import { User } from "../entity/User.entity";
@@ -9,31 +8,8 @@ import { AccountManager } from "../entity/AccountManager.entity";
 import { AccountManagerOrganisation } from "../entity/AccountManagerOrganisation.entity";
 import { Subscription } from "../entity/Subscription.entity";
 import { AuditLog } from "../entity/AuditLog.entity";
-
-const getAccessibleOrganisationIds = async (user: any) => {
-      if (user.role === UserRole.MasterAdmin) {
-            return null; // null means all organisations
-        }
-        
-        if (user.role === UserRole.AccountManager) {
-            // Fetch fresh from database instead of using JWT token data
-            const accountManagerRepository = AppDataSource.getRepository(AccountManager);
-            const amoRepository = AppDataSource.getRepository(AccountManagerOrganisation);
-            
-            const accountManager = await accountManagerRepository.findOne({
-                where: { user_id: user.user_id }
-            });
-            
-            if (accountManager) {
-                const assignments = await amoRepository.find({
-                    where: { account_manager_id: accountManager.id }
-                });
-                return assignments.map(a => a.organisation_id);
-            }
-            return [];
-        }
-        return [];
-}
+import { getAccessibleOrganisationIds, getAccessibleCentreIds, addUserOrganisationFilter, applyLearnerScope } from "../util/organisationFilter";
+import { Learner } from "../entity/Learner.entity";
 
 class DashboardController {
 
@@ -57,6 +33,7 @@ class DashboardController {
                             totalOrganisations: 0,
                             totalCentres: 0,
                             totalUsers: 0,
+                            totalLearners: 0,
                             totalSubscriptions: 0,
                             activeOrganisations: 0,
                             activeSubscriptions: 0
@@ -76,11 +53,36 @@ class DashboardController {
             if (accessibleIds !== null) {
                 centreQuery.andWhere("centre.organisation_id IN (:...ids)", { ids: accessibleIds });
             }
+            const accessibleCentreIds = await getAccessibleCentreIds(req.user);
+            if (accessibleCentreIds !== null) {
+                if (accessibleCentreIds.length === 0) {
+                    centreQuery.andWhere("1 = 0");
+                } else {
+                    centreQuery.andWhere("centre.id IN (:...centreIds)", { centreIds: accessibleCentreIds });
+                }
+            }
             const totalCentres = await centreQuery.getCount();
 
-            const totalUsers = await userRepository.count({
-                where: { deleted_at: null as any }
-            });
+            let userCountQuery = userRepository.createQueryBuilder("user")
+                .where("user.deleted_at IS NULL");
+            if (accessibleIds !== null) {
+                if (accessibleIds.length === 0) {
+                    userCountQuery.andWhere("1 = 0");
+                } else {
+                    userCountQuery
+                        .innerJoin("user.userOrganisations", "uo")
+                        .andWhere("uo.organisation_id IN (:...ids)", { ids: accessibleIds });
+                }
+            }
+            const totalUsers = await userCountQuery.getCount();
+
+            const learnerRepository = AppDataSource.getRepository(Learner);
+            let learnerCountQuery = learnerRepository.createQueryBuilder("learner")
+                .where("learner.deleted_at IS NULL")
+                .select("COUNT(DISTINCT learner.learner_id)", "count");
+            if (req.user) await applyLearnerScope(learnerCountQuery, req.user, "learner");
+            const totalLearnersResult = await learnerCountQuery.getRawOne<{ count: string }>();
+            const totalLearners = parseInt(totalLearnersResult?.count ?? "0", 10);
 
             let subQuery = subscriptionRepository.createQueryBuilder("sub")
                 .where("sub.deleted_at IS NULL");
@@ -99,6 +101,7 @@ class DashboardController {
                     totalOrganisations,
                     totalCentres,
                     totalUsers,
+                    totalLearners,
                     totalSubscriptions,
                     activeOrganisations,
                     activeSubscriptions
@@ -169,9 +172,10 @@ class DashboardController {
             const userRepository = AppDataSource.getRepository(User);
             const { UserRole: Roles } = await import("../util/constants");
 
-            const users = await userRepository.find({
-                where: { deleted_at: null as any }
-            });
+            const qb = userRepository.createQueryBuilder("user")
+                .where("user.deleted_at IS NULL");
+            await addUserOrganisationFilter(qb, req.user);
+            const users = await qb.getMany();
 
             const metrics: Record<string, number> = {};
             users.forEach(user => {
@@ -263,7 +267,13 @@ class DashboardController {
                         }
                     });
                 }
-                query.andWhere("log.organisation_id IN (:...ids)", { ids: accessibleIds });
+                query.andWhere("(log.organisation_id IN (:...ids) OR log.organisation_id IS NULL)", { ids: accessibleIds });
+            }
+            const accessibleCentreIdsForLog = await getAccessibleCentreIds(req.user);
+            if (accessibleCentreIdsForLog !== null && accessibleCentreIdsForLog.length > 0) {
+                query.andWhere("(log.centre_id IS NULL OR log.centre_id IN (:...centreIds))", { centreIds: accessibleCentreIdsForLog });
+            } else if (accessibleCentreIdsForLog !== null && accessibleCentreIdsForLog.length === 0) {
+                query.andWhere("log.centre_id IS NULL");
             }
 
             const totalActions = await query.getCount();
@@ -344,6 +354,14 @@ class DashboardController {
             if (accessibleIds !== null) {
                 centreQuery.andWhere("centre.organisation_id IN (:...ids)", { ids: accessibleIds });
             }
+            const accessibleCentreIds = await getAccessibleCentreIds(req.user);
+            if (accessibleCentreIds !== null) {
+                if (accessibleCentreIds.length === 0) {
+                    centreQuery.andWhere("1 = 0");
+                } else {
+                    centreQuery.andWhere("centre.id IN (:...centreIds)", { centreIds: accessibleCentreIds });
+                }
+            }
             const centreActive = await centreQuery.clone()
                 .andWhere("centre.status = :status", { status: 'active' })
                 .getCount();
@@ -351,12 +369,17 @@ class DashboardController {
                 .andWhere("centre.status = :status", { status: 'suspended' })
                 .getCount();
 
-            const userActive = await userRepository.count({
-                where: { status: 'Active' as any, deleted_at: null as any }
-            });
-            const userInactive = await userRepository.count({
-                where: { status: 'InActive' as any, deleted_at: null as any }
-            });
+            let userActiveQuery = userRepository.createQueryBuilder("user")
+                .where("user.deleted_at IS NULL")
+                .andWhere("user.status = :active", { active: 'Active' });
+            await addUserOrganisationFilter(userActiveQuery, req.user);
+            const userActive = await userActiveQuery.getCount();
+
+            let userInactiveQuery = userRepository.createQueryBuilder("user")
+                .where("user.deleted_at IS NULL")
+                .andWhere("user.status = :inactive", { inactive: 'InActive' });
+            await addUserOrganisationFilter(userInactiveQuery, req.user);
+            const userInactive = await userInactiveQuery.getCount();
 
             let subQuery = subscriptionRepository.createQueryBuilder("sub")
                 .where("sub.deleted_at IS NULL");

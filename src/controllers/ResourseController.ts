@@ -4,6 +4,9 @@ import { Resource } from '../entity/Resource.entity';
 import { CustomRequest } from '../util/Interface/expressInterface';
 import { deleteFromS3, uploadToS3 } from '../util/aws';
 import { Course } from '../entity/Course.entity';
+import { UserCourse } from '../entity/UserCourse.entity';
+import { Learner } from '../entity/Learner.entity';
+import { applyLearnerScope } from '../util/organisationFilter';
 
 class ResourceController {
     public async createResource(req: CustomRequest, res: Response) {
@@ -63,12 +66,19 @@ class ResourceController {
         }
     }
 
-    public async getResources(req: Request, res: Response) {
+    public async getResources(req: CustomRequest, res: Response) {
         try {
             const { search, job_type } = req.query;
             const resourceRepository = AppDataSource.getRepository(Resource);
 
-            const query = resourceRepository.createQueryBuilder('resource');
+            const query = resourceRepository.createQueryBuilder('resource')
+                .innerJoin('resource.course_id', 'course')
+                .innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
+                .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id');
+
+            if (req.user) {
+                await applyLearnerScope(query, req.user, 'learner');
+            }
 
             if (search) {
                 query.andWhere(
@@ -81,7 +91,7 @@ class ResourceController {
                 query.andWhere('resource.job_type = :job_type', { job_type });
             }
 
-            const resources = await query.getMany();
+            const resources = await query.select('resource').distinct(true).getMany();
 
             return res.status(200).json({
                 message: 'Resources fetched successfully',
@@ -97,12 +107,22 @@ class ResourceController {
         }
     }
 
-    public async getResource(req: Request, res: Response) {
+    public async getResource(req: CustomRequest, res: Response) {
         try {
             const resourceId = parseInt(req.params.id);
             const resourceRepository = AppDataSource.getRepository(Resource);
 
-            const resource = await resourceRepository.findOne({ where: { resource_id: resourceId } });
+            const qb = resourceRepository.createQueryBuilder('resource')
+                .innerJoin('resource.course_id', 'course')
+                .innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
+                .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id')
+                .where('resource.resource_id = :resourceId', { resourceId });
+
+            if (req.user) {
+                await applyLearnerScope(qb, req.user, 'learner');
+            }
+
+            const resource = await qb.select('resource').getOne();
 
             if (!resource) {
                 return res.status(404).json({

@@ -5,6 +5,9 @@ import { CustomRequest } from '../util/Interface/expressInterface';
 import { User } from '../entity/User.entity';
 import { ResourceStatus } from '../entity/ResourceStatus.entity';
 import { uploadToS3 } from '../util/aws';
+import { UserCourse } from '../entity/UserCourse.entity';
+import { Learner } from '../entity/Learner.entity';
+import { applyLearnerScope } from '../util/organisationFilter';
 
 class ResourceStatusController {
 
@@ -47,7 +50,7 @@ class ResourceStatusController {
         }
     }
 
-    public async addResourceStatus(req: Request, res: Response) {
+    public async addResourceStatus(req: CustomRequest, res: Response) {
         try {
             const { resource_id, user_id } = req.body;
 
@@ -59,7 +62,14 @@ class ResourceStatusController {
             if (!user) {
                 return res.status(404).json({ message: 'User not found', status: false });
             }
-            const resource = await ResourceRepository.findOne({ where: { resource_id } })
+
+            const resourceQb = ResourceRepository.createQueryBuilder('resource')
+                .innerJoin('resource.course_id', 'course')
+                .innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
+                .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id')
+                .where('resource.resource_id = :resource_id', { resource_id });
+            if (req.user) await applyLearnerScope(resourceQb, req.user, 'learner');
+            const resource = await resourceQb.getOne();
             if (!resource) {
                 return res.status(404).json({ message: 'Resource not found', status: false });
             }
@@ -71,7 +81,7 @@ class ResourceStatusController {
                 },
             });
             if (!resourceStatus) {
-                resourceStatus = await resourceStatusRepository.create({ user, resource: resource_id, last_viewed: new Date() });
+                resourceStatus = await resourceStatusRepository.create({ user, resource: resource as any, last_viewed: new Date() });
             }
 
             resourceStatus.user = user;
@@ -96,6 +106,18 @@ class ResourceStatusController {
             }
 
             const resourceStatusRepository = AppDataSource.getRepository(ResourceStatus);
+            const ResourceRepository = AppDataSource.getRepository(Resource);
+
+            const resourceQb = ResourceRepository.createQueryBuilder('resource')
+                .innerJoin('resource.course_id', 'course')
+                .innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
+                .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id')
+                .where('resource.resource_id = :resource_id', { resource_id });
+            if (req.user) await applyLearnerScope(resourceQb, req.user, 'learner');
+            const resourceInScope = await resourceQb.getOne();
+            if (!resourceInScope) {
+                return res.status(404).json({ message: 'Resource not found', status: false });
+            }
 
             let resourceStatus = await resourceStatusRepository.findOne({
                 relations: ['resource', 'user'],
