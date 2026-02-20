@@ -6,7 +6,39 @@ import { UserRole } from "../util/constants";
 import { In } from "typeorm";
 import AuditLogController from "./AuditLogController";
 import { AuditActionType } from "../entity/AuditLog.entity";
-import { getAccessibleOrganisationIds, canAccessOrganisation } from "../util/organisationFilter";
+import { AccountManager } from "../entity/AccountManager.entity";
+import { AccountManagerOrganisation } from "../entity/AccountManagerOrganisation.entity";
+
+const getAccessibleOrganisationIds = async (user: any) => {
+      if (user.role === UserRole.MasterAdmin) {
+            return null; // null means all organisations
+        }
+        
+        if (user.role === UserRole.AccountManager) {
+            // Fetch fresh from database instead of using JWT token data
+            const accountManagerRepository = AppDataSource.getRepository(AccountManager);
+            const amoRepository = AppDataSource.getRepository(AccountManagerOrganisation);
+            
+            const accountManager = await accountManagerRepository.findOne({
+                where: { user_id: user.user_id }
+            });
+            
+            if (accountManager) {
+                const assignments = await amoRepository.find({
+                    where: { account_manager_id: accountManager.id }
+                });
+                return assignments.map(a => a.organisation_id);
+            }
+            return [];
+        }
+        return [];
+}
+// Helper method to check if user can access organisation
+const canAccessOrganisation = async (user: any, organisationId: number) => {
+    const accessibleIds = await getAccessibleOrganisationIds(user);
+    if (accessibleIds === null) return true; // MasterAdmin can access all
+    return accessibleIds.includes(organisationId);
+}
 class OrganisationController {
     // Helper method to get accessible organisation IDs for user
 
