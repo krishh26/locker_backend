@@ -14,6 +14,9 @@ export class DefaultReviewSetting {
   @Column({ type: 'boolean', default: false })
   requireFileUpload: boolean;
 
+  @Column({ name: 'organisation_id', type: 'int', nullable: true })
+  organisation_id: number | null;
+
   @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;
 

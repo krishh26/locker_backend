@@ -5,6 +5,14 @@ import { SupplementaryTrainingResource, SupplementaryTrainingResourceType } from
 import { LearnerSupplementaryTrainingActivity } from '../entity/LearnerSupplementaryTrainingActivity.entity';
 import { uploadToS3 } from '../util/aws';
 import { User } from '../entity/User.entity';
+import { getAccessibleOrganisationIds } from '../util/organisationFilter';
+
+async function canAccessSupplementaryTrainingResource(user: CustomRequest['user'], resource: SupplementaryTrainingResource): Promise<boolean> {
+    if (!user) return false;
+    const orgIds = await getAccessibleOrganisationIds(user);
+    if (orgIds === null) return true;
+    return resource.organisation_id != null && orgIds.includes(resource.organisation_id);
+}
 
 export class SupplementaryTrainingController {
     // Admin: Add Resource
@@ -37,6 +45,11 @@ export class SupplementaryTrainingController {
                 return res.status(400).json({ message: 'Invalid resourceType', status: false });
             }
 
+            let organisation_id: number | null = (req.body as any).organisation_id ?? null;
+            if (organisation_id == null && req.user) {
+                const accessibleIds = await getAccessibleOrganisationIds(req.user);
+                if (accessibleIds != null && accessibleIds.length > 0) organisation_id = accessibleIds[0];
+            }
             const entity = repo.create({
                 resourceType,
                 location,
@@ -45,6 +58,7 @@ export class SupplementaryTrainingController {
                 createdBy: String(req.user.user_id),
                 updatedBy: null,
                 resource_name: resource_name || null,
+                organisation_id,
             });
 
             const saved = await repo.save(entity);
@@ -64,6 +78,9 @@ export class SupplementaryTrainingController {
             const repo = AppDataSource.getRepository(SupplementaryTrainingResource);
             const existing = await repo.findOne({ where: { id } });
             if (!existing) return res.status(404).json({ message: 'Resource not found', status: false });
+            if (!(await canAccessSupplementaryTrainingResource(req.user, existing))) {
+                return res.status(403).json({ message: 'You do not have access to this resource', status: false });
+            }
 
             let location: string = existing.location;
 
@@ -121,8 +138,18 @@ export class SupplementaryTrainingController {
                     'lu.user_name AS lu_user_name'
                 ]);
 
+            if (req.user) {
+                const accessibleIds = await getAccessibleOrganisationIds(req.user);
+                if (accessibleIds !== null) {
+                    if (accessibleIds.length === 0) {
+                        return res.status(200).json({ message: 'OK', status: true, data: [] });
+                    }
+                    qb.andWhere('r.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+                }
+            }
+
             if (search) {
-                qb.where('r.location ILIKE :search', { search: `%${search}%` });
+                qb.andWhere('r.location ILIKE :search', { search: `%${search}%` });
             }
 
             const raws = await qb.orderBy('r.createdAt', 'DESC').getRawMany();
@@ -176,6 +203,9 @@ export class SupplementaryTrainingController {
             const repo = AppDataSource.getRepository(SupplementaryTrainingResource);
             const resource = await repo.findOne({ where: { id } });
             if (!resource) return res.status(404).json({ message: 'Resource not found', status: false });
+            if (!(await canAccessSupplementaryTrainingResource(req.user, resource))) {
+                return res.status(403).json({ message: 'You do not have access to this resource', status: false });
+            }
             resource.isActive = !resource.isActive;
             resource.updatedBy = String(req.user.user_id);
             await repo.save(resource);

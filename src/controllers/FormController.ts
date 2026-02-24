@@ -9,6 +9,38 @@ import { LearnerPlan } from "../entity/LearnerPlan.entity";
 import { SendEmailTemplet } from "../util/nodemailer";
 import { uploadToS3, uploadMultipleFilesToS3 } from "../util/aws";
 import { getAccessibleOrganisationIds, getAccessibleCentreAdminUserIds } from "../util/organisationFilter";
+import { SelectQueryBuilder } from "typeorm";
+
+async function applyFormListScope(qb: SelectQueryBuilder<Form>, req: CustomRequest): Promise<void> {
+    if (!req.user) return;
+    const accessibleIds = await getAccessibleOrganisationIds(req.user);
+    if (accessibleIds !== null) {
+        if (accessibleIds.length === 0) {
+            qb.andWhere('1 = 0');
+            return;
+        }
+        qb.innerJoin('form.users', 'formUser')
+            .leftJoin('formUser.userOrganisations', 'userOrganisation')
+            .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+    }
+    const centreAdminUserIds = await getAccessibleCentreAdminUserIds(req.user);
+    if (centreAdminUserIds !== null) {
+        if (centreAdminUserIds.length === 0) {
+            qb.andWhere('1 = 0');
+            return;
+        }
+        qb.innerJoin('form.users', 'formUserCentre')
+            .andWhere('formUserCentre.user_id IN (:...centreAdminUserIds)', { centreAdminUserIds });
+    }
+}
+
+async function formAccessible(formRepository: ReturnType<typeof AppDataSource.getRepository<Form>>, req: CustomRequest, formId: number): Promise<boolean> {
+    const qb = formRepository.createQueryBuilder('form')
+        .where('form.id = :formId', { formId });
+    await applyFormListScope(qb, req);
+    const form = await qb.getOne();
+    return !!form;
+}
 
 class FormController {
 
@@ -48,8 +80,15 @@ class FormController {
                     status: false,
                 });
             }
-            
-            const form = formRepository.create(data)
+
+            const form = formRepository.create(data);
+
+            // Link form to creator so getForms (org filter via form.users → userOrganisations) includes this form
+            if (req.user?.user_id) {
+                const userRepository = AppDataSource.getRepository(User);
+                const creator = await userRepository.findOne({ where: { user_id: req.user.user_id } });
+                if (creator) form.users = [creator];
+            }
 
             const savedForm = await formRepository.save(form);
             res.status(200).json({
@@ -84,16 +123,19 @@ class FormController {
             } = req.body;
 
             const formRepository = AppDataSource.getRepository(Form);
-
             const form = await formRepository.findOne({ where: { id } });
-
             if (!form) {
                 return res.status(404).json({
                     message: 'Form not found',
                     status: false,
                 });
             }
-
+            if (!(await formAccessible(formRepository, req, id))) {
+                return res.status(403).json({
+                    message: 'You do not have access to this form',
+                    status: false,
+                });
+            }
             form.form_name = form_name || form.form_name;
             form.form_data = form_data || form.form_data;
             form.description = description ?? form.description;
@@ -124,21 +166,20 @@ class FormController {
     public async getForm(req: CustomRequest, res: Response) {
         try {
             const id = parseInt(req.params.id);
-
             const formRepository = AppDataSource.getRepository(Form);
-
-            const form = await formRepository.createQueryBuilder('form')
-                .where('form.id = :id', { id })
-                .getOne();
-
-
+            const form = await formRepository.findOne({ where: { id } });
             if (!form) {
                 return res.status(404).json({
                     message: 'Form not found',
                     status: false,
                 });
             }
-
+            if (!(await formAccessible(formRepository, req, id))) {
+                return res.status(403).json({
+                    message: 'You do not have access to this form',
+                    status: false,
+                });
+            }
             return res.status(200).json({
                 message: 'Form retrieved successfully',
                 status: true,
@@ -244,16 +285,20 @@ class FormController {
         try {
             const id = parseInt(req.params.id);
             const formRepository = AppDataSource.getRepository(Form);
-
-            const deleteResult = await formRepository.delete(id);
-
-            if (deleteResult.affected === 0) {
+            const form = await formRepository.findOne({ where: { id } });
+            if (!form) {
                 return res.status(404).json({
                     message: 'Form not found',
                     status: false,
                 });
             }
-
+            if (!(await formAccessible(formRepository, req, id))) {
+                return res.status(403).json({
+                    message: 'You do not have access to this form',
+                    status: false,
+                });
+            }
+            await formRepository.remove(form);
             return res.status(200).json({
                 message: 'Form deleted successfully',
                 status: true,
@@ -296,6 +341,12 @@ class FormController {
                 return res.status(404).json({
                     message: 'Form not found',
                     status: false
+                });
+            }
+            if (!(await formAccessible(formRepository, req, form_id))) {
+                return res.status(403).json({
+                    message: 'You do not have access to this form',
+                    status: false,
                 });
             }
             let usersToAdd

@@ -11,6 +11,9 @@ export class FormTemplate {
     @Column({ type: 'json' })
     data: object;
 
+    @Column({ name: 'organisation_id', type: 'int', nullable: true })
+    organisation_id: number | null;
+
     @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
     created_at: Date;
 

@@ -35,6 +35,9 @@ export class SupplementaryTrainingResource {
     @Column({ type: 'varchar', nullable: true })
     description: string;
 
+    @Column({ name: 'organisation_id', type: 'int', nullable: true })
+    organisation_id: number | null;
+
     @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
     createdAt: Date;
 

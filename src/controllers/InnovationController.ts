@@ -4,11 +4,21 @@ import { CustomRequest } from '../util/Interface/expressInterface';
 import { AppDataSource } from '../data-source';
 import { User } from '../entity/User.entity';
 import { sendDataToUser } from '../socket/socket';
-import { SocketDomain, UserRole } from '../util/constants';
+import { SocketDomain } from '../util/constants';
 import { SendNotifications } from '../util/socket/notification';
-import { getAccessibleOrganisationIds, getAccessibleCentreIds, resolveUserRole } from '../util/organisationFilter';
+import { applyLearnerScope } from '../util/organisationFilter';
+import { Learner } from '../entity/Learner.entity';
 
 class InnovationController {
+    private async canAccessInnovation(proposerUserId: number | undefined, req: CustomRequest): Promise<boolean> {
+        if (!proposerUserId) return false;
+        const qb = AppDataSource.getRepository(Learner)
+            .createQueryBuilder('learner')
+            .where('learner.user_id = :proposerUserId', { proposerUserId });
+        await applyLearnerScope(qb, req.user, 'learner');
+        return (await qb.getCount()) > 0;
+    }
+
     public async createInnovation(req: CustomRequest, res: Response): Promise<Response> {
         try {
             const innovationRepository = AppDataSource.getRepository(Innovation);
@@ -70,12 +80,15 @@ class InnovationController {
             const id = parseInt(req.params.id);
             const { topic, description, comment, status } = req.body;
 
-            let innovation = await innovationRepository.findOne({ where: { id } });
+            let innovation = await innovationRepository.findOne({ where: { id }, relations: ['innovation_propose_by_id'] });
             if (!innovation) {
                 return res.status(404).json({
                     message: "Innovation not found",
                     status: false
                 });
+            }
+            if (req.user && !(await this.canAccessInnovation(innovation.innovation_propose_by_id?.user_id, req))) {
+                return res.status(403).json({ message: "Access denied", status: false });
             }
 
             innovation.topic = topic || innovation.topic;
@@ -102,6 +115,17 @@ class InnovationController {
         try {
             const id = parseInt(req.params.id);
             const innovationRepository = AppDataSource.getRepository(Innovation);
+
+            const innovation = await innovationRepository.findOne({ where: { id }, relations: ['innovation_propose_by_id'] });
+            if (!innovation) {
+                return res.status(404).json({
+                    message: 'Innovation not found',
+                    status: false,
+                });
+            }
+            if (req.user && !(await this.canAccessInnovation(innovation.innovation_propose_by_id?.user_id, req))) {
+                return res.status(403).json({ message: "Access denied", status: false });
+            }
 
             const deleteResult = await innovationRepository.delete(id);
 
@@ -153,17 +177,10 @@ class InnovationController {
                 qb.andWhere('user_id.user_id = :user_id', { user_id });
             }
 
-            if (req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
-                const role = resolveUserRole(req.user);
-                if (role === UserRole.CentreAdmin) {
-                    const centreIds = await getAccessibleCentreIds(req.user);
-                    if (centreIds === null || centreIds.length === 0) qb.andWhere('1 = 0');
-                    else qb.innerJoin('user_id.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
-                } else {
-                    const orgIds = await getAccessibleOrganisationIds(req.user);
-                    if (orgIds === null || orgIds.length === 0) qb.andWhere('1 = 0');
-                    else qb.innerJoin('user_id.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
-                }
+            // Org / centre / learner scope: only innovations proposed by learners in scope
+            if (req.user) {
+                qb.leftJoin(Learner, 'learner', 'learner.user_id = user_id.user_id');
+                await applyLearnerScope(qb, req.user, 'learner');
             }
 
             qb.skip(req.pagination.skip)
@@ -214,17 +231,10 @@ class InnovationController {
                     'user_id.avatar'
                 ]);
 
-            if (req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
-                const role = resolveUserRole(req.user);
-                if (role === UserRole.CentreAdmin) {
-                    const centreIds = await getAccessibleCentreIds(req.user);
-                    if (centreIds === null || centreIds.length === 0) return res.status(404).json({ message: "Innovation not found", status: false });
-                    qb.innerJoin('user_id.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
-                } else {
-                    const orgIds = await getAccessibleOrganisationIds(req.user);
-                    if (orgIds === null || orgIds.length === 0) return res.status(404).json({ message: "Innovation not found", status: false });
-                    qb.innerJoin('user_id.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
-                }
+            // Org / centre / learner scope: only if proposer is a learner in scope
+            if (req.user) {
+                qb.leftJoin(Learner, 'learner', 'learner.user_id = user_id.user_id');
+                await applyLearnerScope(qb, req.user, 'learner');
             }
 
             const innovation = await qb.getOne();
@@ -268,6 +278,9 @@ class InnovationController {
                     message: "Innovation not found",
                     status: false
                 });
+            }
+            if (req.user && !(await this.canAccessInnovation(innovation.innovation_propose_by_id?.user_id, req))) {
+                return res.status(403).json({ message: "Access denied", status: false });
             }
 
             innovation.comment = [...innovation.comment, { type, description, date }];
