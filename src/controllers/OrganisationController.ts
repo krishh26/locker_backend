@@ -179,15 +179,17 @@ class OrganisationController {
                 });
             }
 
+            //only role admin
             const admins = (organisation.userOrganisations ?? [])
                 .map((uo) => uo.user)
                 .filter(Boolean)
+                .filter((u) => u.roles?.includes(UserRole.Admin))
                 .map((u) => ({
                     user_id: u.user_id,
                     first_name: u.first_name,
                     last_name: u.last_name,
                     email: u.email,
-                    roles: u.roles ?? []
+                    roles: u.roles ?? [],
                 }));
 
             const { userOrganisations: _uo, ...rest } = organisation;

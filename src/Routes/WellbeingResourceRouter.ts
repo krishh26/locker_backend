@@ -8,10 +8,10 @@ const wellbeingRoutes = express.Router();
 const Controller = new WellbeingResourceController();
 
 // Admin endpoints
-wellbeingRoutes.post('/admin/resources', authorizeRoles(UserRole.Admin), singleFileUpload('file'), Controller.addResource);
-wellbeingRoutes.patch('/admin/resources/:id', authorizeRoles(UserRole.Admin), singleFileUpload('file'), Controller.updateResource);
-wellbeingRoutes.get('/admin/resources', authorizeRoles(UserRole.Admin), Controller.getAllAdmin);
-wellbeingRoutes.patch('/admin/resources/:id/toggle', authorizeRoles(UserRole.Admin), Controller.toggleActive);
+wellbeingRoutes.post('/admin/resources', authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), singleFileUpload('file'), Controller.addResource);
+wellbeingRoutes.patch('/admin/resources/:id', authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), singleFileUpload('file'), Controller.updateResource);
+wellbeingRoutes.get('/admin/resources', authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), Controller.getAllAdmin);
+wellbeingRoutes.patch('/admin/resources/:id/toggle', authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), Controller.toggleActive);
 
 // Learner endpoints
 wellbeingRoutes.get('/learner/resources', authorizeRoles(), Controller.getAllActiveForLearner);

@@ -14,7 +14,7 @@ import { NotificationType, SocketDomain, UserRole, CourseType, CourseStatus } fr
 import { convertDataToJson } from "../util/convertDataToJson";
 import { EnhancedUnit, LearningOutcome, AssessmentCriterion } from "../types/courseBuilder.types";
 import { In, Raw } from 'typeorm';
-import { applyLearnerScope } from "../util/organisationFilter";
+import { applyScope, canAccessOrganisation, getAccessibleOrganisationIds } from "../util/organisationFilter";
 
 const enhanceCourseData = (course: any) => {
     return {
@@ -52,17 +52,31 @@ class CourseController {
                 return res.status(400).json({ message: 'questions must be an array', status: false });
             }
 
-            const courseRepository = AppDataSource.getRepository(Course);
+            const organisation_id = data.organisation_id != null ? Number(data.organisation_id) : null;
+            if (organisation_id == null || isNaN(organisation_id)) {
+                return res.status(400).json({
+                    message: 'organisation_id is required when creating a course',
+                    status: false,
+                });
+            }
+            if (req.user && !(await canAccessOrganisation(req.user, organisation_id))) {
+                return res.status(403).json({
+                    message: 'You do not have access to create courses for this organisation',
+                    status: false,
+                });
+            }
 
+            const courseRepository = AppDataSource.getRepository(Course);
+            data.organisation_id = organisation_id;
             const course = courseRepository.create(data);
             const savedCourse: any = await courseRepository.save(course);
 
             const enhancedCourse = enhanceCourseData(savedCourse);
 
-            if (data.course_core_type === 'Gateway') {
+            if (data.course_core_type === 'Gateway' && Array.isArray(data.assigned_standards) && data.assigned_standards.length > 0) {
                 const userCourseRepo = AppDataSource.getRepository(UserCourse);
 
-                // find all learners from assigned standards
+                // Only assign learners in the same organisation (no cross-organisation)
                 const assignedLearners = await userCourseRepo
                     .createQueryBuilder('uc')
                     .leftJoinAndSelect('uc.learner_id', 'learner')
@@ -72,10 +86,10 @@ class CourseController {
                     .leftJoinAndSelect('uc.EQA_id', 'eqa')
                     .leftJoinAndSelect('uc.employer_id', 'employer')
                     .where("uc.course ->> 'course_id' IN (:...ids)", { ids: data.assigned_standards })
+                    .andWhere('learner.organisation_id = :courseOrgId', { courseOrgId: savedCourse.organisation_id })
                     .getMany();
 
                 for (const learnerUC of assignedLearners) {
-                    console.log('Creating user_course for learner:', learnerUC.learner_id?.learner_id);
 
                     const newUserCourse = userCourseRepo.create({
                         learner_id: learnerUC.learner_id ? { learner_id: learnerUC.learner_id.learner_id } : null,
@@ -211,6 +225,17 @@ class CourseController {
                 });
             }
 
+            if (req.user && courseToDelete.organisation_id != null && !(await canAccessOrganisation(req.user, courseToDelete.organisation_id))) {
+                return res.status(403).json({ message: 'You do not have access to delete this course', status: false });
+            }
+            if (req.user && courseToDelete.organisation_id == null) {
+                const { resolveUserRole } = await import('../util/organisationFilter');
+                const { UserRole } = await import('../util/constants');
+                if (resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                    return res.status(403).json({ message: 'You do not have access to delete this course', status: false });
+                }
+            }
+
             await courseRepository.remove(courseToDelete);
 
             res.status(200).json({
@@ -227,7 +252,7 @@ class CourseController {
         }
     }
 
-    public async updateCourse(req: Request, res: Response): Promise<Response> {
+    public async updateCourse(req: CustomRequest, res: Response): Promise<Response> {
         try {
             const courseId: number = parseInt(req.params.id);
             const data = req.body;
@@ -240,6 +265,20 @@ class CourseController {
                     message: 'Course not found',
                     status: false,
                 });
+            }
+
+            if (req.user && existingCourse.organisation_id != null && !(await canAccessOrganisation(req.user, existingCourse.organisation_id))) {
+                return res.status(403).json({ message: 'You do not have access to update this course', status: false });
+            }
+            if (req.user && existingCourse.organisation_id == null) {
+                const { resolveUserRole } = await import('../util/organisationFilter');
+                const { UserRole } = await import('../util/constants');
+                if (resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                    return res.status(403).json({ message: 'You do not have access to update this course', status: false });
+                }
+            }
+            if (data.organisation_id != null && data.organisation_id !== existingCourse.organisation_id && req.user && !(await canAccessOrganisation(req.user, Number(data.organisation_id)))) {
+                return res.status(403).json({ message: 'You cannot assign this course to that organisation', status: false });
             }
 
             // if (!Object.values(CourseType).includes(data.course_type)) {
@@ -315,6 +354,16 @@ class CourseController {
             const learner = await learnerRepository.findOne({ where: { learner_id }, relations: ['user_id'] });
             if (!course || !learner) {
                 return res.status(404).json({ message: 'course or learner not found', status: false });
+            }
+
+            if (course.organisation_id != null && learner.organisation_id !== course.organisation_id) {
+                return res.status(400).json({
+                    message: 'Learner and course must belong to the same organisation',
+                    status: false,
+                });
+            }
+            if (req.user && course.organisation_id != null && !(await canAccessOrganisation(req.user, course.organisation_id))) {
+                return res.status(403).json({ message: 'You do not have access to assign this course', status: false });
             }
 
             // if learner has one main course, then return error to select other course
@@ -422,7 +471,7 @@ class CourseController {
         }
     };
 
-    public async getCourse(req: Request, res: Response): Promise<Response> {
+    public async getCourse(req: CustomRequest, res: Response): Promise<Response> {
         try {
             const course_id = parseInt(req.params.id);
 
@@ -432,6 +481,17 @@ class CourseController {
 
             if (!course) {
                 return res.status(404).json({ message: 'Course not found', status: false });
+            }
+
+            if (req.user && course.organisation_id != null && !(await canAccessOrganisation(req.user, course.organisation_id))) {
+                return res.status(403).json({ message: 'You do not have access to this course', status: false });
+            }
+            if (req.user && course.organisation_id == null) {
+                const { resolveUserRole } = await import('../util/organisationFilter');
+                const { UserRole } = await import('../util/constants');
+                if (resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                    return res.status(403).json({ message: 'You do not have access to this course', status: false });
+                }
             }
 
             const enhancedCourse = enhanceCourseData(course);
@@ -471,12 +531,11 @@ class CourseController {
         try {
             const courseRepository = AppDataSource.getRepository(Course);
 
-            const qb = courseRepository.createQueryBuilder("course")
-                .innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
-                .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id');
+            // Direct organisation scope: course.organisation_id in user scope (no join-based visibility)
+            const qb = courseRepository.createQueryBuilder("course");
 
             if (req.user) {
-                await applyLearnerScope(qb, req.user, 'learner');
+                await applyScope(qb, req.user, 'course', { organisationOnly: true });
             }
 
             if (req.query.keyword) {
@@ -488,11 +547,9 @@ class CourseController {
             }
 
             const [courses, count] = await qb
-                .select('course')
-                .distinct(true)
+                .orderBy('course.course_id', 'ASC')
                 .skip(Number(req.pagination.skip))
                 .take(Number(req.pagination.limit))
-                .orderBy("course.course_id", "ASC")
                 .getManyAndCount();
 
             // enhance + add assigned_standards_details for Gateway

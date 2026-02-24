@@ -2,7 +2,9 @@ import { Response } from 'express';
 import { CustomRequest } from '../util/Interface/expressInterface';
 import { AppDataSource } from '../data-source';
 import { TimeLog } from '../entity/TimeLog.entity';
+import { Learner } from '../entity/Learner.entity';
 import { getOTJSummary } from '../util/services/otj.service';
+import { applyLearnerScope } from '../util/organisationFilter';
 import { getAccessibleOrganisationIds } from '../util/organisationFilter';
 
 class TimeLogController {
@@ -176,28 +178,10 @@ class TimeLogController {
                 });
             }
 
-            // Add organization filtering through user_id (User → UserOrganisation)
+            // Apply scope: organisation + centre via learner (timelog.user_id is learner's user)
             if (req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user);
-                if (accessibleIds !== null) {
-                    if (accessibleIds.length === 0) {
-                        return res.status(200).json({
-                            message: "Time logs fetched successfully",
-                            status: true,
-                            data: [],
-                            ...((req.query.meta === "true" && pagination) && {
-                                meta_data: {
-                                    page: req.pagination.page,
-                                    items: 0,
-                                    page_size: req.pagination.limit,
-                                    pages: 0
-                                }
-                            })
-                        });
-                    }
-                    qb.leftJoin('user_id.userOrganisations', 'userOrganisation')
-                      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
-                }
+                qb.leftJoin(Learner, 'learner', 'learner.user_id = user_id.user_id');
+                await applyLearnerScope(qb, req.user, 'learner');
             }
 
             if (pagination) {

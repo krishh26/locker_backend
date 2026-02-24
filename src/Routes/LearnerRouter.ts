@@ -9,17 +9,17 @@ const learnerRoutes = express.Router();
 
 const Controller = new LearnerController();
 
-learnerRoutes.post("/create", authorizeRoles(UserRole.Admin), singleFileUpload("avatar"), Controller.CreateLearner);
-learnerRoutes.post("/create-multiple", authorizeRoles(UserRole.Admin), Controller.CreateMultipleLearners);
+learnerRoutes.post("/create", authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), singleFileUpload("avatar"), Controller.CreateLearner);
+learnerRoutes.post("/create-multiple", authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), Controller.CreateMultipleLearners);
 learnerRoutes.get("/list", authorizeRoles(), paginationMiddleware, Controller.getLearnerList);
 learnerRoutes.get("/list-with-count", authorizeRoles(), Controller.getLearnerListWithCount);
 learnerRoutes.get("/get/:id", authorizeRoles(), Controller.getLearner);
 learnerRoutes.get("/get", authorizeRoles(UserRole.Learner), Controller.getLearnerByToken);
 learnerRoutes.get("/excel", authorizeRoles(), Controller.getLearnerExcel);
 learnerRoutes.patch("/update/:id", authorizeRoles(), Controller.updateLearner);
-learnerRoutes.delete("/delete/:id", authorizeRoles(UserRole.Admin), Controller.deleteLearner);
-learnerRoutes.post("/restore/:id", authorizeRoles(UserRole.Admin), Controller.restoreLearner);
-learnerRoutes.get("/dashboard", authorizeRoles(UserRole.Admin), Controller.getAdminDashboard);
+learnerRoutes.delete("/delete/:id", authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), Controller.deleteLearner);
+learnerRoutes.post("/restore/:id", authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), Controller.restoreLearner);
+learnerRoutes.get("/dashboard", authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), Controller.getAdminDashboard);
 learnerRoutes.post("/bulk-upload", authorizeRoles(), Controller.bulkCreateLearnersWithCourses);
 
 // Funding band routes - automatic based on assigned courses

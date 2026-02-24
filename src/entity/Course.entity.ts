@@ -1,12 +1,20 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, OneToMany, JoinTable, ManyToMany, ManyToOne } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, OneToMany, JoinTable, ManyToMany, ManyToOne, JoinColumn } from 'typeorm';
 import { Resource } from './Resource.entity';
 import { CourseType, CourseCoretype } from '../util/constants';
 import { SamplingPlan } from "./samplingPlan.entity";
+import { Organisation } from './Organisation.entity';
 
 @Entity('course')
 export class Course {
     @PrimaryGeneratedColumn()
     course_id: number;
+
+    @ManyToOne(() => Organisation, { nullable: true })
+    @JoinColumn({ name: 'organisation_id', referencedColumnName: 'id' })
+    organisation: Organisation;
+
+    @Column({ type: 'int', nullable: true })
+    organisation_id: number;
 
     @Column({ type: 'varchar' })
     course_name: string;

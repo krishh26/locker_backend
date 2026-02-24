@@ -33,7 +33,7 @@ surveyRoutes.get('/:surveyId/responses/:responseId', authorizeRoles(), controlle
 surveyRoutes.delete('/:surveyId/responses/:responseId', authorizeRoles(), controller.deleteResponse);
 
 // Allocation management
-surveyRoutes.post('/allocate', authorizeRoles(UserRole.Admin), trimMiddleware, controller.allocateSurvey);
+surveyRoutes.post('/allocate', authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), trimMiddleware, controller.allocateSurvey);
 surveyRoutes.get('/allocations/all', authorizeRoles(), controller.getAllSurveysWithAllocations);
 surveyRoutes.get('/:surveyId/allocations', authorizeRoles(), controller.getAllocationsBySurveyId);
 

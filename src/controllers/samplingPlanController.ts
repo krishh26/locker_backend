@@ -140,6 +140,21 @@ export class SamplingPlanController {
 
       const courseId = plan.course.course_id;
 
+      // Ensure plan is in scope (course has at least one learner in user's org/centre)
+      if ((req as any).user) {
+        const accessQb = userCourseRepo
+          .createQueryBuilder("uc")
+          .innerJoin("uc.learner_id", "learner")
+          .where("uc.course ->> 'course_id' = :courseId", { courseId });
+        await applyLearnerScope(accessQb, (req as any).user, "learner");
+        if ((await accessQb.getCount()) === 0) {
+          return res.status(403).json({
+            message: "You do not have access to this sampling plan",
+            status: false,
+          });
+        }
+      }
+
       // Fetch all sampled details for plan
       const allDetails = await detailRepo.find({
         where: { samplingPlan: { id: Number(plan_id) } },
@@ -161,7 +176,11 @@ export class SamplingPlanController {
         .leftJoinAndSelect("learner.user_id", "user")
         .leftJoinAndSelect("uc.trainer_id", "trainer")
         .leftJoinAndSelect("uc.employer_id", "employer")
-        .where("uc.course ->> 'course_id' = :courseId", { courseId })
+        .where("uc.course ->> 'course_id' = :courseId", { courseId });
+
+      if ((req as any).user) {
+        await applyLearnerScope(qb, (req as any).user, "learner");
+      }
 
       if (eqaId) {
         qb.andWhere('uc."EQA_id" = :eqaId', { eqaId });

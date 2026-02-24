@@ -8,7 +8,7 @@ import { AccountManager } from "../entity/AccountManager.entity";
 import { AccountManagerOrganisation } from "../entity/AccountManagerOrganisation.entity";
 import { Subscription } from "../entity/Subscription.entity";
 import { AuditLog } from "../entity/AuditLog.entity";
-import { getAccessibleOrganisationIds, getAccessibleCentreIds, addUserOrganisationFilter, applyLearnerScope } from "../util/organisationFilter";
+import { getAccessibleOrganisationIds, getAccessibleCentreIds, addUserScopeFilter, applyLearnerScope } from "../util/organisationFilter";
 import { Learner } from "../entity/Learner.entity";
 
 class DashboardController {
@@ -174,7 +174,7 @@ class DashboardController {
 
             const qb = userRepository.createQueryBuilder("user")
                 .where("user.deleted_at IS NULL");
-            await addUserOrganisationFilter(qb, req.user);
+            await addUserScopeFilter(qb, req.user, "user");
             const users = await qb.getMany();
 
             const metrics: Record<string, number> = {};
@@ -372,13 +372,13 @@ class DashboardController {
             let userActiveQuery = userRepository.createQueryBuilder("user")
                 .where("user.deleted_at IS NULL")
                 .andWhere("user.status = :active", { active: 'Active' });
-            await addUserOrganisationFilter(userActiveQuery, req.user);
+            await addUserScopeFilter(userActiveQuery, req.user, "user");
             const userActive = await userActiveQuery.getCount();
 
             let userInactiveQuery = userRepository.createQueryBuilder("user")
                 .where("user.deleted_at IS NULL")
                 .andWhere("user.status = :inactive", { inactive: 'InActive' });
-            await addUserOrganisationFilter(userInactiveQuery, req.user);
+            await addUserScopeFilter(userInactiveQuery, req.user, "user");
             const userInactive = await userInactiveQuery.getCount();
 
             let subQuery = subscriptionRepository.createQueryBuilder("sub")

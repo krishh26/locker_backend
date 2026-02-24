@@ -8,10 +8,10 @@ const FormTemplateRoutes = express.Router();
 
 const Controller = new FormTemplateController();
 
-FormTemplateRoutes.post('/create', authorizeRoles(UserRole.Admin), Controller.CreateFormTemplate);
+FormTemplateRoutes.post('/create', authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), Controller.CreateFormTemplate);
 FormTemplateRoutes.get("/get/:id", authorizeRoles(), Controller.getFormTemplate);
 FormTemplateRoutes.get("/list", authorizeRoles(), Controller.getFormTemplates);
-FormTemplateRoutes.patch("/update/:id", authorizeRoles(UserRole.Admin), Controller.updateFormTemplate);
-FormTemplateRoutes.delete("/delete/:id", authorizeRoles(UserRole.Admin), Controller.deleteFormTemplate);
+FormTemplateRoutes.patch("/update/:id", authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), Controller.updateFormTemplate);
+FormTemplateRoutes.delete("/delete/:id", authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), Controller.deleteFormTemplate);
 
 export default FormTemplateRoutes;

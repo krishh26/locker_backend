@@ -9,7 +9,7 @@ import { LearnerCPD } from "../entity/LearnerCpd.entity";
 import { Learner } from "../entity/Learner.entity";
 import XLSX from 'xlsx';
 import PDFDocument from 'pdfkit';
-import { applyLearnerScope, canAccessOrganisation } from "../util/organisationFilter";
+import { getAccessibleUserIds, canAccessOrganisation } from "../util/organisationFilter";
 
 class CpdController {
 
@@ -97,7 +97,17 @@ class CpdController {
             let relations = (req.query.table as string)?.split(',') || [];
             const { user_id } = req.params as any;
 
-            // Use query builder to add organization filtering
+            // Enforce scope: only allow viewing CPD for users in scope (org/centre)
+            if (req.user) {
+                const accessibleUserIds = await getAccessibleUserIds(req.user);
+                if (accessibleUserIds !== null && !accessibleUserIds.includes(Number(user_id))) {
+                    return res.status(403).json({
+                        message: "You do not have access to this user's CPD",
+                        status: false,
+                    });
+                }
+            }
+
             const qb = cpdRepository.createQueryBuilder('cpd')
                 .where('cpd.user_id = :user_id', { user_id });
 
@@ -106,12 +116,6 @@ class CpdController {
                 relations.forEach(rel => {
                     qb.leftJoinAndSelect(`cpd.${rel}`, rel);
                 });
-            }
-
-            // Filter via learner scope (CPD belongs to learner user)
-            if (req.user) {
-                qb.leftJoin(Learner, 'learner', 'learner.user_id = cpd.user_id');
-                await applyLearnerScope(qb, req.user, 'learner');
             }
 
             const cpd = await qb.getMany();

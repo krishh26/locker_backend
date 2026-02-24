@@ -36,16 +36,16 @@ SamplingPlanRoutes.put("/learner-signoff", SamplingPlanController.signOffLearner
 // GET /api/v1/sampling-plan/course/:course_id → get sampling plans by course
 // SamplingPlanRoutes.get(
 //   '/course/:course_id',
-//   authorizeRoles(UserRole.Admin, UserRole.IQA),
+//   authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin, UserRole.IQA),
 //   SamplingPlanController.getSamplingPlansByCourse
 // );
 
 // PATCH /api/v1/sampling-plan/:id → update sampling plan
-SamplingPlanRoutes.patch('/deatil/:id', authorizeRoles(UserRole.Admin, UserRole.IQA), SamplingPlanController.updateSamplingPlanDetail );
+SamplingPlanRoutes.patch('/deatil/:id', authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin, UserRole.IQA), SamplingPlanController.updateSamplingPlanDetail );
 
 SamplingPlanRoutes.get('/:detailId/evidence', authorizeRoles(), SamplingPlanController.getEvidenceForSamplePlanDetail);
-SamplingPlanRoutes.post("/assignment-review", singleFileUpload('file'), authorizeRoles(UserRole.Admin, UserRole.IQA), SamplingPlanController.upsertAssignmentReview);
-SamplingPlanRoutes.post("/assignment-pc-review", authorizeRoles(UserRole.Admin, UserRole.IQA), SamplingPlanController.upsertAssignmentPCReview);
+SamplingPlanRoutes.post("/assignment-review", singleFileUpload('file'), authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin, UserRole.IQA), SamplingPlanController.upsertAssignmentReview);
+SamplingPlanRoutes.post("/assignment-pc-review", authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin, UserRole.IQA), SamplingPlanController.upsertAssignmentPCReview);
 SamplingPlanRoutes.get("/:detailId/unit-mapping", authorizeRoles(), SamplingPlanController.getUnitMappingByPlanDetail);
 SamplingPlanRoutes.delete('/assignment-review/file', authorizeRoles(), SamplingPlanController.deleteAssignmentReviewFile);
 export default SamplingPlanRoutes;

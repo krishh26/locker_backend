@@ -8,7 +8,7 @@ import { deleteFromS3, uploadToS3 } from "../util/aws";
 import { Course } from "../entity/Course.entity";
 import { sendDataToUser } from "../socket/socket";
 import { User } from "../entity/User.entity";
-import { getAccessibleOrganisationIds, getAccessibleCentreAdminUserIds } from "../util/organisationFilter";
+import { getAccessibleOrganisationIds, getAccessibleCentreAdminUserIds, applyLearnerScope } from "../util/organisationFilter";
 
 class ForumController {
     constructor() {
@@ -17,11 +17,11 @@ class ForumController {
         this.getCourseUserIds = this.getCourseUserIds.bind(this);
     }
 
-    getCourseUserIds = async (course_id: number, sender_id) => {
+    getCourseUserIds = async (course_id: number, sender_id, req?: CustomRequest) => {
         const userCourseRepository = AppDataSource.getRepository(UserCourse)
         const userRepository = AppDataSource.getRepository(User)
 
-        const userCourses = await userCourseRepository.createQueryBuilder('user_course')
+        const qb = userCourseRepository.createQueryBuilder('user_course')
             .leftJoin('user_course.learner_id', 'learner')
             .leftJoin('learner.user_id', 'learner_user')
             .leftJoin('user_course.trainer_id', 'trainer')
@@ -37,8 +37,11 @@ class ForumController {
                 'LIQA.user_id AS liqa_id',
                 'EQA.user_id AS eqa_id',
                 'employer.user_id AS employer_id'
-            ])
-            .getRawMany();
+            ]);
+        if (req?.user) {
+            await applyLearnerScope(qb, req.user, 'learner');
+        }
+        const userCourses = await qb.getRawMany();
 
         const adminUsers = await userRepository.createQueryBuilder('user')
             .where(':role = ANY(user.roles)', { role: 'Admin' })
@@ -75,7 +78,7 @@ class ForumController {
             let forum = forumRepository.create({ sender: sender_id, course: course_id, message, file })
             forum = await forumRepository.save(forum)
 
-            const uniqueUserIdArray = await this.getCourseUserIds(course_id, sender_id)
+            const uniqueUserIdArray = await this.getCourseUserIds(course_id, sender_id, req)
             const qb = await forumRepository.createQueryBuilder('forum')
                 .innerJoin('forum.course', 'course')
                 .innerJoin('forum.sender', 'sender')
@@ -131,7 +134,7 @@ class ForumController {
             }
             forum = await forumRepository.save(forum)
 
-            const uniqueUserIdArray = await this.getCourseUserIds(forum.course.course_id, req.user.user_id)
+            const uniqueUserIdArray = await this.getCourseUserIds(forum.course.course_id, req.user.user_id, req)
             sendDataToUser(uniqueUserIdArray, { data: forum, domain: SocketDomain.MessageUpdate })
             delete forum.course
 
@@ -179,8 +182,24 @@ class ForumController {
 
     public async getMessages(req: CustomRequest, res: Response) {
         try {
-            const forumRepository = AppDataSource.getRepository(Forum)
-            const course_id = parseInt(req.params.course_id)
+            const forumRepository = AppDataSource.getRepository(Forum);
+            const userCourseRepository = AppDataSource.getRepository(UserCourse);
+            const course_id = parseInt(req.params.course_id);
+
+            // Ensure course is in scope: at least one enrolment has a learner in user's org/centre
+            if (req.user) {
+                const accessQb = userCourseRepository.createQueryBuilder('uc')
+                    .innerJoin('uc.learner_id', 'learner')
+                    .where("uc.course ->> 'course_id' = :cid", { cid: String(course_id) });
+                await applyLearnerScope(accessQb, req.user, 'learner');
+                const canAccess = await accessQb.getCount() > 0;
+                if (!canAccess) {
+                    return res.status(403).json({
+                        message: 'You do not have access to this course',
+                        status: false,
+                    });
+                }
+            }
 
             const qb = forumRepository.createQueryBuilder('forum')
                 .innerJoin('forum.course', 'course')

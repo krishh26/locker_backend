@@ -15,8 +15,7 @@ import { Raw, In } from 'typeorm';
 import { AssignmentSignature } from "../entity/AssignmentSignature.entity";
 import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
 import { UserEmployer } from '../entity/UserEmployers.entity';
-import { addUserOrganisationFilter } from "../util/organisationFilter";
-import { getAccessibleOrganisationIds } from '../util/organisationFilter';
+import { addUserScopeFilter, getAccessibleOrganisationIds, getAccessibleCentreIds, resolveUserRole } from "../util/organisationFilter";
 
 class UserController {
 
@@ -211,12 +210,12 @@ class UserController {
                 });
             }
 
-            if (req.tokenrole !== UserRole.Admin && (Boolean(roles?.length) || Boolean(email) || Boolean(mobile) || Boolean(sso_id))) {
-                return res.status(401).json({
-                    message: "Admin role is required",
-                    status: false
-                })
-            }
+            // if (req.tokenrole !== UserRole.Admin && (Boolean(roles?.length) || Boolean(email) || Boolean(mobile) || Boolean(sso_id))) {
+            //     return res.status(401).json({
+            //         message: "Admin role is required",
+            //         status: false
+            //     })
+            // }
 
             const userEmployerRepo = AppDataSource.getRepository(UserEmployer);
             const userRepository = AppDataSource.getRepository(User)
@@ -584,9 +583,9 @@ class UserController {
                 .leftJoinAndSelect('user.userEmployers', 'userEmployers')
                 .leftJoinAndSelect('userEmployers.employer', 'employer');
 
-            // Add organization filtering
+            // Apply scope: organisation for OrgAdmin/AccountManager, centre for CentreAdmin (from UserCentre)
             if (req.user) {
-                await addUserOrganisationFilter(qb, req.user);
+                await addUserScopeFilter(qb, req.user, 'user');
             }
 
             if (req.query.role) {

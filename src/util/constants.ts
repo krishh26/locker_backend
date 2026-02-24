@@ -121,7 +121,7 @@ export const rolePriority = [
     UserRole.AccountManager,
     UserRole.OrganisationAdmin,
     UserRole.CentreAdmin,
-    UserRole.Admin,
+    UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin,
     UserRole.Trainer,
     UserRole.LineManager,
     UserRole.Employer,

@@ -22,21 +22,20 @@ export function resolveUserRole(user: any): string | undefined {
 }
 
 export async function getAccessibleOrganisationIds(user: any): Promise<number[] | null> {
-    console.log(user.user_id)
     const role = resolveUserRole(user);
     if (role === UserRole.MasterAdmin) {
         return null; // All access
     }
-    
+
     if (role === UserRole.AccountManager) {
         // Fetch fresh from database for AccountManager
         const accountManagerRepository = AppDataSource.getRepository(AccountManager);
         const amoRepository = AppDataSource.getRepository(AccountManagerOrganisation);
-        
+
         const accountManager = await accountManagerRepository.findOne({
             where: { user_id: user.user_id }
         });
-        
+
         if (accountManager) {
             const assignments = await amoRepository.find({
                 where: { account_manager_id: accountManager.id }
@@ -45,7 +44,7 @@ export async function getAccessibleOrganisationIds(user: any): Promise<number[] 
         }
         return [];
     }
-    
+
     if (role === UserRole.OrganisationAdmin) {
         // OrganisationAdmin: get their organisation_id from UserOrganisation (should be single org)
         const userOrganisationRepository = AppDataSource.getRepository(UserOrganisation);
@@ -54,32 +53,24 @@ export async function getAccessibleOrganisationIds(user: any): Promise<number[] 
         });
         return userOrganisations.map(uo => uo.organisation_id);
     }
-    console.log("role", role)
     if (role === UserRole.CentreAdmin) {
-    const userCentreRepository = AppDataSource.getRepository(UserCentre);
-    const centreRepository = AppDataSource.getRepository(Centre);
+        const userCentreRepository = AppDataSource.getRepository(UserCentre);
+        const centreRepository = AppDataSource.getRepository(Centre);
 
-    // Get assigned centres
-    const userCentres = await userCentreRepository.find({
-        where: { user_id: user.user_id }
-    });
-    console.log(userCentres)
-    if (!userCentres.length) {
-        return [];
+        const userCentres = await userCentreRepository.find({
+            where: { user_id: user.user_id }
+        });
+        if (!userCentres.length) {
+            return [];
+        }
+
+        const centreIds = userCentres.map(uc => uc.centre_id);
+        const centres = await centreRepository.find({
+            where: { id: In(centreIds) }
+        });
+        const orgIds = [...new Set(centres.map(c => c.organisation_id))];
+        return orgIds;
     }
-
-    const centreIds = userCentres.map(uc => uc.centre_id);
-    console.log(centreIds)
-    // Fetch organisation_ids from centres
-    const centres = await centreRepository.find({
-        where: { id: In(centreIds) }
-    });
-    console.log(centres)
-    // Return unique organisation ids
-    const orgIds = [...new Set(centres.map(c => c.organisation_id))];
-    console.log(orgIds)
-    return orgIds;
-}
     // For other roles (including CentreAdmin), fetch from UserOrganisation
     const userOrganisationRepository = AppDataSource.getRepository(UserOrganisation);
     const userOrganisations = await userOrganisationRepository.find({
@@ -129,6 +120,33 @@ export async function getAccessibleCentreIds(user: any): Promise<number[] | null
         .getMany();
 
     return centresInOrgs.map(c => c.id);
+}
+
+/**
+ * Get accessible user IDs for filtering entities that are scoped by user (e.g. CPD, RiskRating trainer).
+ * - MasterAdmin: null (all users).
+ * - CentreAdmin: user IDs assigned to their centres via UserCentre.
+ * - OrganisationAdmin / AccountManager: user IDs in their organisation(s) via UserOrganisation.
+ */
+export async function getAccessibleUserIds(user: any): Promise<number[] | null> {
+    const role = resolveUserRole(user);
+    if (role === UserRole.MasterAdmin) return null;
+
+    if (role === UserRole.CentreAdmin) {
+        return getAccessibleCentreAdminUserIds(user);
+    }
+
+    const orgIds = await getAccessibleOrganisationIds(user);
+    if (orgIds === null) return null;
+    if (orgIds.length === 0) return [];
+
+    const userOrgRepository = AppDataSource.getRepository(UserOrganisation);
+    const rows = await userOrgRepository
+        .createQueryBuilder('uo')
+        .select('DISTINCT uo.user_id', 'user_id')
+        .where('uo.organisation_id IN (:...orgIds)', { orgIds })
+        .getRawMany();
+    return rows.map((r: { user_id: number }) => r.user_id);
 }
 
 /**
@@ -223,18 +241,18 @@ export async function addOrganisationFilter(
     organisationColumn: string = 'organisation_id'
 ): Promise<void> {
     const accessibleIds = await getAccessibleOrganisationIds(user);
-    
+
     if (accessibleIds === null) {
         // MasterAdmin - no filter needed
         return;
     }
-    
+
     if (accessibleIds.length === 0) {
         // No organizations assigned - return empty result
         qb.andWhere(`1 = 0`); // Always false condition
         return;
     }
-    
+
     qb.andWhere(`${organisationColumn} IN (:...ids)`, { ids: accessibleIds });
 }
 
@@ -249,21 +267,67 @@ export async function addUserOrganisationFilter(
     user: any
 ): Promise<void> {
     const accessibleIds = await getAccessibleOrganisationIds(user);
-    
+
     if (accessibleIds === null) {
         // MasterAdmin - no filter needed
         return;
     }
-    
+
     if (accessibleIds.length === 0) {
         // No organizations assigned - return empty result
         qb.andWhere(`1 = 0`); // Always false condition
         return;
     }
-    
+
     // Join with UserOrganisation and filter by organisation_id
     qb.leftJoin('user.userOrganisations', 'userOrganisation')
-      .andWhere('userOrganisation.organisation_id IN (:...ids)', { ids: accessibleIds });
+        .andWhere('userOrganisation.organisation_id IN (:...ids)', { ids: accessibleIds });
+}
+
+/**
+ * Apply scope to User list query based on role. Use for User List API only.
+ * - MasterAdmin: no filter.
+ * - OrganisationAdmin: users in their organisation(s) via UserOrganisation.
+ * - CentreAdmin: only users assigned to their centre(s) via UserCentre (no cross-centre).
+ * - AccountManager: users in their assigned organisation(s) via UserOrganisation.
+ * @param qb - TypeORM QueryBuilder for User entity (alias must be 'user' or pass userAlias)
+ * @param user - User object from request (req.user)
+ * @param userAlias - Alias of the User entity in the query (default 'user')
+ */
+export async function addUserScopeFilter(
+    qb: SelectQueryBuilder<any>,
+    user: any,
+    userAlias: string = 'user'
+): Promise<void> {
+    const role = resolveUserRole(user);
+
+    if (role === UserRole.MasterAdmin) {
+        return;
+    }
+
+    if (role === UserRole.CentreAdmin) {
+        const centreIds = await getAccessibleCentreIds(user);
+        if (centreIds === null || centreIds.length === 0) {
+            qb.andWhere('1 = 0');
+            return;
+        }
+        // Only users that have at least one UserCentre row for the admin's assigned centres
+        qb.andWhere(
+            `${userAlias}.user_id IN (SELECT uc.user_id FROM user_centres uc WHERE uc.centre_id IN (:...centreIds))`,
+            { centreIds }
+        );
+        return;
+    }
+
+    // OrganisationAdmin, AccountManager, and fallback: filter by organisation via UserOrganisation
+    const accessibleIds = await getAccessibleOrganisationIds(user);
+    if (accessibleIds === null) return;
+    if (accessibleIds.length === 0) {
+        qb.andWhere('1 = 0');
+        return;
+    }
+    qb.leftJoin(`${userAlias}.userOrganisations`, 'userOrganisation')
+        .andWhere('userOrganisation.organisation_id IN (:...ids)', { ids: accessibleIds });
 }
 
 export type ScopeOptions = {
@@ -356,6 +420,24 @@ export async function applyScope(
 }
 
 /**
+ * Apply scope filter to entities that are scoped by user_id (e.g. CPD, RiskRating trainer_id).
+ * Adds WHERE userIdColumn IN (accessible user IDs). Use when entity has no organisation_id/centre_id.
+ */
+export async function applyUserScopedFilter(
+    qb: SelectQueryBuilder<any>,
+    user: any,
+    userIdColumn: string
+): Promise<void> {
+    const userIds = await getAccessibleUserIds(user);
+    if (userIds === null) return;
+    if (userIds.length === 0) {
+        qb.andWhere('1 = 0');
+        return;
+    }
+    qb.andWhere(`${userIdColumn} IN (:...userIds)`, { userIds });
+}
+
+/**
  * Apply scope filter to Learner query builder. Wraps applyScope with learner-specific logic.
  */
 export async function applyLearnerScope(
@@ -378,8 +460,8 @@ export async function applyLearnerScope(
         return;
     }
     qb.leftJoin(`${learnerAlias}.user_id`, 'learnerUser')
-      .leftJoin('learnerUser.userOrganisations', 'userOrganisation')
-      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds });
+        .leftJoin('learnerUser.userOrganisations', 'userOrganisation')
+        .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds });
 
     const centreAdminUserIds = await getAccessibleCentreAdminUserIds(user);
     if (centreAdminUserIds !== null && centreAdminUserIds.length > 0) {
@@ -399,7 +481,7 @@ export async function validateCentreOrganisation(centreId: number, organisationI
         where: { id: centreId },
         relations: ['organisation']
     });
-    
+
     if (!centre) return false;
     return centre.organisation_id === organisationId;
 }
@@ -412,7 +494,7 @@ export async function validateEmployerOrganisation(employerId: number, organisat
     const employer = await employerRepository.findOne({
         where: { employer_id: employerId }
     });
-    
+
     if (!employer) return false;
     return employer.organisation_id === organisationId;
 }
@@ -432,12 +514,12 @@ export async function validateLearnerOrganisationCentre(
     if (!centreValid) {
         return { valid: false, error: 'Centre does not belong to the specified organisation' };
     }
-    
+
     // Validate employer belongs to organisation
     const employerValid = await validateEmployerOrganisation(employerId, organisationId);
     if (!employerValid) {
         return { valid: false, error: 'Employer does not belong to the specified organisation' };
     }
-    
+
     return { valid: true };
 }

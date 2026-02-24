@@ -1319,29 +1319,35 @@ class LearnerController {
         }
     }
 
-    public async getLearnerExcel(req: Request, res: Response): Promise<Response> {
+    public async getLearnerExcel(req: CustomRequest, res: Response): Promise<Response> {
         try {
             const learnerRepository = AppDataSource.getRepository(Learner);
             const userCourseRepository = AppDataSource.getRepository(UserCourse);
             const workbook = XLSX.utils.book_new();
 
-
-            let usercourses = await userCourseRepository.createQueryBuilder("user_course")
+            const qbUserCourse = userCourseRepository.createQueryBuilder("user_course")
+                .leftJoin('user_course.learner_id', 'learner')
                 .leftJoinAndSelect(`user_course.learner_id`, `learner_id`)
                 .leftJoinAndSelect(`user_course.trainer_id`, `trainer_id`)
                 .leftJoinAndSelect(`user_course.IQA_id`, `IQA_id`)
                 .leftJoinAndSelect(`user_course.LIQA_id`, `LIQA_id`)
                 .leftJoinAndSelect(`user_course.EQA_id`, `EQA_id`)
                 .leftJoinAndSelect(`user_course.employer_id`, `employer_id`)
-                .leftJoinAndSelect(`employer_id.employer`, `employer`)
-                .getMany();
+                .leftJoinAndSelect(`employer_id.employer`, `employer`);
+            if (req.user) {
+                await applyLearnerScope(qbUserCourse, req.user, 'learner');
+            }
+            let usercourses = await qbUserCourse.getMany();
 
-            const learners = await learnerRepository.createQueryBuilder("learner")
+            const qbLearner = learnerRepository.createQueryBuilder("learner")
                 .withDeleted()
                 .leftJoinAndSelect('learner.user_id', "user_id")
                 .orderBy('CASE WHEN learner.deleted_at IS NULL THEN 0 ELSE 1 END', 'ASC')
-                .addOrderBy("learner.learner_id", "ASC")
-                .getMany();
+                .addOrderBy("learner.learner_id", "ASC");
+            if (req.user) {
+                await applyLearnerScope(qbLearner, req.user, 'learner');
+            }
+            const learners = await qbLearner.getMany();
 
 
             let formattedLearners
@@ -1458,18 +1464,20 @@ class LearnerController {
         }
     }
 
-    public async getAdminDashboard(req: Request, res: Response): Promise<Response> {
+    public async getAdminDashboard(req: CustomRequest, res: Response): Promise<Response> {
         try {
             const learnerRepository = AppDataSource.getRepository(Learner);
-            const userCourseRepository = AppDataSource.getRepository(UserCourse);
 
-            const counts = await learnerRepository
+            const qb = learnerRepository
                 .createQueryBuilder("learner")
                 .select([
                     "COUNT(*) FILTER (WHERE learner.deleted_at IS NULL) AS activeLearnerCount",
                     "COUNT(*) FILTER (WHERE learner.deleted_at IS NOT NULL) AS archivedLearnerCount"
-                ])
-                .getRawOne();
+                ]);
+            if (req.user) {
+                await applyLearnerScope(qb, req.user, 'learner');
+            }
+            const counts = await qb.getRawOne();
 
             return res.status(200).json({
                 message: "Dashboard data fetched successfully",

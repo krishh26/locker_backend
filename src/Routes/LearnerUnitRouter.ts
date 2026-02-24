@@ -8,7 +8,7 @@ const learnerUnitRouter = express.Router();
 const Controller = new LearnerUnitController();
 
 // Save selected units (activate/deactivate)
-learnerUnitRouter.post('/', authorizeRoles(UserRole.Admin, UserRole.Trainer, UserRole.Learner), Controller.saveSelectedUnits);
+learnerUnitRouter.post('/', authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin, UserRole.Trainer, UserRole.Learner), Controller.saveSelectedUnits);
 // Get all units of a course
 learnerUnitRouter.get('/courses/:course_id/units', Controller.getCourseUnits);
 

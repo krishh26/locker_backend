@@ -9,7 +9,7 @@ const AssignmentRoutes = express.Router();
 
 const Controller = new AssignmentController();
 
-AssignmentRoutes.post('/create', authorizeRoles(UserRole.Learner, UserRole.Admin), singleFileUpload("file"), Controller.CreateAssignment);
+AssignmentRoutes.post('/create', authorizeRoles(UserRole.Learner, UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), singleFileUpload("file"), Controller.CreateAssignment);
 AssignmentRoutes.get("/list", authorizeRoles(), paginationMiddleware, Controller.getAssignmentBycourse);
 AssignmentRoutes.get("/list-with-signatures", authorizeRoles(), paginationMiddleware, Controller.listWithSignatures);
 AssignmentRoutes.patch("/update/:id", authorizeRoles(), Controller.updateAssignment);
