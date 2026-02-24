@@ -5,6 +5,14 @@ import { WellbeingResource, WellbeingResourceType } from '../entity/WellbeingRes
 import { LearnerResourceActivity } from '../entity/LearnerResourceActivity.entity';
 import { uploadToS3 } from '../util/aws';
 import { User } from '../entity/User.entity';
+import { getAccessibleOrganisationIds } from '../util/organisationFilter';
+
+async function canAccessWellbeingResource(user: CustomRequest['user'], resource: WellbeingResource): Promise<boolean> {
+    if (!user) return false;
+    const orgIds = await getAccessibleOrganisationIds(user);
+    if (orgIds === null) return true;
+    return resource.organisation_id != null && orgIds.includes(resource.organisation_id);
+}
 
 export class WellbeingResourceController {
     // Admin: Add Resource
@@ -37,6 +45,11 @@ export class WellbeingResourceController {
                 return res.status(400).json({ message: 'Invalid resourceType', status: false });
             }
             console.log(resourceType, location, description)
+            let organisation_id: number | null = (req.body as any).organisation_id ?? null;
+            if (organisation_id == null && req.user) {
+                const accessibleIds = await getAccessibleOrganisationIds(req.user);
+                if (accessibleIds != null && accessibleIds.length > 0) organisation_id = accessibleIds[0];
+            }
             const entity = repo.create({
                 resourceType,
                 location,
@@ -45,6 +58,7 @@ export class WellbeingResourceController {
                 createdBy: String(req.user.user_id),
                 updatedBy: null,
                 resource_name: resource_name || null,
+                organisation_id,
             });
             console.log(repo.exists)
             const saved = await repo.save(entity);
@@ -64,6 +78,9 @@ export class WellbeingResourceController {
             const repo = AppDataSource.getRepository(WellbeingResource);
             const existing = await repo.findOne({ where: { id } });
             if (!existing) return res.status(404).json({ message: 'Resource not found', status: false });
+            if (!(await canAccessWellbeingResource(req.user, existing))) {
+                return res.status(403).json({ message: 'You do not have access to this resource', status: false });
+            }
 
             let location: string = existing.location;
 
@@ -105,7 +122,7 @@ export class WellbeingResourceController {
         try {
             const { search } = req.query as any;
             const repo = AppDataSource.getRepository(WellbeingResource);
-    
+
             const qb = repo.createQueryBuilder('r')
                 .leftJoin(User, 'u', 'u.user_id = CAST(r.createdBy AS INT)')
                 .addSelect(['u.first_name', 'u.last_name'])
@@ -120,11 +137,21 @@ export class WellbeingResourceController {
                     'lu.last_name AS lu_last_name',
                     'lu.user_name AS lu_user_name'
                 ]);
-    
-            if (search) {
-                qb.where('r.location ILIKE :search', { search: `%${search}%` });
+
+            if (req.user) {
+                const accessibleIds = await getAccessibleOrganisationIds(req.user);
+                if (accessibleIds !== null) {
+                    if (accessibleIds.length === 0) {
+                        return res.status(200).json({ message: 'OK', status: true, data: [] });
+                    }
+                    qb.andWhere('r.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+                }
             }
-    
+
+            if (search) {
+                qb.andWhere('r.location ILIKE :search', { search: `%${search}%` });
+            }
+
             const raws = await qb.orderBy('r.createdAt', 'DESC').getRawMany();
     
             // Group feedbacks under each resource
@@ -178,6 +205,9 @@ export class WellbeingResourceController {
             const repo = AppDataSource.getRepository(WellbeingResource);
             const resource = await repo.findOne({ where: { id } });
             if (!resource) return res.status(404).json({ message: 'Resource not found', status: false });
+            if (!(await canAccessWellbeingResource(req.user, resource))) {
+                return res.status(403).json({ message: 'You do not have access to this resource', status: false });
+            }
             resource.isActive = !resource.isActive;
             resource.updatedBy = String(req.user.user_id);
             await repo.save(resource);

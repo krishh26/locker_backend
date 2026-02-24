@@ -2,6 +2,7 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateCol
 import { User } from './User.entity';
 import { Course } from './Course.entity';
 import { Assignment } from './Assignment.entity';
+import { AssignmentSignature } from './AssignmentSignature.entity';
 
 @Entity('assignment_mapping')
 export class AssignmentMapping {
@@ -16,6 +17,9 @@ export class AssignmentMapping {
   @ManyToOne(() => Course)
   @JoinColumn({ name: 'course_id' })
   course: Course;
+
+  @OneToMany(() => AssignmentSignature, (sig) => sig.mapping)
+  signatures: AssignmentSignature[];
 
   @Column({ type: 'varchar' })
   unit_code: string; // unit_ref / unit id

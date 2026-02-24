@@ -8,7 +8,7 @@ import { deleteFromS3, uploadToS3 } from "../util/aws";
 import { Course } from "../entity/Course.entity";
 import { sendDataToUser } from "../socket/socket";
 import { User } from "../entity/User.entity";
-import { getAccessibleOrganisationIds, getAccessibleCentreAdminUserIds, applyLearnerScope } from "../util/organisationFilter";
+import { getAccessibleOrganisationIds, getAccessibleCentreAdminUserIds, applyLearnerScope, applyScope } from "../util/organisationFilter";
 
 class ForumController {
     constructor() {
@@ -327,6 +327,11 @@ class ForumController {
                 } else {
                     query.where('0 = 1'); // This ensures no data is returned when courseIds is empty
                 }
+            }
+
+            // Restrict courses to user's accessible organisation(s) (multi-tenant)
+            if (req.user) {
+                await applyScope(query, req.user, 'course', { organisationOnly: true });
             }
 
             const chatList = await query.getRawMany();

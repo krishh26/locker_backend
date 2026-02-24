@@ -1129,6 +1129,10 @@ class UserController {
                 .andWhere('line_manager.deleted_at IS NULL')
                 .orderBy('line_manager.first_name', 'ASC');
 
+            if (req.user) {
+                await addUserScopeFilter(queryBuilder, req.user, 'line_manager');
+            }
+
             // Filter by specific line manager if provided
             if (line_manager_id) {
                 queryBuilder.andWhere('line_manager.user_id = :line_manager_id', { line_manager_id });
@@ -1158,22 +1162,24 @@ class UserController {
                 });
             }
 
+            const accessibleOrgIds = req.user ? await getAccessibleOrganisationIds(req.user) : null;
+
             // Get linked users and learners for each line manager
             const caseloadData = await Promise.all(lineManagers.map(async (lineManager) => {
-                // Get users managed by this line manager (only employers and trainers)
-                const managedUsers = await userRepository.find({
-                    where: { 
-                        line_manager: { user_id: lineManager.user_id },
-                        deleted_at: null 
-                    },
-                    select: [
-                        'user_id', 'user_name', 'first_name', 'last_name', 
-                        'email', 'mobile', 'roles', 'status', 'created_at'
-                    ]
-                });
+                // Get users managed by this line manager (only employers and trainers), scoped by org/centre
+                const managedUsersQb = userRepository.createQueryBuilder('user')
+                    .where('user.line_manager_id = :line_manager_id', { line_manager_id: lineManager.user_id })
+                    .andWhere('user.deleted_at IS NULL')
+                    .select([
+                        'user.user_id', 'user.user_name', 'user.first_name', 'user.last_name',
+                        'user.email', 'user.mobile', 'user.roles', 'user.status', 'user.created_at'
+                    ]);
+                if (req.user) {
+                    await addUserScopeFilter(managedUsersQb, req.user, 'user');
+                }
+                const managedUsers = await managedUsersQb.getMany();
 
-                // Filter to only include employers and trainers
-                const employersAndTrainers = managedUsers.filter(user => 
+                const employersAndTrainers = managedUsers.filter(user =>
                     user.roles.includes(UserRole.Employer) || user.roles.includes(UserRole.Trainer)
                 );
 
@@ -1197,25 +1203,33 @@ class UserController {
                         const employerIds = employers.map(emp => emp.employer_id);
 
                         if (employerIds.length > 0) {
-                            // Get all learners under these employers
-                            let learnerQueryBuilder = learnerRepository.createQueryBuilder('learner')
+                            const learnerQb = learnerRepository.createQueryBuilder('learner')
                                 .leftJoinAndSelect('learner.user_id', 'user')
                                 .leftJoinAndSelect('learner.employer_id', 'employer')
                                 .leftJoinAndSelect('learner.funding_band', 'funding_band')
                                 .where('learner.employer_id IN (:...employerIds)', { employerIds })
                                 .andWhere('learner.deleted_at IS NULL');
 
-                            managedLearners = await learnerQueryBuilder
-                                .select([
-                                    'learner.learner_id', 'learner.first_name', 'learner.last_name',
-                                    'learner.email', 'learner.mobile', 'learner.job_title',
-                                    'learner.created_at', 'learner.manager_name',
-                                    'user.user_id', 'user.user_name',
-                                    'employer.employer_id', 'employer.employer_name',
-                                    'funding_band.id', 'funding_band.band_name', 'funding_band.amount'
-                                ])
-                                .orderBy('learner.first_name', 'ASC')
-                                .getMany();
+                            if (accessibleOrgIds !== null) {
+                                if (accessibleOrgIds.length === 0) {
+                                    managedLearners = [];
+                                } else {
+                                    learnerQb.andWhere('learner.organisation_id IN (:...orgIds)', { orgIds: accessibleOrgIds });
+                                }
+                            }
+                            if (managedLearners.length === 0 && (accessibleOrgIds === null || (accessibleOrgIds?.length ?? 0) > 0)) {
+                                managedLearners = await learnerQb
+                                    .select([
+                                        'learner.learner_id', 'learner.first_name', 'learner.last_name',
+                                        'learner.email', 'learner.mobile', 'learner.job_title',
+                                        'learner.created_at', 'learner.manager_name',
+                                        'user.user_id', 'user.user_name',
+                                        'employer.employer_id', 'employer.employer_name',
+                                        'funding_band.id', 'funding_band.band_name', 'funding_band.amount'
+                                    ])
+                                    .orderBy('learner.first_name', 'ASC')
+                                    .getMany();
+                            }
                         }
                     }
                 }

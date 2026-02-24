@@ -17,6 +17,9 @@ export class SessionType {
   @Column({ type: "int", default: 0 })
   order: number;
 
+  @Column({ name: "organisation_id", type: "int", nullable: true })
+  organisation_id: number | null;
+
   @CreateDateColumn({ type: "timestamp" })
   created_at: Date;
 

@@ -1,11 +1,21 @@
-import { Request, Response } from "express";
+import { Response } from "express";
 import { AppDataSource } from "../data-source";
 import { SessionType } from "../entity/SessionType.entity";
+import { CustomRequest } from "../util/Interface/expressInterface";
+import { getAccessibleOrganisationIds } from "../util/organisationFilter";
+
+async function canAccessSessionType(user: CustomRequest["user"], item: SessionType): Promise<boolean> {
+  if (!user) return false;
+  const orgIds = await getAccessibleOrganisationIds(user);
+  if (orgIds === null) return true;
+  if (item.organisation_id == null) return true;
+  return orgIds.includes(item.organisation_id);
+}
 
 export class SessionTypeController {
 
   // ➕ Create
-  public async create(req: Request, res: Response) {
+  public async create(req: CustomRequest, res: Response) {
     try {
       const { name, is_off_the_job, active } = req.body;
 
@@ -21,11 +31,17 @@ export class SessionTypeController {
         .select("MAX(session_types.order)", "max")
         .getRawOne();
 
+      let organisation_id: number | null = req.body.organisation_id ?? null;
+      if (organisation_id == null && req.user) {
+        const accessibleIds = await getAccessibleOrganisationIds(req.user);
+        if (accessibleIds != null && accessibleIds.length > 0) organisation_id = accessibleIds[0];
+      }
       const newItem = repo.create({
         name,
         is_off_the_job,
         active,
-        order: (maxOrder?.max || 0) + 1
+        order: (maxOrder?.max || 0) + 1,
+        organisation_id,
       });
 
       const saved = await repo.save(newItem);
@@ -37,7 +53,7 @@ export class SessionTypeController {
   }
 
   // ✏ Update
-  public async update(req: Request, res: Response) {
+  public async update(req: CustomRequest, res: Response) {
     try {
       const { id } = req.params;
       const data = req.body;
@@ -46,6 +62,9 @@ export class SessionTypeController {
       const item = await repo.findOne({ where: { id: parseInt(id) } });
 
       if (!item) return res.status(404).json({ message: "Not found", status: false });
+      if (!(await canAccessSessionType(req.user, item))) {
+        return res.status(403).json({ message: "You do not have access to this session type", status: false });
+      }
 
       repo.merge(item, data);
       const updated = await repo.save(item);
@@ -58,7 +77,7 @@ export class SessionTypeController {
   }
 
   // ❌ Delete (soft delete)
-  public async delete(req: Request, res: Response) {
+  public async delete(req: CustomRequest, res: Response) {
     try {
       const { id } = req.params;
 
@@ -66,6 +85,9 @@ export class SessionTypeController {
       const item = await repo.findOne({ where: { id: parseInt(id) } });
 
       if (!item) return res.status(404).json({ message: "Not found", status: false });
+      if (!(await canAccessSessionType(req.user, item))) {
+        return res.status(403).json({ message: "You do not have access to this session type", status: false });
+      }
 
       item.active = false;
       await repo.save(item);
@@ -78,11 +100,20 @@ export class SessionTypeController {
   }
 
   // 📌 List all (sorted by order)
-  public async list(req: Request, res: Response) {
+  public async list(req: CustomRequest, res: Response) {
     try {
       const repo = AppDataSource.getRepository(SessionType);
-      const data = await repo.find({ order: { order: "ASC" } });
-
+      const qb = repo.createQueryBuilder("st").orderBy("st.order", "ASC");
+      if (req.user) {
+        const orgIds = await getAccessibleOrganisationIds(req.user);
+        if (orgIds !== null) {
+          if (orgIds.length === 0) {
+            return res.status(200).json({ message: "Fetched successfully", status: true, data: [] });
+          }
+          qb.andWhere("(st.organisation_id IN (:...orgIds) OR st.organisation_id IS NULL)", { orgIds });
+        }
+      }
+      const data = await qb.getMany();
       return res.status(200).json({ message: "Fetched successfully", status: true, data });
 
     } catch (err) {
@@ -91,13 +122,16 @@ export class SessionTypeController {
   }
 
   // 🔼🔽 Reorder (move up/down)
-  public async reorder(req: Request, res: Response) {
+  public async reorder(req: CustomRequest, res: Response) {
     try {
       const { id, direction } = req.body; // "UP" or "DOWN"
       const repo = AppDataSource.getRepository(SessionType);
 
       const current = await repo.findOne({ where: { id } });
       if (!current) return res.status(404).json({ message: "Not found" });
+      if (!(await canAccessSessionType(req.user, current))) {
+        return res.status(403).json({ message: "You do not have access to this session type", status: false });
+      }
 
       const swapWith = await repo.findOne({
         where: direction === "UP"
@@ -107,6 +141,9 @@ export class SessionTypeController {
 
       if (!swapWith)
         return res.status(400).json({ message: "Reorder not possible" });
+      if (!(await canAccessSessionType(req.user, swapWith))) {
+        return res.status(403).json({ message: "You do not have access to this session type", status: false });
+      }
 
       [current.order, swapWith.order] = [swapWith.order, current.order];
 

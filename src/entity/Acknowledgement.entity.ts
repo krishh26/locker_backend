@@ -17,6 +17,9 @@ export class Acknowledgement {
     @Column({ type: 'varchar', nullable: true })
     fileUrl: string;
 
+    @Column({ name: 'organisation_id', type: 'int', nullable: true })
+    organisation_id: number | null;
+
     @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
     createdAt: Date;
 
