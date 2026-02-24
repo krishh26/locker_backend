@@ -15,8 +15,7 @@ import { Raw, In } from 'typeorm';
 import { AssignmentSignature } from "../entity/AssignmentSignature.entity";
 import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
 import { UserEmployer } from '../entity/UserEmployers.entity';
-import { addUserOrganisationFilter } from "../util/organisationFilter";
-import { getAccessibleOrganisationIds } from '../util/organisationFilter';
+import { addUserScopeFilter, getAccessibleOrganisationIds, getAccessibleCentreIds, resolveUserRole } from "../util/organisationFilter";
 
 class UserController {
 
@@ -149,6 +148,9 @@ class UserController {
                     },
                     userOrganisations: {
                         organisation: true
+                    },
+                    userCentres: {
+                        centre: true
                     }
                 }
             });
@@ -170,6 +172,10 @@ class UserController {
                 name: uo.organisation.name
             })) || [];
 
+            const assignedCentres = user.userCentres?.map(uc => ({
+                id: uc.centre.id,
+                name: uc.centre.name
+            })) || [];
             delete user.password;
 
             return res.status(200).json({
@@ -178,7 +184,8 @@ class UserController {
                 data: {
                     ...user,
                     assigned_employers: assignedEmployers,
-                    assigned_organisations: assignedOrganisations
+                    assigned_organisations: assignedOrganisations,
+                    assigned_centers: assignedCentres
                 }
             })
 
@@ -203,12 +210,12 @@ class UserController {
                 });
             }
 
-            if (req.tokenrole !== UserRole.Admin && (Boolean(roles?.length) || Boolean(email) || Boolean(mobile) || Boolean(sso_id))) {
-                return res.status(401).json({
-                    message: "Admin role is required",
-                    status: false
-                })
-            }
+            // if (req.tokenrole !== UserRole.Admin && (Boolean(roles?.length) || Boolean(email) || Boolean(mobile) || Boolean(sso_id))) {
+            //     return res.status(401).json({
+            //         message: "Admin role is required",
+            //         status: false
+            //     })
+            // }
 
             const userEmployerRepo = AppDataSource.getRepository(UserEmployer);
             const userRepository = AppDataSource.getRepository(User)
@@ -576,9 +583,9 @@ class UserController {
                 .leftJoinAndSelect('user.userEmployers', 'userEmployers')
                 .leftJoinAndSelect('userEmployers.employer', 'employer');
 
-            // Add organization filtering
+            // Apply scope: organisation for OrgAdmin/AccountManager, centre for CentreAdmin (from UserCentre)
             if (req.user) {
-                await addUserOrganisationFilter(qb, req.user);
+                await addUserScopeFilter(qb, req.user, 'user');
             }
 
             if (req.query.role) {
@@ -685,6 +692,9 @@ class UserController {
                     },
                     userOrganisations: {
                         organisation: true
+                    },
+                    userCentres: {
+                        centre: true
                     }
                 }
             });
@@ -732,6 +742,11 @@ class UserController {
                 name: uo.organisation.name
             })) || [];
 
+            const assignedCentres = user.userCentres?.map(uc => ({
+                id: uc.centre.id,
+                name: uc.centre.name
+            })) || [];
+
             // Add calculated fields for trainers
             let additionalFields = {};
             if (user.roles && user.roles.includes(UserRole.Trainer)) {
@@ -758,7 +773,8 @@ class UserController {
                     ...user,
                     ...additionalFields,
                     assigned_employers: assignedEmployers,
-                    assigned_organisations: assignedOrganisations
+                    assigned_organisations: assignedOrganisations,
+                    assigned_centers: assignedCentres
                 }
             })
 

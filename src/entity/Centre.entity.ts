@@ -1,6 +1,6 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, DeleteDateColumn, ManyToOne, JoinColumn, ManyToMany, JoinTable } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, DeleteDateColumn, ManyToOne, JoinColumn, OneToMany } from 'typeorm';
 import { Organisation } from './Organisation.entity';
-import { User } from './User.entity';
+import { UserCentre } from './UserCentre.entity';
 
 export enum CentreStatus {
     Active = 'active',
@@ -29,13 +29,8 @@ export class Centre {
     })
     status: CentreStatus;
 
-    @ManyToMany(() => User)
-    @JoinTable({
-        name: 'centre_admins',
-        joinColumn: { name: 'centre_id', referencedColumnName: 'id' },
-        inverseJoinColumn: { name: 'user_id', referencedColumnName: 'user_id' }
-    })
-    admins: User[];
+    @OneToMany(() => UserCentre, uc => uc.centre)
+    userCentres: UserCentre[];
 
     @DeleteDateColumn({ type: 'timestamp', nullable: true })
     deleted_at: Date;

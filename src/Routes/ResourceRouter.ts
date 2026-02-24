@@ -10,12 +10,12 @@ const ResourceRoute = express.Router();
 
 const Controller = new ResourceController();
 
-ResourceRoute.post("/create", authorizeRoles(UserRole.Admin, UserRole.Trainer), trimMiddleware, singleFileUpload("file"), Controller.createResource);
+ResourceRoute.post("/create", authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin, UserRole.Trainer), trimMiddleware, singleFileUpload("file"), Controller.createResource);
 ResourceRoute.get("/get/:id", Controller.getResource);
 ResourceRoute.get("/list", paginationMiddleware, Controller.getResources);
 ResourceRoute.patch("/update/:id", singleFileUpload("file"), Controller.updateResource);
 ResourceRoute.delete("/delete/:id", Controller.deleteResource);
-ResourceRoute.get("/list-by-course", authorizeRoles(UserRole.Admin, UserRole.EQA, UserRole.Employer, UserRole.IQA, UserRole.Learner, UserRole.Trainer), Controller.getCourseResources);
+ResourceRoute.get("/list-by-course", authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin, UserRole.EQA, UserRole.Employer, UserRole.IQA, UserRole.Learner, UserRole.Trainer), Controller.getCourseResources);
 
 
 export default ResourceRoute;

@@ -6,6 +6,7 @@ import { RiskRating } from '../entity/RiskRating.entity';
 import { User } from '../entity/User.entity';
 import { Course } from '../entity/Course.entity';
 import { UserRole } from '../util/constants';
+import { getAccessibleOrganisationIds, getAccessibleCentreIds, resolveUserRole } from '../util/organisationFilter';
 
 class RiskRatingController {
 
@@ -158,6 +159,19 @@ class RiskRatingController {
                 .where('risk_rating.is_active = :is_active', { is_active: true })
                 .orderBy('risk_rating.created_at', 'DESC');
 
+            if (req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user);
+                    if (centreIds === null || centreIds.length === 0) queryBuilder.andWhere('1 = 0');
+                    else queryBuilder.innerJoin('trainer.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                } else {
+                    const orgIds = await getAccessibleOrganisationIds(req.user);
+                    if (orgIds === null || orgIds.length === 0) queryBuilder.andWhere('1 = 0');
+                    else queryBuilder.innerJoin('trainer.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
+                }
+            }
+
             // Apply filters
             if (trainer_id) {
                 queryBuilder.andWhere('trainer.user_id = :trainer_id', { trainer_id });
@@ -226,7 +240,7 @@ class RiskRatingController {
         }
     }
 
-    // GET /api/v1/risk-rating/:id → get single risk rating by id
+    // GET /api/v1/risk-rating/:id → get single risk rating by id (scoped)
     public async getRiskRatingById(req: CustomRequest, res: Response) {
         try {
             const { id } = req.params;
@@ -239,11 +253,24 @@ class RiskRatingController {
             }
 
             const riskRatingRepository = AppDataSource.getRepository(RiskRating);
+            const qb = riskRatingRepository.createQueryBuilder('risk_rating')
+                .leftJoinAndSelect('risk_rating.trainer', 'trainer')
+                .where('risk_rating.id = :id', { id: parseInt(id) });
 
-            const riskRating = await riskRatingRepository.findOne({
-                where: { id: parseInt(id) },
-                relations: ['trainer']
-            });
+            if (req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user);
+                    if (centreIds === null || centreIds.length === 0) return res.status(404).json({ message: 'Risk rating not found', status: false });
+                    qb.innerJoin('trainer.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                } else {
+                    const orgIds = await getAccessibleOrganisationIds(req.user);
+                    if (orgIds === null || orgIds.length === 0) return res.status(404).json({ message: 'Risk rating not found', status: false });
+                    qb.innerJoin('trainer.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
+                }
+            }
+
+            const riskRating = await qb.getOne();
 
             if (!riskRating) {
                 return res.status(404).json({

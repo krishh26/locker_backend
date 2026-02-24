@@ -16,5 +16,8 @@ CentreRoutes.post('/:id/activate', authorizeRoles(), Controller.ActivateCentre);
 CentreRoutes.post('/:id/suspend', authorizeRoles(), Controller.SuspendCentre);
 CentreRoutes.post('/:id/assign-admin', authorizeRoles(), trimMiddleware, Controller.AssignAdminToCentre);
 CentreRoutes.post('/:id/remove-admin', authorizeRoles(), trimMiddleware, Controller.RemoveAdminFromCentre);
+CentreRoutes.put('/:id/admins', authorizeRoles(), trimMiddleware, Controller.SetCentreAdmins);
+CentreRoutes.get('/by-user/:userId', authorizeRoles(), Controller.GetUserCentres);
+CentreRoutes.get('/:id/users', authorizeRoles(), Controller.GetCentreUsers);
 
 export default CentreRoutes;

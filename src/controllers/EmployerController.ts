@@ -7,6 +7,7 @@ import { sendPasswordByEmail } from "../util/mailSend";
 import { CustomRequest } from "../util/Interface/expressInterface";
 import { Employer } from "../entity/Employer.entity";
 import { UserRole } from "../util/constants";
+import { applyScope, applyLearnerScope, canAccessOrganisation } from "../util/organisationFilter";
 
 
 class EmployerController {
@@ -37,7 +38,8 @@ class EmployerController {
                 assessment_date,
                 assessment_renewal_date,
                 insurance_renewal_date,
-                file
+                file,
+                organisation_id
             } = req.body
             if (!employer_name ||
                 !msi_employer_id ||
@@ -49,6 +51,18 @@ class EmployerController {
                 !email) {
                 return res.status(400).json({
                     message: "All Field Required",
+                    status: false
+                })
+            }
+            if (!organisation_id) {
+                return res.status(400).json({
+                    message: "organisation_id is required",
+                    status: false
+                })
+            }
+            if (req.user && !(await canAccessOrganisation(req.user, organisation_id))) {
+                return res.status(403).json({
+                    message: "You do not have access to create employers in this organisation",
                     status: false
                 })
             }
@@ -70,6 +84,7 @@ class EmployerController {
             let employer = await employerRepository.save(employerRepository.create({
                 employer_name,
                 msi_employer_id,
+                organisation_id,
                 business_department,
                 business_location,
                 branch_code,
@@ -129,7 +144,7 @@ class EmployerController {
         }
     }
 
-    public async getEmployerList(req: Request, res: Response): Promise<Response> {
+    public async getEmployerList(req: CustomRequest, res: Response): Promise<Response> {
         try {
             const employerRepository = AppDataSource.getRepository(Employer);
 
@@ -174,19 +189,24 @@ class EmployerController {
                 qb.andWhere("(user.email ILIKE :keyword OR employer.employer_name ILIKE :keyword)", { keyword: `%${req.query.keyword}%` });
             }
 
+            if (req.user) {
+                await applyScope(qb, req.user, "employer", { organisationOnly: true });
+            }
+
             const [employer, count] = await qb
                 .skip(Number(req.pagination.skip))
                 .take(Number(req.pagination.limit))
                 .orderBy("employer.created_at", "ASC")
                 .getManyAndCount();
 
-            // Get learner counts for each employer
+            // Get learner counts for each employer (scoped so CentreAdmin only counts learners in their centres)
             const learnerRepository = AppDataSource.getRepository(Learner);
             const employerData = await Promise.all(employer.map(async (emp) => {
-                const learnerCount = await learnerRepository
+                const qb = learnerRepository
                     .createQueryBuilder("learner")
-                    .where("learner.employer_id = :id", { id: emp.employer_id })
-                    .getCount();
+                    .where("learner.employer_id = :id", { id: emp.employer_id });
+                if (req.user) await applyLearnerScope(qb, req.user, "learner");
+                const learnerCount = await qb.getCount();
 
                 return {
                     ...emp,
@@ -260,13 +280,22 @@ class EmployerController {
                     email,
                     assessment_date,
                     assessment_renewal_date,
-                    insurance_renewal_date
+                    insurance_renewal_date,
+                    organisation_id
                 } = employerData;
 
                 try {
                     // Validate required fields (all from createEmployer except file)
                     if (!employer_name || !msi_employer_id || !address_1 || !address_2 || !city || !country || !postal_code || !email) {
                         errors.push({ index: i, email: email || 'unknown', error: "Missing required fields" });
+                        continue;
+                    }
+                    if (!organisation_id) {
+                        errors.push({ index: i, email: email || 'unknown', error: "organisation_id is required" });
+                        continue;
+                    }
+                    if (req.user && !(await canAccessOrganisation(req.user, organisation_id))) {
+                        errors.push({ index: i, email: email || 'unknown', error: "No access to this organisation" });
                         continue;
                     }
 
@@ -286,6 +315,7 @@ class EmployerController {
                         employerRepository.create({
                             employer_name,
                             msi_employer_id,
+                            organisation_id,
                             business_department,
                             business_location,
                             branch_code,
@@ -353,7 +383,7 @@ class EmployerController {
             });
         }
     }
-    public async updateEmployer(req: Request, res: Response): Promise<Response> {
+    public async updateEmployer(req: CustomRequest, res: Response): Promise<Response> {
         try {
             const employerId: number = parseInt(req.params.id);
 
@@ -365,6 +395,13 @@ class EmployerController {
             if (!existingEmployer) {
                 return res.status(404).json({
                     message: 'Employer not found',
+                    status: false,
+                });
+            }
+
+            if (req.user && existingEmployer.organisation_id != null && !(await canAccessOrganisation(req.user, existingEmployer.organisation_id))) {
+                return res.status(403).json({
+                    message: 'You do not have access to this employer',
                     status: false,
                 });
             }
@@ -403,7 +440,7 @@ class EmployerController {
         }
     }
 
-    public async deleteEmployer(req: Request, res: Response): Promise<Response> {
+    public async deleteEmployer(req: CustomRequest, res: Response): Promise<Response> {
         try {
             const employerId: number = parseInt(req.params.id);
 
@@ -415,6 +452,13 @@ class EmployerController {
             if (!employer) {
                 return res.status(404).json({
                     message: 'Employer not found',
+                    status: false,
+                });
+            }
+
+            if (req.user && employer.organisation_id != null && !(await canAccessOrganisation(req.user, employer.organisation_id))) {
+                return res.status(403).json({
+                    message: 'You do not have access to this employer',
                     status: false,
                 });
             }

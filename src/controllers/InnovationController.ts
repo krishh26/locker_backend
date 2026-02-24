@@ -4,8 +4,9 @@ import { CustomRequest } from '../util/Interface/expressInterface';
 import { AppDataSource } from '../data-source';
 import { User } from '../entity/User.entity';
 import { sendDataToUser } from '../socket/socket';
-import { SocketDomain } from '../util/constants';
+import { SocketDomain, UserRole } from '../util/constants';
 import { SendNotifications } from '../util/socket/notification';
+import { getAccessibleOrganisationIds, getAccessibleCentreIds, resolveUserRole } from '../util/organisationFilter';
 
 class InnovationController {
     public async createInnovation(req: CustomRequest, res: Response): Promise<Response> {
@@ -152,6 +153,19 @@ class InnovationController {
                 qb.andWhere('user_id.user_id = :user_id', { user_id });
             }
 
+            if (req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user);
+                    if (centreIds === null || centreIds.length === 0) qb.andWhere('1 = 0');
+                    else qb.innerJoin('user_id.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                } else {
+                    const orgIds = await getAccessibleOrganisationIds(req.user);
+                    if (orgIds === null || orgIds.length === 0) qb.andWhere('1 = 0');
+                    else qb.innerJoin('user_id.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
+                }
+            }
+
             qb.skip(req.pagination.skip)
                 .take(Number(req.pagination.limit))
                 .orderBy('innovation.created_at', 'DESC');
@@ -185,7 +199,7 @@ class InnovationController {
             const innovationRepository = AppDataSource.getRepository(Innovation);
             const { id } = req.params;
 
-            const innovation = await innovationRepository.createQueryBuilder('innovation')
+            const qb = innovationRepository.createQueryBuilder('innovation')
                 .leftJoinAndSelect('innovation.innovation_propose_by_id', "user_id")
                 .where('innovation.id = :id', { id })
                 .select([
@@ -198,8 +212,22 @@ class InnovationController {
                     'user_id.user_name',
                     'user_id.email',
                     'user_id.avatar'
-                ])
-                .getOne();
+                ]);
+
+            if (req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user);
+                    if (centreIds === null || centreIds.length === 0) return res.status(404).json({ message: "Innovation not found", status: false });
+                    qb.innerJoin('user_id.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                } else {
+                    const orgIds = await getAccessibleOrganisationIds(req.user);
+                    if (orgIds === null || orgIds.length === 0) return res.status(404).json({ message: "Innovation not found", status: false });
+                    qb.innerJoin('user_id.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
+                }
+            }
+
+            const innovation = await qb.getOne();
 
             if (!innovation) {
                 return res.status(404).json({

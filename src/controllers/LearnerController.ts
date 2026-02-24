@@ -18,15 +18,53 @@ import { Course } from "../entity/Course.entity";
 import { getUnitCompletionStatus, unitCompletionStatus } from '../util/unitCompletion';
 import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
 import { In } from "typeorm";
-import { getAccessibleOrganisationIds } from "../util/organisationFilter";
+import { getAccessibleOrganisationIds, getAccessibleCentreAdminUserIds, applyLearnerScope, validateLearnerOrganisationCentre, canAccessOrganisation, canAccessCentre } from "../util/organisationFilter";
 class LearnerController {
 
     public async CreateLearner(req: CustomRequest, res: Response) {
         try {
-            const { user_name, first_name, last_name, email, password, confirmPassword, mobile, funding_body, funding_band_id, job_title, comment } = req.body
+            const { user_name, first_name, last_name, email, password, confirmPassword, mobile, funding_body, funding_band_id, job_title, comment, organisation_id, centre_id, employer_id } = req.body
+            
+            // Validate required fields
             if (!user_name || !first_name || !last_name || !email || !password || !confirmPassword) {
                 return res.status(400).json({
                     message: "All Field Required",
+                    status: false
+                })
+            }
+
+            // Validate organisation, centre, employer are provided
+            if (!organisation_id || !centre_id || !employer_id) {
+                return res.status(400).json({
+                    message: "organisation_id, centre_id, and employer_id are required",
+                    status: false
+                })
+            }
+
+            // Validate user has access to create learners in this organisation/centre
+            if (req.user) {
+                const hasOrgAccess = await canAccessOrganisation(req.user, organisation_id);
+                if (!hasOrgAccess) {
+                    return res.status(403).json({
+                        message: "You do not have access to create learners in this organisation",
+                        status: false
+                    })
+                }
+
+                const hasCentreAccess = await canAccessCentre(req.user, centre_id);
+                if (!hasCentreAccess) {
+                    return res.status(403).json({
+                        message: "You do not have access to create learners in this centre",
+                        status: false
+                    })
+                }
+            }
+
+            // Validate centre belongs to organisation and employer belongs to organisation
+            const validation = await validateLearnerOrganisationCentre(organisation_id, centre_id, employer_id);
+            if (!validation.valid) {
+                return res.status(400).json({
+                    message: validation.error,
                     status: false
                 })
             }
@@ -53,6 +91,9 @@ class LearnerController {
             const user: any = await userRepository.save(await userRepository.create(req.body))
 
             req.body.user_id = user.user_id
+            req.body.organisation_id = organisation_id
+            req.body.centre_id = centre_id
+            req.body.employer_id = employer_id
             const learner = await learnerRepository.create(req.body);
 
             const savelearner = await learnerRepository.save(learner)
@@ -286,30 +327,9 @@ class LearnerController {
                     'funding_course.course_code',
                 ])
 
-            // Add organization filtering through User → UserOrganisation
+            // Apply scope filtering based on user role (organisation/centre)
             if (req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user);
-                if (accessibleIds !== null) {
-                    if (accessibleIds.length === 0) {
-                        // No organizations assigned - return empty result
-                        return res.status(200).json({
-                            message: "Learner fetched successfully",
-                            status: true,
-                            data: [],
-                            ...(req.query.meta === "true" && {
-                                meta_data: {
-                                    page: req.pagination?.page || 1,
-                                    items: 0,
-                                    page_size: req.pagination?.limit || 10,
-                                    pages: 0
-                                }
-                            })
-                        });
-                    }
-                    // Join with UserOrganisation and filter by organisation_id
-                    qb.leftJoin('user_id.userOrganisations', 'userOrganisation')
-                      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
-                }
+                await applyLearnerScope(qb, req.user, "learner");
             }
 
             if (status.includes("Show only archived users")) {
@@ -1299,29 +1319,35 @@ class LearnerController {
         }
     }
 
-    public async getLearnerExcel(req: Request, res: Response): Promise<Response> {
+    public async getLearnerExcel(req: CustomRequest, res: Response): Promise<Response> {
         try {
             const learnerRepository = AppDataSource.getRepository(Learner);
             const userCourseRepository = AppDataSource.getRepository(UserCourse);
             const workbook = XLSX.utils.book_new();
 
-
-            let usercourses = await userCourseRepository.createQueryBuilder("user_course")
+            const qbUserCourse = userCourseRepository.createQueryBuilder("user_course")
+                .leftJoin('user_course.learner_id', 'learner')
                 .leftJoinAndSelect(`user_course.learner_id`, `learner_id`)
                 .leftJoinAndSelect(`user_course.trainer_id`, `trainer_id`)
                 .leftJoinAndSelect(`user_course.IQA_id`, `IQA_id`)
                 .leftJoinAndSelect(`user_course.LIQA_id`, `LIQA_id`)
                 .leftJoinAndSelect(`user_course.EQA_id`, `EQA_id`)
                 .leftJoinAndSelect(`user_course.employer_id`, `employer_id`)
-                .leftJoinAndSelect(`employer_id.employer`, `employer`)
-                .getMany();
+                .leftJoinAndSelect(`employer_id.employer`, `employer`);
+            if (req.user) {
+                await applyLearnerScope(qbUserCourse, req.user, 'learner');
+            }
+            let usercourses = await qbUserCourse.getMany();
 
-            const learners = await learnerRepository.createQueryBuilder("learner")
+            const qbLearner = learnerRepository.createQueryBuilder("learner")
                 .withDeleted()
                 .leftJoinAndSelect('learner.user_id', "user_id")
                 .orderBy('CASE WHEN learner.deleted_at IS NULL THEN 0 ELSE 1 END', 'ASC')
-                .addOrderBy("learner.learner_id", "ASC")
-                .getMany();
+                .addOrderBy("learner.learner_id", "ASC");
+            if (req.user) {
+                await applyLearnerScope(qbLearner, req.user, 'learner');
+            }
+            const learners = await qbLearner.getMany();
 
 
             let formattedLearners
@@ -1438,18 +1464,20 @@ class LearnerController {
         }
     }
 
-    public async getAdminDashboard(req: Request, res: Response): Promise<Response> {
+    public async getAdminDashboard(req: CustomRequest, res: Response): Promise<Response> {
         try {
             const learnerRepository = AppDataSource.getRepository(Learner);
-            const userCourseRepository = AppDataSource.getRepository(UserCourse);
 
-            const counts = await learnerRepository
+            const qb = learnerRepository
                 .createQueryBuilder("learner")
                 .select([
                     "COUNT(*) FILTER (WHERE learner.deleted_at IS NULL) AS activeLearnerCount",
                     "COUNT(*) FILTER (WHERE learner.deleted_at IS NOT NULL) AS archivedLearnerCount"
-                ])
-                .getRawOne();
+                ]);
+            if (req.user) {
+                await applyLearnerScope(qb, req.user, 'learner');
+            }
+            const counts = await qb.getRawOne();
 
             return res.status(200).json({
                 message: "Dashboard data fetched successfully",
@@ -1680,29 +1708,57 @@ class LearnerController {
             const learnerPlanRepository = AppDataSource.getRepository(LearnerPlan);
             const SessionLearnerActionRepository = AppDataSource.getRepository(SessionLearnerAction);
             const courseRepository = AppDataSource.getRepository(Course);
+
+            // Get accessible org/centre IDs once
+            const accessibleOrgIds = req.user ? await getAccessibleOrganisationIds(req.user) : null;
+            const centreAdminUserIds = req.user ? await getAccessibleCentreAdminUserIds(req.user) : null;
+
+            // Helper functions for applying filters
+            const applyOrgFilterOnUserAlias = (qb: any, userAlias: string) => {
+                if (accessibleOrgIds !== null) {
+                    if (accessibleOrgIds.length === 0) return;
+                    qb.leftJoin(`${userAlias}.userOrganisations`, "userOrganisation")
+                        .andWhere("userOrganisation.organisation_id IN (:...orgIds)", { orgIds: accessibleOrgIds });
+                }
+            };
+
+            const applyCentreLearnerTrainerFilter = (qb: any, learnerAlias: string = "learner") => {
+                if (centreAdminUserIds !== null) {
+                    if (centreAdminUserIds.length === 0) return;
+                    qb.andWhere(
+                        `${learnerAlias}.learner_id IN (SELECT uc.learner_id FROM user_course uc WHERE uc.trainer_id IN (:...centreAdminUserIds))`,
+                        { centreAdminUserIds }
+                    );
+                }
+            };
+
+            const applyCentreUserFilter = (qb: any, userIdColumn: string) => {
+                if (centreAdminUserIds !== null) {
+                    if (centreAdminUserIds.length === 0) return;
+                    qb.andWhere(`${userIdColumn} IN (:...centreAdminUserIds)`, { centreAdminUserIds });
+                }
+            };
+
+            const applyCentreAssignmentLearnerFilter = (qb: any, learnerUserIdColumn: string) => {
+                if (centreAdminUserIds !== null) {
+                    if (centreAdminUserIds.length === 0) return;
+                    qb.andWhere(
+                        `${learnerUserIdColumn} IN (SELECT l.user_id FROM learner l INNER JOIN user_course uc ON uc.learner_id = l.learner_id WHERE uc.trainer_id IN (:...centreAdminUserIds))`,
+                        { centreAdminUserIds }
+                    );
+                }
+            };
+
+            const hasNoAccess = (accessibleOrgIds !== null && accessibleOrgIds.length === 0) || 
+                               (centreAdminUserIds !== null && centreAdminUserIds.length === 0);
+
             if (type) {
                 if (type === "active_learners") {
                     const qb = learnerRepository
                         .createQueryBuilder("learner")
                         .leftJoinAndSelect("learner.user_id", "user_id")
                         .where("user_id.status = 'Active'");
-                    
-                    // Add organization filtering
-                    if (req.user) {
-                        const accessibleIds = await getAccessibleOrganisationIds(req.user);
-                        if (accessibleIds !== null) {
-                            if (accessibleIds.length === 0) {
-                                return res.status(200).json({
-                                    message: "Active learners fetched successfully",
-                                    status: true,
-                                    data: [],
-                                });
-                            }
-                            qb.leftJoin('user_id.userOrganisations', 'userOrganisation')
-                              .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
-                        }
-                    }
-                    
+                    if (req.user) await applyLearnerScope(qb, req.user, "learner");
                     const active_learners = await qb.getMany();
 
                     return res.status(200).json({
@@ -1713,13 +1769,25 @@ class LearnerController {
                 }
 
                 else if (type === "suspended_learners") {
-                    const suspended_learners = await userCourseRepository
+                    if (hasNoAccess) {
+                        return res.status(200).json({
+                            message: "Suspended learners fetched successfully",
+                            status: true,
+                            data: [],
+                        });
+                    }
+                    const qb = userCourseRepository
                         .createQueryBuilder("user_course")
                         .leftJoinAndSelect("user_course.learner_id", "learner_id")
                         .leftJoinAndSelect("learner_id.user_id", "user_id")
+                        .leftJoin("user_course.trainer_id", "trainer")
                         .where("user_course.course_status = 'Training Suspended'")
-                        .distinctOn(["learner_id.learner_id"])
-                        .getMany();
+                        .distinctOn(["learner_id.learner_id"]);
+                    
+                    applyOrgFilterOnUserAlias(qb, "user_id");
+                    applyCentreUserFilter(qb, "trainer.user_id");
+                    
+                    const suspended_learners = await qb.getMany();
 
                     return res.status(200).json({
                         message: "Suspended learners fetched successfully",
@@ -1728,15 +1796,27 @@ class LearnerController {
                     });
                 }
                 else if (type === "assignments_without_mapped") {
-                    const assignments_without_mapped = await assignmentRepository
+                    if (hasNoAccess) {
+                        return res.status(200).json({
+                            message: "Assignments without mapped fetched successfully",
+                            status: true,
+                            data: [],
+                        });
+                    }
+                    const qb = assignmentRepository
                         .createQueryBuilder("assignment")
+                        .leftJoin("assignment.user", "user")
                         .leftJoin(
                             AssignmentMapping,
                             "mapping",
                             "mapping.assignment_id = assignment.assignment_id"
                         )
-                        .where("mapping.mapping_id IS NULL")
-                        .getMany();
+                        .where("mapping.mapping_id IS NULL");
+                    
+                    applyOrgFilterOnUserAlias(qb, "user");
+                    applyCentreAssignmentLearnerFilter(qb, "user.user_id");
+                    
+                    const assignments_without_mapped = await qb.getMany();
                     return res.status(200).json({
                         message: "Assignments without mapped fetched successfully",
                         status: true,
@@ -1744,13 +1824,25 @@ class LearnerController {
                     })
                 }
                 else if (type === "learners_over_due") {
-                    const learners_over_due = await userCourseRepository
+                    if (hasNoAccess) {
+                        return res.status(200).json({
+                            message: "Learners over due fetched successfully",
+                            status: true,
+                            data: [],
+                        });
+                    }
+                    const qb = userCourseRepository
                         .createQueryBuilder("user_course")
                         .leftJoinAndSelect("user_course.learner_id", "learner_id")
                         .leftJoinAndSelect("learner_id.user_id", "user_id")
+                        .leftJoin("user_course.trainer_id", "trainer")
                         .where("user_course.end_date < :currentDate", { currentDate: new Date() })
-                        .distinctOn(["learner_id.learner_id"])
-                        .getMany();
+                        .distinctOn(["learner_id.learner_id"]);
+                    
+                    applyOrgFilterOnUserAlias(qb, "user_id");
+                    applyCentreUserFilter(qb, "trainer.user_id");
+                    
+                    const learners_over_due = await qb.getMany();
 
                     return res.status(200).json({
                         message: "Learners over due fetched successfully",
@@ -1760,12 +1852,23 @@ class LearnerController {
                 }
 
                 else if (type === "learner_plan_due") {
-                    const learner_plan_due = await learnerPlanRepository
+                    if (hasNoAccess) {
+                        return res.status(200).json({
+                            message: "Learner plan due fetched successfully",
+                            status: true,
+                            data: [],
+                        });
+                    }
+                    const qb = learnerPlanRepository
                         .createQueryBuilder("learner_plan")
                         .leftJoinAndSelect("learner_plan.learners", "learner")
                         .leftJoinAndSelect("learner.user_id", "user_id")
-                        .where("learner_plan.startDate < :currentDate", { currentDate: new Date() })
-                        .getMany();
+                        .where("learner_plan.startDate < :currentDate", { currentDate: new Date() });
+                    
+                    applyOrgFilterOnUserAlias(qb, "user_id");
+                    applyCentreLearnerTrainerFilter(qb, "learner");
+                    
+                    const learner_plan_due = await qb.getMany();
 
                     return res.status(200).json({
                         message: "Learner plan due fetched successfully",
@@ -1775,12 +1878,23 @@ class LearnerController {
                 }
 
                 else if (type === "learner_plan_due_in_next_7_days") {
-                    const learner_plan_due_in_next_7_days = await learnerPlanRepository
+                    if (hasNoAccess) {
+                        return res.status(200).json({
+                            message: "Learner plan due in next 7 days fetched successfully",
+                            status: true,
+                            data: [],
+                        });
+                    }
+                    const qb = learnerPlanRepository
                         .createQueryBuilder("learner_plan")
                         .leftJoinAndSelect("learner_plan.learners", "learner")
                         .leftJoinAndSelect("learner.user_id", "user_id")
-                        .where("learner_plan.startDate BETWEEN NOW() AND NOW() + INTERVAL '7 days'")
-                        .getMany();
+                        .where("learner_plan.startDate BETWEEN NOW() AND NOW() + INTERVAL '7 days'");
+                    
+                    applyOrgFilterOnUserAlias(qb, "user_id");
+                    applyCentreLearnerTrainerFilter(qb, "learner");
+                    
+                    const learner_plan_due_in_next_7_days = await qb.getMany();
 
                     return res.status(200).json({
                         message: "Learner plan due in next 7 days fetched successfully",
@@ -1790,13 +1904,24 @@ class LearnerController {
                 }
 
                 else if (type === "session_learner_action_due") {
-                    const session_learner_action_due = await SessionLearnerActionRepository
+                    if (hasNoAccess) {
+                        return res.status(200).json({
+                            message: "Session learner action due fetched successfully",
+                            status: true,
+                            data: [],
+                        });
+                    }
+                    const qb = SessionLearnerActionRepository
                         .createQueryBuilder("session_learner_action")
                         .leftJoinAndSelect("session_learner_action.learner_plan", "learner_plan")
                         .leftJoinAndSelect("learner_plan.learners", "learner")
                         .leftJoinAndSelect("learner.user_id", "user_id")
-                        .where("DATE(session_learner_action.target_date) = CURRENT_DATE")
-                        .getMany();
+                        .where("DATE(session_learner_action.target_date) = CURRENT_DATE");
+                    
+                    applyOrgFilterOnUserAlias(qb, "user_id");
+                    applyCentreLearnerTrainerFilter(qb, "learner");
+                    
+                    const session_learner_action_due = await qb.getMany();
 
                     return res.status(200).json({
                         message: "Session learner action due fetched successfully",
@@ -1806,14 +1931,24 @@ class LearnerController {
                 }
 
                 else if (type === "session_action_due_in_next_7_days") {
-                    const session_learner_action_due_in_next_7_days =
-                        await SessionLearnerActionRepository
-                            .createQueryBuilder("session_learner_action")
-                            .leftJoinAndSelect("session_learner_action.learner_plan", "learner_plan")
-                            .leftJoinAndSelect("learner_plan.learners", "learner")
-                            .leftJoinAndSelect("learner.user_id", "user_id")
-                            .where("session_learner_action.target_date BETWEEN NOW() AND NOW() + INTERVAL '7 days'")
-                            .getMany();
+                    if (hasNoAccess) {
+                        return res.status(200).json({
+                            message: "Session learner action due in next 7 days fetched successfully",
+                            status: true,
+                            data: [],
+                        });
+                    }
+                    const qb = SessionLearnerActionRepository
+                        .createQueryBuilder("session_learner_action")
+                        .leftJoinAndSelect("session_learner_action.learner_plan", "learner_plan")
+                        .leftJoinAndSelect("learner_plan.learners", "learner")
+                        .leftJoinAndSelect("learner.user_id", "user_id")
+                        .where("session_learner_action.target_date BETWEEN NOW() AND NOW() + INTERVAL '7 days'");
+                    
+                    applyOrgFilterOnUserAlias(qb, "user_id");
+                    applyCentreLearnerTrainerFilter(qb, "learner");
+                    
+                    const session_learner_action_due_in_next_7_days = await qb.getMany();
 
                     return res.status(200).json({
                         message: "Session learner action due in next 7 days fetched successfully",
@@ -1823,14 +1958,24 @@ class LearnerController {
                 }
 
                 else if (type === "session_learner_action_overdue") {
-                    const session_learner_action_overdue =
-                        await SessionLearnerActionRepository
-                            .createQueryBuilder("session_learner_action")
-                            .leftJoinAndSelect("session_learner_action.learner_plan", "learner_plan")
-                            .leftJoinAndSelect("learner_plan.learners", "learner")
-                            .leftJoinAndSelect("learner.user_id", "user_id")
-                            .where("session_learner_action.target_date < NOW()")
-                            .getMany();
+                    if (hasNoAccess) {
+                        return res.status(200).json({
+                            message: "Session learner action overdue fetched successfully",
+                            status: true,
+                            data: [],
+                        });
+                    }
+                    const qb = SessionLearnerActionRepository
+                        .createQueryBuilder("session_learner_action")
+                        .leftJoinAndSelect("session_learner_action.learner_plan", "learner_plan")
+                        .leftJoinAndSelect("learner_plan.learners", "learner")
+                        .leftJoinAndSelect("learner.user_id", "user_id")
+                        .where("session_learner_action.target_date < NOW()");
+                    
+                    applyOrgFilterOnUserAlias(qb, "user_id");
+                    applyCentreLearnerTrainerFilter(qb, "learner");
+                    
+                    const session_learner_action_overdue = await qb.getMany();
 
                     return res.status(200).json({
                         message: "Session learner action overdue fetched successfully",
@@ -1840,13 +1985,24 @@ class LearnerController {
                 }
 
                 else if (type === "learners_course_due_in_next_30_days") {
-                    const learners_course_due_in_next_30_days =
-                        await userCourseRepository
-                            .createQueryBuilder("user_course")
-                            .leftJoinAndSelect("user_course.learner_id", "learner_id")
-                            .leftJoinAndSelect("learner_id.user_id", "user_id")
-                            .where("user_course.end_date BETWEEN NOW() AND NOW() + INTERVAL '30 days'")
-                            .getMany();
+                    if (hasNoAccess) {
+                        return res.status(200).json({
+                            message: "Learners course due in next 30 days fetched successfully",
+                            status: true,
+                            data: [],
+                        });
+                    }
+                    const qb = userCourseRepository
+                        .createQueryBuilder("user_course")
+                        .leftJoinAndSelect("user_course.learner_id", "learner_id")
+                        .leftJoinAndSelect("learner_id.user_id", "user_id")
+                        .leftJoin("user_course.trainer_id", "trainer")
+                        .where("user_course.end_date BETWEEN NOW() AND NOW() + INTERVAL '30 days'");
+                    
+                    applyOrgFilterOnUserAlias(qb, "user_id");
+                    applyCentreUserFilter(qb, "trainer.user_id");
+                    
+                    const learners_course_due_in_next_30_days = await qb.getMany();
 
                     return res.status(200).json({
                         message: "Learners course due in next 30 days fetched successfully",
@@ -1857,97 +2013,154 @@ class LearnerController {
             }
 
 
-            const total_learners = await learnerRepository
-                .createQueryBuilder("learner")
-                .leftJoinAndSelect("learner.user_id", "user_id")
-                .where("user_id.status = 'Active'")
-                .getMany();
-
-            const learners_suspended = await userCourseRepository
-                .createQueryBuilder("user_course")
-                .leftJoinAndSelect("user_course.learner_id", "learner_id")
-                .leftJoinAndSelect("learner_id.user_id", "user_id")
-                .where("user_course.course_status = 'Training Suspended'")
-                .distinctOn(["learner_id.learner_id"])
-                .getMany();
-
-            const assignmentsWithoutMapped = await assignmentRepository
-                .createQueryBuilder("assignment")
-                .leftJoin(
-                    AssignmentMapping,
-                    "mapping",
-                    "mapping.assignment_id = assignment.assignment_id"
-                )
-                .where("mapping.mapping_id IS NULL")
-                .getMany();
-
-            const learnersOverDue = await userCourseRepository
-                .createQueryBuilder("user_course")
-                .leftJoinAndSelect("user_course.learner_id", "learner_id")
-                .leftJoinAndSelect("learner_id.user_id", "user_id")
-                .where("user_course.end_date < :currentDate", { currentDate: new Date() })
-                .distinctOn(["learner_id.learner_id"])
-                .getMany();
-
-            const learnersCourseDueInNext30Days = await userCourseRepository
-                .createQueryBuilder("user_course")
-                .leftJoinAndSelect("user_course.learner_id", "learner_id")
-                .leftJoinAndSelect("learner_id.user_id", "user_id")
-                .where("user_course.end_date BETWEEN NOW() AND NOW() + INTERVAL '30 days'")
-                .distinctOn(["learner_id.learner_id"])
-                .getMany();
+            // ================= Dashboard counts (scoped + computed in DB with correct PK columns) =================
+            if (hasNoAccess) {
+                return res.status(200).json({
+                    message: "Dashboard data fetched successfully",
+                    status: true,
+                    data: {
+                        active_learners_count: 0,
+                        learners_suspended_count: 0,
+                        assignmentsWithoutMapped_count: 0,
+                        learnersOverDue_count: 0,
+                        learnerPlanDue_count: 0,
+                        learnerPlanDueInNext7Days_count: 0,
+                        sessionLearnerActionDue_count: 0,
+                        sessionLearnerActionDueInNext7Days_count: 0,
+                        sessionLearnerActionOverdue_count: 0,
+                        learnersCourseDueInNext30Days_count: 0,
+                        totalCourses: await courseRepository.createQueryBuilder("course").getCount(),
+                    }
+                });
+            }
 
             const totalCourses = await courseRepository.createQueryBuilder("course").getCount();
 
-            const learnerPlanDue = await learnerPlanRepository
+            const activeLearnersQb = learnerRepository
+                .createQueryBuilder("learner")
+                .leftJoin("learner.user_id", "user_id")
+                .where("user_id.status = 'Active'");
+            if (req.user) await applyLearnerScope(activeLearnersQb, req.user, "learner");
+            const activeLearnersCountRaw = await activeLearnersQb
+                .select("COUNT(DISTINCT learner.learner_id)", "count")
+                .getRawOne();
+
+            const suspendedQb = userCourseRepository
+                .createQueryBuilder("user_course")
+                .leftJoin("user_course.learner_id", "learner_id")
+                .leftJoin("learner_id.user_id", "user_id")
+                .leftJoin("user_course.trainer_id", "trainer")
+                .where("user_course.course_status = 'Training Suspended'");
+            applyOrgFilterOnUserAlias(suspendedQb, "user_id");
+            applyCentreUserFilter(suspendedQb, "trainer.user_id");
+            const suspendedCountRaw = await suspendedQb
+                .select("COUNT(DISTINCT learner_id.learner_id)", "count")
+                .getRawOne();
+
+            const assignmentsWithoutMappedQb = assignmentRepository
+                .createQueryBuilder("assignment")
+                .leftJoin("assignment.user", "user")
+                .leftJoin(AssignmentMapping, "mapping", "mapping.assignment_id = assignment.assignment_id")
+                .where("mapping.mapping_id IS NULL");
+            applyOrgFilterOnUserAlias(assignmentsWithoutMappedQb, "user");
+            applyCentreAssignmentLearnerFilter(assignmentsWithoutMappedQb, "user.user_id");
+            const assignmentsWithoutMappedCountRaw = await assignmentsWithoutMappedQb
+                .select("COUNT(DISTINCT assignment.assignment_id)", "count")
+                .getRawOne();
+
+            const learnersOverDueQb = userCourseRepository
+                .createQueryBuilder("user_course")
+                .leftJoin("user_course.learner_id", "learner_id")
+                .leftJoin("learner_id.user_id", "user_id")
+                .leftJoin("user_course.trainer_id", "trainer")
+                .where("user_course.end_date < :currentDate", { currentDate: new Date() });
+            applyOrgFilterOnUserAlias(learnersOverDueQb, "user_id");
+            applyCentreUserFilter(learnersOverDueQb, "trainer.user_id");
+            const learnersOverDueCountRaw = await learnersOverDueQb
+                .select("COUNT(DISTINCT learner_id.learner_id)", "count")
+                .getRawOne();
+
+            const learnersCourseDueInNext30DaysQb = userCourseRepository
+                .createQueryBuilder("user_course")
+                .leftJoin("user_course.learner_id", "learner_id")
+                .leftJoin("learner_id.user_id", "user_id")
+                .leftJoin("user_course.trainer_id", "trainer")
+                .where("user_course.end_date BETWEEN NOW() AND NOW() + INTERVAL '30 days'");
+            applyOrgFilterOnUserAlias(learnersCourseDueInNext30DaysQb, "user_id");
+            applyCentreUserFilter(learnersCourseDueInNext30DaysQb, "trainer.user_id");
+            const learnersCourseDueInNext30DaysCountRaw = await learnersCourseDueInNext30DaysQb
+                .select("COUNT(DISTINCT learner_id.learner_id)", "count")
+                .getRawOne();
+
+            const learnerPlanDueQb = learnerPlanRepository
                 .createQueryBuilder("learner_plan")
-                .leftJoinAndSelect("learner_plan.learners", "learner")
-                .leftJoinAndSelect("learner.user_id", "user_id")
-                .where("learner_plan.startDate < :currentDate", { currentDate: new Date() })
-                .getMany();
+                .leftJoin("learner_plan.learners", "learner")
+                .leftJoin("learner.user_id", "user_id")
+                .where("learner_plan.startDate < :currentDate", { currentDate: new Date() });
+            applyOrgFilterOnUserAlias(learnerPlanDueQb, "user_id");
+            applyCentreLearnerTrainerFilter(learnerPlanDueQb, "learner");
+            const learnerPlanDueCountRaw = await learnerPlanDueQb
+                .select("COUNT(DISTINCT learner_plan.learner_plan_id)", "count")
+                .getRawOne();
 
-            const learnerPlanDueInNext7Days = await learnerPlanRepository
+            const learnerPlanDueInNext7DaysQb = learnerPlanRepository
                 .createQueryBuilder("learner_plan")
-                .leftJoinAndSelect("learner_plan.learners", "learner")
-                .leftJoinAndSelect("learner.user_id", "user_id")
-                .where("learner_plan.startDate BETWEEN NOW() AND NOW() + INTERVAL '7 days'")
-                .getMany();
+                .leftJoin("learner_plan.learners", "learner")
+                .leftJoin("learner.user_id", "user_id")
+                .where("learner_plan.startDate BETWEEN NOW() AND NOW() + INTERVAL '7 days'");
+            applyOrgFilterOnUserAlias(learnerPlanDueInNext7DaysQb, "user_id");
+            applyCentreLearnerTrainerFilter(learnerPlanDueInNext7DaysQb, "learner");
+            const learnerPlanDueInNext7DaysCountRaw = await learnerPlanDueInNext7DaysQb
+                .select("COUNT(DISTINCT learner_plan.learner_plan_id)", "count")
+                .getRawOne();
 
-            const sessionLearnerActionDue = await SessionLearnerActionRepository
+            const sessionLearnerActionDueQb = SessionLearnerActionRepository
                 .createQueryBuilder("session_learner_action")
-                .leftJoinAndSelect("session_learner_action.learner_plan", "learner_plan")
-                .leftJoinAndSelect("learner_plan.learners", "learner")
-                .leftJoinAndSelect("learner.user_id", "user_id")
-                .where("DATE(session_learner_action.target_date) = CURRENT_DATE")
-                .getMany();
+                .leftJoin("session_learner_action.learner_plan", "learner_plan")
+                .leftJoin("learner_plan.learners", "learner")
+                .leftJoin("learner.user_id", "user_id")
+                .where("DATE(session_learner_action.target_date) = CURRENT_DATE");
+            applyOrgFilterOnUserAlias(sessionLearnerActionDueQb, "user_id");
+            applyCentreLearnerTrainerFilter(sessionLearnerActionDueQb, "learner");
+            const sessionLearnerActionDueCountRaw = await sessionLearnerActionDueQb
+                .select("COUNT(DISTINCT session_learner_action.action_id)", "count")
+                .getRawOne();
 
-            const sessionLearnerActionDueInNext7Days = await SessionLearnerActionRepository
+            const sessionLearnerActionDueInNext7DaysQb = SessionLearnerActionRepository
                 .createQueryBuilder("session_learner_action")
-                .leftJoinAndSelect("session_learner_action.learner_plan", "learner_plan")
-                .leftJoinAndSelect("learner_plan.learners", "learner")
-                .leftJoinAndSelect("learner.user_id", "user_id")
-                .where("session_learner_action.target_date BETWEEN NOW() AND NOW() + INTERVAL '7 days'")
-                .getMany();
+                .leftJoin("session_learner_action.learner_plan", "learner_plan")
+                .leftJoin("learner_plan.learners", "learner")
+                .leftJoin("learner.user_id", "user_id")
+                .where("session_learner_action.target_date BETWEEN NOW() AND NOW() + INTERVAL '7 days'");
+            applyOrgFilterOnUserAlias(sessionLearnerActionDueInNext7DaysQb, "user_id");
+            applyCentreLearnerTrainerFilter(sessionLearnerActionDueInNext7DaysQb, "learner");
+            const sessionLearnerActionDueInNext7DaysCountRaw = await sessionLearnerActionDueInNext7DaysQb
+                .select("COUNT(DISTINCT session_learner_action.action_id)", "count")
+                .getRawOne();
 
-            const sessionLearnerActionOverdue = await SessionLearnerActionRepository
+            const sessionLearnerActionOverdueQb = SessionLearnerActionRepository
                 .createQueryBuilder("session_learner_action")
-                .leftJoinAndSelect("session_learner_action.learner_plan", "learner_plan")
-                .leftJoinAndSelect("learner_plan.learners", "learner")
-                .leftJoinAndSelect("learner.user_id", "user_id")
-                .where("session_learner_action.target_date < NOW()")
-                .getMany();
+                .leftJoin("session_learner_action.learner_plan", "learner_plan")
+                .leftJoin("learner_plan.learners", "learner")
+                .leftJoin("learner.user_id", "user_id")
+                .where("session_learner_action.target_date < NOW()");
+            applyOrgFilterOnUserAlias(sessionLearnerActionOverdueQb, "user_id");
+            applyCentreLearnerTrainerFilter(sessionLearnerActionOverdueQb, "learner");
+            const sessionLearnerActionOverdueCountRaw = await sessionLearnerActionOverdueQb
+                .select("COUNT(DISTINCT session_learner_action.action_id)", "count")
+                .getRawOne();
 
             const data = {
-                active_learners_count: total_learners.length,
-                learners_suspended_count: learners_suspended.length,
-                assignmentsWithoutMapped_count: assignmentsWithoutMapped.length,
-                learnersOverDue_count: learnersOverDue.length,
-                learnerPlanDue_count: learnerPlanDue.length,
-                learnerPlanDueInNext7Days_count: learnerPlanDueInNext7Days.length,
-                sessionLearnerActionDue_count: sessionLearnerActionDue.length,
-                sessionLearnerActionDueInNext7Days_count: sessionLearnerActionDueInNext7Days.length,
-                sessionLearnerActionOverdue_count: sessionLearnerActionOverdue.length,
-                learnersCourseDueInNext30Days_count: learnersCourseDueInNext30Days.length,
+                active_learners_count: Number(activeLearnersCountRaw?.count || 0),
+                learners_suspended_count: Number(suspendedCountRaw?.count || 0),
+                assignmentsWithoutMapped_count: Number(assignmentsWithoutMappedCountRaw?.count || 0),
+                learnersOverDue_count: Number(learnersOverDueCountRaw?.count || 0),
+                learnerPlanDue_count: Number(learnerPlanDueCountRaw?.count || 0),
+                learnerPlanDueInNext7Days_count: Number(learnerPlanDueInNext7DaysCountRaw?.count || 0),
+                sessionLearnerActionDue_count: Number(sessionLearnerActionDueCountRaw?.count || 0),
+                sessionLearnerActionDueInNext7Days_count: Number(sessionLearnerActionDueInNext7DaysCountRaw?.count || 0),
+                sessionLearnerActionOverdue_count: Number(sessionLearnerActionOverdueCountRaw?.count || 0),
+                learnersCourseDueInNext30Days_count: Number(learnersCourseDueInNext30DaysCountRaw?.count || 0),
                 totalCourses: totalCourses
             }
 

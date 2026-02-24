@@ -8,7 +8,7 @@ import { UserForm } from "../entity/UserForm.entity";
 import { LearnerPlan } from "../entity/LearnerPlan.entity";
 import { SendEmailTemplet } from "../util/nodemailer";
 import { uploadToS3, uploadMultipleFilesToS3 } from "../util/aws";
-import { getAccessibleOrganisationIds } from "../util/organisationFilter";
+import { getAccessibleOrganisationIds, getAccessibleCentreAdminUserIds } from "../util/organisationFilter";
 
 class FormController {
 
@@ -190,6 +190,25 @@ class FormController {
                     }
                     qb.leftJoin('formUser.userOrganisations', 'userOrganisation')
                       .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+                }
+                const centreAdminUserIds = await getAccessibleCentreAdminUserIds(req.user);
+                if (centreAdminUserIds !== null) {
+                    if (centreAdminUserIds.length === 0) {
+                        return res.status(200).json({
+                            message: 'Form retrieved successfully',
+                            status: true,
+                            data: [],
+                            ...(req.query.meta === "true" && {
+                                meta_data: { page: req.pagination.page, items: 0, page_size: req.pagination.limit, pages: 0 }
+                            })
+                        });
+                    }
+                    if (req.query.user_id) {
+                        qb.andWhere('user.user_id IN (:...centreAdminUserIds)', { centreAdminUserIds });
+                    } else {
+                        qb.innerJoin('form.users', 'formUserCentre')
+                          .andWhere('formUserCentre.user_id IN (:...centreAdminUserIds)', { centreAdminUserIds });
+                    }
                 }
             }
 

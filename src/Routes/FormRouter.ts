@@ -9,12 +9,12 @@ const FormRoutes = express.Router();
 
 const Controller = new FormController();
 
-FormRoutes.post('/create', authorizeRoles(UserRole.Admin), Controller.CreateForm);
+FormRoutes.post('/create', authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), Controller.CreateForm);
 FormRoutes.get("/get/:id", authorizeRoles(), Controller.getForm);
 FormRoutes.get("/list", authorizeRoles(), paginationMiddleware, Controller.getForms);
-FormRoutes.patch("/update/:id", authorizeRoles(UserRole.Admin), Controller.updateForm);
-FormRoutes.patch("/add-user/:id", authorizeRoles(UserRole.Admin), Controller.addUsersToForm);
-FormRoutes.delete("/delete/:id", authorizeRoles(UserRole.Admin), Controller.deleteForm);
+FormRoutes.patch("/update/:id", authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), Controller.updateForm);
+FormRoutes.patch("/add-user/:id", authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), Controller.addUsersToForm);
+FormRoutes.delete("/delete/:id", authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), Controller.deleteForm);
 
 // Email functionality for form assignment
 FormRoutes.post("/send-assignment-email", authorizeRoles(), singleFileUpload("pdf"), Controller.sendFormAssignmentEmail);
@@ -26,7 +26,7 @@ FormRoutes.get("/list/user", authorizeRoles(), paginationMiddleware, Controller.
 
 // Lock / Unlock
 FormRoutes.post("/:formId/users/:userId/lock", authorizeRoles(), Controller.lockUserForm);
-FormRoutes.post("/:formId/users/:userId/unlock", authorizeRoles(UserRole.Admin, UserRole.Trainer), Controller.unlockUserForm);
+FormRoutes.post("/:formId/users/:userId/unlock", authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin, UserRole.Trainer), Controller.unlockUserForm);
 
 // Form options route
 FormRoutes.get("/options", authorizeRoles(), Controller.getFormOptions);

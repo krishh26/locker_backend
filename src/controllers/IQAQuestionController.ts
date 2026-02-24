@@ -3,6 +3,8 @@ import { AppDataSource } from '../data-source';
 import { CustomRequest } from '../util/Interface/expressInterface';
 import { IQAQuestion, IQAQuestionType } from '../entity/IQAQuestion.entity';
 import { User } from '../entity/User.entity';
+import { getAccessibleOrganisationIds, getAccessibleCentreIds, resolveUserRole } from '../util/organisationFilter';
+import { UserRole } from '../util/constants';
 
 export class IQAQuestionController {
     // Add new IQA Question
@@ -114,6 +116,19 @@ export class IQAQuestionController {
                 .leftJoin(User, 'uu', 'uu.user_id = CAST(q.updatedBy AS INT)')
                 .addSelect(['uu.first_name AS updated_first_name', 'uu.last_name AS updated_last_name']);
 
+            if (req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user);
+                    if (centreIds === null || centreIds.length === 0) return res.status(200).json({ message: 'IQA Questions retrieved successfully', status: true, data: [] });
+                    qb.innerJoin('u.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                } else {
+                    const orgIds = await getAccessibleOrganisationIds(req.user);
+                    if (orgIds === null || orgIds.length === 0) return res.status(200).json({ message: 'IQA Questions retrieved successfully', status: true, data: [] });
+                    qb.innerJoin('u.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
+                }
+            }
+
             // Filter by question type if provided
             if (questionType) {
                 if (!Object.values(IQAQuestionType).includes(questionType)) {
@@ -173,13 +188,27 @@ export class IQAQuestionController {
             const id = parseInt(req.params.id);
             const repo = AppDataSource.getRepository(IQAQuestion);
 
-            const question = await repo.createQueryBuilder('q')
+            const qb = repo.createQueryBuilder('q')
                 .leftJoin(User, 'u', 'u.user_id = CAST(q.createdBy AS INT)')
                 .addSelect(['u.first_name', 'u.last_name'])
                 .leftJoin(User, 'uu', 'uu.user_id = CAST(q.updatedBy AS INT)')
                 .addSelect(['uu.first_name AS updated_first_name', 'uu.last_name AS updated_last_name'])
-                .where('q.id = :id', { id })
-                .getOne();
+                .where('q.id = :id', { id });
+
+            if (req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user);
+                    if (centreIds === null || centreIds.length === 0) return res.status(404).json({ message: 'IQA Question not found', status: false });
+                    qb.innerJoin('u.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                } else {
+                    const orgIds = await getAccessibleOrganisationIds(req.user);
+                    if (orgIds === null || orgIds.length === 0) return res.status(404).json({ message: 'IQA Question not found', status: false });
+                    qb.innerJoin('u.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
+                }
+            }
+
+            const question = await qb.getOne();
 
             if (!question) {
                 return res.status(404).json({

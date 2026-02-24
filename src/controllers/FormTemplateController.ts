@@ -102,6 +102,7 @@ class FormTemplateController {
         try {
             const formTemplateRepository = AppDataSource.getRepository(FormTemplate);;
             const qb = formTemplateRepository.createQueryBuilder('formtemplate');
+            // Note: FormTemplate entity has no organisation_id; when added, apply applyScope(qb, req.user, 'formtemplate', { organisationOnly: true })
 
             const [forms, count] = await qb
                 .orderBy(`formtemplate.created_at`, "DESC")

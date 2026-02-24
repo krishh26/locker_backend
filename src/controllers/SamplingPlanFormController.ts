@@ -3,6 +3,10 @@ import { AppDataSource } from "../data-source";
 import { SamplingPlanForm } from "../entity/SamplingPlanForm.entity";
 import { SamplingPlanDetail } from "../entity/SamplingPlanDetail.entity";
 import { Form } from "../entity/Form.entity";
+import { UserCourse } from "../entity/UserCourse.entity";
+import { Learner } from "../entity/Learner.entity";
+import { applyLearnerScope } from "../util/organisationFilter";
+import { CustomRequest } from "../util/Interface/expressInterface";
 
 export class SamplingPlanFormController {
 
@@ -38,16 +42,26 @@ export class SamplingPlanFormController {
     }
   }
 
-  // ✅ Get all forms linked to a sampling detail
+  // ✅ Get all forms linked to a sampling detail (scoped)
   public async getFormsByPlanDetail(req: Request, res: Response): Promise<Response> {
     try {
       const { plan_detail_id } = req.params;
 
       const repo = AppDataSource.getRepository(SamplingPlanForm);
-      const forms = await repo.find({
-        where: { plan_detail: { id: parseInt(plan_detail_id) } },
-        order: { created_at: "DESC" }
-      });
+      const qb = repo.createQueryBuilder("spf")
+        .leftJoinAndSelect("spf.plan_detail", "plan_detail")
+        .leftJoinAndSelect("spf.form", "form")
+        .leftJoin("plan_detail.samplingPlan", "plan")
+        .leftJoin("plan.course", "course")
+        .innerJoin(UserCourse, "uc", "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
+        .innerJoin(Learner, "learner", "learner.learner_id = uc.learner_id")
+        .where("plan_detail.id = :plan_detail_id", { plan_detail_id: parseInt(plan_detail_id) });
+
+      if ((req as any).user) {
+        await applyLearnerScope(qb, (req as any).user, "learner");
+      }
+
+      const forms = await qb.select("spf").addSelect("plan_detail").addSelect("form").distinct(true).orderBy("spf.created_at", "DESC").getMany();
 
       return res.status(200).json({ message: "Forms fetched successfully", status: true, data: forms });
     } catch (error) {

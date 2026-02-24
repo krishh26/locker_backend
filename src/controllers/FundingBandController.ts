@@ -3,6 +3,9 @@ import { AppDataSource } from '../data-source';
 import { CustomRequest } from '../util/Interface/expressInterface';
 import { FundingBand } from '../entity/FundingBand.entity';
 import { Course } from '../entity/Course.entity';
+import { UserCourse } from '../entity/UserCourse.entity';
+import { Learner } from '../entity/Learner.entity';
+import { applyLearnerScope } from '../util/organisationFilter';
 
 class FundingBandController {
     
@@ -63,17 +66,22 @@ class FundingBandController {
         }
     }
 
-    // GET /api/v1/funding-band → list all funding bands
+    // GET /api/v1/funding-band → list all funding bands (scoped by learner enrolments)
     public async getFundingBands(req: CustomRequest, res: Response) {
         try {
             const { page = 1, limit = 10, course_id, is_active } = req.query;
 
             const fundingBandRepository = AppDataSource.getRepository(FundingBand);
             const queryBuilder = fundingBandRepository.createQueryBuilder('funding_band')
-                .leftJoin('funding_band.course', 'course')
+                .innerJoin('funding_band.course', 'course')
+                .innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
+                .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id')
                 .addSelect(['course.course_id', 'course.course_name', 'course.course_code', 'course.level', 'course.total_credits'])
                 .orderBy('funding_band.created_at', 'DESC');
 
+            if (req.user) {
+                await applyLearnerScope(queryBuilder, req.user, 'learner');
+            }
 
             // Apply filters
             if (course_id) {
@@ -89,9 +97,13 @@ class FundingBandController {
             const limitNumber = parseInt(limit as string);
             const skip = (pageNumber - 1) * limitNumber;
 
-            queryBuilder.skip(skip).take(limitNumber);
+            const countQb = queryBuilder.clone().select('COUNT(DISTINCT funding_band.id)', 'count');
+            const totalResult = await countQb.getRawOne<{ count: string }>();
+            const total = parseInt(totalResult?.count ?? '0', 10);
 
-            const [fundingBands, total] = await queryBuilder.getManyAndCount();
+            queryBuilder.select('funding_band').addSelect(['course.course_id', 'course.course_name', 'course.course_code', 'course.level', 'course.total_credits']).distinct(true).skip(skip).take(limitNumber);
+
+            const fundingBands = await queryBuilder.getMany();
 
             const totalPages = Math.ceil(total / limitNumber);
 
@@ -117,7 +129,7 @@ class FundingBandController {
         }
     }
 
-    // GET /api/v1/funding-band/:id → get single funding band by id
+    // GET /api/v1/funding-band/:id → get single funding band by id (scoped)
     public async getFundingBandById(req: CustomRequest, res: Response) {
         try {
             const { id } = req.params;
@@ -131,13 +143,19 @@ class FundingBandController {
 
             const fundingBandRepository = AppDataSource.getRepository(FundingBand);
 
-            const fundingBand = await fundingBandRepository
+            const qb = fundingBandRepository
                 .createQueryBuilder('funding_band')
-                .leftJoin('funding_band.course', 'course')
+                .innerJoin('funding_band.course', 'course')
+                .innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
+                .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id')
                 .addSelect(['course.course_id', 'course.course_name', 'course.course_code', 'course.level', 'course.total_credits'])
-                .where('funding_band.id = :id', { id: parseInt(id) })
-                .getOne();
+                .where('funding_band.id = :id', { id: parseInt(id) });
 
+            if (req.user) {
+                await applyLearnerScope(qb, req.user, 'learner');
+            }
+
+            const fundingBand = await qb.getOne();
 
             if (!fundingBand) {
                 return res.status(404).json({
@@ -265,7 +283,7 @@ class FundingBandController {
         }
     }
 
-    // GET /api/v1/courses/:course_id/funding-band → get funding bands for specific course
+    // GET /api/v1/courses/:course_id/funding-band → get funding bands for specific course (scoped)
     public async getFundingBandsByCourse(req: CustomRequest, res: Response) {
         try {
             const { course_id } = req.params;
@@ -281,7 +299,6 @@ class FundingBandController {
             const fundingBandRepository = AppDataSource.getRepository(FundingBand);
             const courseRepository = AppDataSource.getRepository(Course);
 
-            // Check if course exists
             const course = await courseRepository.findOne({ where: { course_id: parseInt(course_id) } });
             if (!course) {
                 return res.status(404).json({
@@ -291,23 +308,22 @@ class FundingBandController {
             }
 
             const queryBuilder = fundingBandRepository.createQueryBuilder('funding_band')
-                .leftJoinAndSelect('funding_band.course', 'course')
+                .innerJoin('funding_band.course', 'course')
+                .innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
+                .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id')
+                .addSelect(['course.course_id', 'course.course_name', 'course.course_code'])
                 .where('funding_band.course_id = :course_id', { course_id })
                 .orderBy('funding_band.effective_from', 'DESC');
 
-            // Apply filters
+            if (req.user) {
+                await applyLearnerScope(queryBuilder, req.user, 'learner');
+            }
+
             if (is_active !== undefined) {
                 queryBuilder.andWhere('funding_band.is_active = :is_active', { is_active: is_active === 'true' });
             }
 
-            // Filter by current date if provided
-            // if (current_date) {
-            //     const filterDate = new Date(current_date as string);
-            //     queryBuilder.andWhere('funding_band.effective_from <= :current_date', { current_date: filterDate });
-            //     queryBuilder.andWhere('(funding_band.effective_to IS NULL OR funding_band.effective_to >= :current_date)', { current_date: filterDate });
-            // }
-
-            const fundingBands = await queryBuilder.getMany();
+            const fundingBands = await queryBuilder.select('funding_band').distinct(true).getMany();
 
             return res.status(200).json({
                 message: 'Course funding bands fetched successfully',

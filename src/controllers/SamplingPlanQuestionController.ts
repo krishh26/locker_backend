@@ -2,6 +2,9 @@ import { Request, Response } from "express";
 import { AppDataSource } from "../data-source";
 import { SamplingPlanQuestion } from "../entity/SamplingPlanQuestion.entity";
 import { SamplingPlanDetail } from "../entity/SamplingPlanDetail.entity";
+import { UserCourse } from "../entity/UserCourse.entity";
+import { Learner } from "../entity/Learner.entity";
+import { applyLearnerScope } from "../util/organisationFilter";
 
 export class SamplingPlanQuestionController {
 
@@ -38,16 +41,27 @@ export class SamplingPlanQuestionController {
     }
   }
 
-  // ✅ Fetch all questions by plan detail
+  // ✅ Fetch all questions by plan detail (scoped)
   public async getQuestionsByPlanDetail(req: Request, res: Response) {
     try {
       const { plan_detail_id } = req.params;
 
       const repo = AppDataSource.getRepository(SamplingPlanQuestion);
-      const questions = await repo.find({
-        where: { plan_detail: { id: parseInt(plan_detail_id) } },
-        order: { created_at: "ASC" }
-      });
+      const qb = repo.createQueryBuilder("spq")
+        .leftJoinAndSelect("spq.plan_detail", "plan_detail")
+        .leftJoinAndSelect("spq.question", "question")
+        .leftJoinAndSelect("spq.answered_by", "answered_by")
+        .leftJoin("plan_detail.samplingPlan", "plan")
+        .leftJoin("plan.course", "course")
+        .innerJoin(UserCourse, "uc", "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
+        .innerJoin(Learner, "learner", "learner.learner_id = uc.learner_id")
+        .where("plan_detail.id = :plan_detail_id", { plan_detail_id: parseInt(plan_detail_id) });
+
+      if ((req as any).user) {
+        await applyLearnerScope(qb, (req as any).user, "learner");
+      }
+
+      const questions = await qb.select("spq").addSelect("plan_detail").addSelect("question").addSelect("answered_by").distinct(true).orderBy("spq.created_at", "ASC").getMany();
 
       return res.status(200).json({ message: "Questions fetched successfully", status: true, data: questions });
     } catch (error) {

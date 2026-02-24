@@ -10,7 +10,7 @@ import { Learner } from "../entity/Learner.entity";
 import { User } from "../entity/User.entity";
 import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
 import { AssessmentStatus } from "../util/constants";
-import { getAccessibleOrganisationIds } from "../util/organisationFilter";
+import { applyLearnerScope, canAccessOrganisation, canAccessCentre } from "../util/organisationFilter";
 class AssignmentController {
     /**
      * Check if user is authorized to access an assignment
@@ -89,24 +89,12 @@ class AssignmentController {
                 );
             }
 
-            // Add organization filtering through learner (User → UserOrganisation)
+            // Apply scope filtering through learner
             if (req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user);
-                if (accessibleIds !== null) {
-                    if (accessibleIds.length === 0) {
-                        return res.status(200).json({
-                            message: "Assignments fetched successfully",
-                            status: true,
-                            data: [],
-                            total: 0,
-                            page: Number(page),
-                            limit: Number(limit),
-                            pages: 0
-                        });
-                    }
-                    qb.leftJoin('learnerUser.userOrganisations', 'userOrganisation')
-                      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
-                }
+                qb.leftJoin(Learner, 'learner', 'learner.user_id = learnerUser.user_id')
+                  .leftJoin('learner.organisation', 'org')
+                  .leftJoin('learner.centre', 'centre');
+                await applyLearnerScope(qb, req.user, 'learner');
             }
 
             // Pagination
@@ -440,19 +428,12 @@ class AssignmentController {
                 );
             }
 
-            // Add organization filtering through user (learner) → UserOrganisation
+            // Apply scope filtering through learner
             if (req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user);
-                if (accessibleIds !== null) {
-                    if (accessibleIds.length === 0) {
-                        return res.status(200).json({
-                            status: true,
-                            data: [],
-                        });
-                    }
-                    assignmentQB.leftJoin('user.userOrganisations', 'userOrganisation')
-                                 .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
-                }
+                assignmentQB.leftJoin(Learner, 'learner', 'learner.user_id = user.user_id')
+                            .leftJoin('learner.organisation', 'org')
+                            .leftJoin('learner.centre', 'centre');
+                await applyLearnerScope(assignmentQB, req.user, 'learner');
             }
 
             const [assignments, count] = await assignmentQB.getManyAndCount();
@@ -861,26 +842,32 @@ class AssignmentController {
                 });
             }
 
-            // Add organization filtering check
+            // Check access via learner scope
             if (req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user);
-                if (accessibleIds !== null) {
-                    // Check if assignment's user (learner) belongs to accessible organizations
-                    const { UserOrganisation } = await import("../entity/UserOrganisation.entity");
-                    const userOrganisationRepo = AppDataSource.getRepository(UserOrganisation);
-                    const userOrganisations = await userOrganisationRepo.find({
-                        where: { user_id: assignment.user.user_id }
+                const learnerRepo = AppDataSource.getRepository(Learner);
+                const learner = await learnerRepo.findOne({ 
+                    where: { user_id: assignment.user.user_id } as any,
+                    relations: ['organisation', 'centre']
+                });
+                if (!learner) {
+                    return res.status(403).json({
+                        message: "You are not authorized to view this assignment",
+                        status: false,
                     });
-                    const userOrgIds = userOrganisations.map(uo => uo.organisation_id);
-                    
-                    // Check if user has any organization in common with accessible organizations
-                    const hasAccess = userOrgIds.some(orgId => accessibleIds.includes(orgId));
-                    if (!hasAccess && accessibleIds.length > 0) {
-                        return res.status(403).json({
-                            message: "You are not authorized to view this assignment",
-                            status: false,
-                        });
-                    }
+                }
+                // Check organisation access
+                if (!(await canAccessOrganisation(req.user, learner.organisation_id))) {
+                    return res.status(403).json({
+                        message: "You are not authorized to view this assignment",
+                        status: false,
+                    });
+                }
+                // Check centre access
+                if (!(await canAccessCentre(req.user, learner.centre_id))) {
+                    return res.status(403).json({
+                        message: "You are not authorized to view this assignment",
+                        status: false,
+                    });
                 }
             }
 
@@ -1234,31 +1221,35 @@ class AssignmentController {
 
             const repo = AppDataSource.getRepository(AssignmentMapping);
 
-            const mappings = await repo.find({
-                where: {
-                    course: { course_id: Number(course_id) } as any,
-                    unit_code,
-                    learnerMap: true,
-                },
-                relations: ["assignment", "assignment.user"],
-                order: { created_at: "DESC" },
-            });
+            const qb = repo.createQueryBuilder('mapping')
+                .leftJoinAndSelect('mapping.assignment', 'assignment')
+                .leftJoinAndSelect('assignment.user', 'user')
+                .leftJoin(Learner, 'learner', 'learner.user_id = user.user_id')
+                .where('mapping.course = :course_id', { course_id: Number(course_id) })
+                .andWhere('mapping.unit_code = :unit_code', { unit_code })
+                .andWhere('mapping.learnerMap = :learnerMap', { learnerMap: true })
+                .andWhere('user.user_id = :user_id', { user_id: Number(user_id) });
 
-            const data = mappings
-                .filter(
-                    (m) => m.assignment?.user?.user_id === Number(user_id)
-                )
-                .map((m) => ({
-                    mapping_id: m.mapping_id,
-                    assignment_id: m.assignment.assignment_id,
-                    title: m.assignment.title,
-                    file: m.assignment.file,
-                    unit_ref: m.unit_code,
-                    sub_unit_ref: m.sub_unit_id,
-                    learnerMap: m.learnerMap,
-                    trainerMap: m.trainerMap,
-                    uploaded_at: m.assignment.created_at,
-                }));
+            // Apply scope filtering
+            if (req.user) {
+                await applyLearnerScope(qb, req.user, 'learner');
+            }
+
+            const mappings = await qb
+                .orderBy('mapping.created_at', 'DESC')
+                .getMany();
+
+            const data = mappings.map((m) => ({
+                mapping_id: m.mapping_id,
+                assignment_id: m.assignment.assignment_id,
+                title: m.assignment.title,
+                file: m.assignment.file,
+                unit_ref: m.unit_code,
+                sub_unit_ref: m.sub_unit_id,
+                learnerMap: m.learnerMap,
+                trainerMap: m.trainerMap,
+                uploaded_at: m.assignment.created_at,
+            }));
 
             return res.status(200).json({
                 status: true,

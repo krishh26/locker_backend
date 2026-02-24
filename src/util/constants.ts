@@ -1,6 +1,8 @@
 export enum UserRole {
     MasterAdmin = 'MasterAdmin',
     AccountManager = 'AccountManager',
+    OrganisationAdmin = 'OrganisationAdmin',
+    CentreAdmin = 'CentreAdmin',
     Learner = 'Learner',
     EQA = 'EQA',
     IQA = 'IQA',
@@ -117,7 +119,9 @@ export const SocketDomain = {
 export const rolePriority = [
     UserRole.MasterAdmin,
     UserRole.AccountManager,
-    UserRole.Admin,
+    UserRole.OrganisationAdmin,
+    UserRole.CentreAdmin,
+    UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin,
     UserRole.Trainer,
     UserRole.LineManager,
     UserRole.Employer,

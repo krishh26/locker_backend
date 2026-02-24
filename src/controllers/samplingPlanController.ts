@@ -16,6 +16,7 @@ import { UserRole } from "../util/constants";
 import { AssignmentPCReview } from "../entity/AssignmentPCReview.entity";
 //import { LearnerUnit } from "../entity/LearnerUnit.entity";
 import { getUnitCompletionStatus } from '../util/unitCompletion';
+import { applyLearnerScope } from "../util/organisationFilter";
 import {  deleteFromS3, uploadToS3 } from '../util/aws';
 import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
 
@@ -74,22 +75,28 @@ export class SamplingPlanController {
       const query = samplingPlanRepo
         .createQueryBuilder("plan")
         .leftJoinAndSelect("plan.course", "course")
-        .leftJoinAndSelect("plan.iqa", "iqa");
+        .leftJoinAndSelect("plan.iqa", "iqa")
+        .innerJoin(UserCourse, "uc", "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
+        .innerJoin(Learner, "learner", "learner.learner_id = uc.learner_id");
+
+      if ((req as any).user) {
+        await applyLearnerScope(query, (req as any).user, "learner");
+      }
 
       if (iqa_id) {
         query.andWhere("iqa.user_id = :iqa_id", { iqa_id });
       }
 
-      // Optional course filter
       if (course_id) {
         query.andWhere("course.course_id = :course_id", { course_id });
       }
 
-      const plans = await query.orderBy("plan.createdAt", "DESC").getOne();
+      const plans = await query.select("plan").addSelect("course").addSelect("iqa").distinct(true).orderBy("plan.createdAt", "DESC").limit(1).getMany();
+      const plan = plans[0] ?? null;
 
       return res.status(200).json({
         message: "Sampling plans fetched successfully",
-        data: plans,
+        data: plan,
         status: true,
       });
     } catch (error) {
@@ -133,6 +140,21 @@ export class SamplingPlanController {
 
       const courseId = plan.course.course_id;
 
+      // Ensure plan is in scope (course has at least one learner in user's org/centre)
+      if ((req as any).user) {
+        const accessQb = userCourseRepo
+          .createQueryBuilder("uc")
+          .innerJoin("uc.learner_id", "learner")
+          .where("uc.course ->> 'course_id' = :courseId", { courseId });
+        await applyLearnerScope(accessQb, (req as any).user, "learner");
+        if ((await accessQb.getCount()) === 0) {
+          return res.status(403).json({
+            message: "You do not have access to this sampling plan",
+            status: false,
+          });
+        }
+      }
+
       // Fetch all sampled details for plan
       const allDetails = await detailRepo.find({
         where: { samplingPlan: { id: Number(plan_id) } },
@@ -154,7 +176,11 @@ export class SamplingPlanController {
         .leftJoinAndSelect("learner.user_id", "user")
         .leftJoinAndSelect("uc.trainer_id", "trainer")
         .leftJoinAndSelect("uc.employer_id", "employer")
-        .where("uc.course ->> 'course_id' = :courseId", { courseId })
+        .where("uc.course ->> 'course_id' = :courseId", { courseId });
+
+      if ((req as any).user) {
+        await applyLearnerScope(qb, (req as any).user, "learner");
+      }
 
       if (eqaId) {
         qb.andWhere('uc."EQA_id" = :eqaId', { eqaId });
@@ -848,15 +874,36 @@ export class SamplingPlanController {
       const planRepo = AppDataSource.getRepository(SamplingPlan);
       const detailRepo = AppDataSource.getRepository(SamplingPlanDetail);
 
-      // Base query: fetch all plans with IQA + Course
+      const scopeQb = planRepo
+        .createQueryBuilder("plan")
+        .innerJoin("plan.course", "course")
+        .innerJoin(UserCourse, "uc", "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
+        .innerJoin(Learner, "learner", "learner.learner_id = uc.learner_id")
+        .leftJoin("plan.iqa", "iqa")
+        .select("plan.id");
+
+      if ((req as any).user) {
+        await applyLearnerScope(scopeQb, (req as any).user, "learner");
+      }
+
+      if (iqa_id) scopeQb.andWhere("iqa.user_id = :iqa_id", { iqa_id });
+      if (course_id) scopeQb.andWhere("course.course_id = :course_id", { course_id });
+      if (status) scopeQb.andWhere("plan.status = :status", { status });
+
+      const scopedPlanIds = await scopeQb.distinct(true).getRawMany().then(rows => rows.map((r: any) => r.plan_id));
+
+      if (scopedPlanIds.length === 0) {
+        return res.status(200).json({ message: "Plan allocation data fetched successfully", status: true, data: [] });
+      }
+
       let query = planRepo
         .createQueryBuilder("plan")
         .leftJoinAndSelect("plan.course", "course")
         .leftJoinAndSelect("plan.iqa", "iqa")
         .leftJoinAndSelect("plan.assignedIQAs", "assignedIQAs")
-        .leftJoinAndSelect("plan.details", "details");
+        .leftJoinAndSelect("plan.details", "details")
+        .where("plan.id IN (:...ids)", { ids: scopedPlanIds });
 
-      // Optional filters
       if (iqa_id) query = query.andWhere("iqa.user_id = :iqa_id", { iqa_id });
       if (course_id) query = query.andWhere("course.course_id = :course_id", { course_id });
       if (status) query = query.andWhere("plan.status = :status", { status });

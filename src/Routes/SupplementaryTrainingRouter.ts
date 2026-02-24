@@ -8,10 +8,10 @@ const supplementaryTrainingRoutes = express.Router();
 const Controller = new SupplementaryTrainingController();
 
 // Admin endpoints
-supplementaryTrainingRoutes.post('/admin/resources', authorizeRoles(UserRole.Admin), singleFileUpload('file'), Controller.addResource);
-supplementaryTrainingRoutes.patch('/admin/resources/:id', authorizeRoles(UserRole.Admin), singleFileUpload('file'), Controller.updateResource);
-supplementaryTrainingRoutes.get('/admin/resources', authorizeRoles(UserRole.Admin), Controller.getAllAdmin);
-supplementaryTrainingRoutes.patch('/admin/resources/:id/toggle', authorizeRoles(UserRole.Admin), Controller.toggleActive);
+supplementaryTrainingRoutes.post('/admin/resources', authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), singleFileUpload('file'), Controller.addResource);
+supplementaryTrainingRoutes.patch('/admin/resources/:id', authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), singleFileUpload('file'), Controller.updateResource);
+supplementaryTrainingRoutes.get('/admin/resources', authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), Controller.getAllAdmin);
+supplementaryTrainingRoutes.patch('/admin/resources/:id/toggle', authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), Controller.toggleActive);
 
 // Learner endpoints
 supplementaryTrainingRoutes.get('/learner/resources', authorizeRoles(), Controller.getAllActiveForLearner);

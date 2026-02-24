@@ -4,6 +4,7 @@ import { Payment } from '../entity/Payment.entity';
 import { Plan } from '../entity/Plan.entity';
 import { CustomRequest } from '../util/Interface/expressInterface';
 import { UserRole } from '../util/constants';
+import { applyScope } from '../util/organisationFilter';
 
 interface LineItemInput {
     periodIndex: number;
@@ -106,6 +107,10 @@ export default class PaymentController {
                 .leftJoinAndSelect('payment.plan', 'plan')
                 .orderBy('payment.date', 'DESC')
                 .addOrderBy('payment.id', 'DESC');
+
+            if (req.user) {
+                await applyScope(qb, req.user, 'payment', { organisationOnly: true });
+            }
 
             if (organisationId != null && !isNaN(organisationId)) {
                 qb.andWhere('payment.organisation_id = :organisationId', { organisationId });

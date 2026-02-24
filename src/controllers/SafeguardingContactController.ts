@@ -3,6 +3,8 @@ import { AppDataSource } from '../data-source';
 import { CustomRequest } from '../util/Interface/expressInterface';
 import { SafeguardingContact } from '../entity/SafeguardingContact.entity';
 import { User } from '../entity/User.entity';
+import { getAccessibleOrganisationIds, getAccessibleCentreIds, resolveUserRole } from '../util/organisationFilter';
+import { UserRole } from '../util/constants';
 
 export class SafeguardingContactController {
     // Add new Safeguarding Contact
@@ -115,6 +117,19 @@ export class SafeguardingContactController {
                 .leftJoin(User, 'uu', 'uu.user_id = CAST(sc.updatedBy AS INT)')
                 .addSelect(['uu.first_name AS updated_first_name', 'uu.last_name AS updated_last_name']);
 
+            if (req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user);
+                    if (centreIds === null || centreIds.length === 0) return res.status(200).json({ message: 'Safeguarding Contacts retrieved successfully', status: true, data: [] });
+                    qb.innerJoin('u.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                } else {
+                    const orgIds = await getAccessibleOrganisationIds(req.user);
+                    if (orgIds === null || orgIds.length === 0) return res.status(200).json({ message: 'Safeguarding Contacts retrieved successfully', status: true, data: [] });
+                    qb.innerJoin('u.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
+                }
+            }
+
             const contacts = await qb
                 .orderBy('sc.createdAt', 'DESC')
                 .getMany();
@@ -140,13 +155,27 @@ export class SafeguardingContactController {
             const id = parseInt(req.params.id);
             const repo = AppDataSource.getRepository(SafeguardingContact);
 
-            const contact = await repo.createQueryBuilder('sc')
+            const qb = repo.createQueryBuilder('sc')
                 .leftJoin(User, 'u', 'u.user_id = CAST(sc.createdBy AS INT)')
                 .addSelect(['u.first_name', 'u.last_name'])
                 .leftJoin(User, 'uu', 'uu.user_id = CAST(sc.updatedBy AS INT)')
                 .addSelect(['uu.first_name AS updated_first_name', 'uu.last_name AS updated_last_name'])
-                .where('sc.id = :id', { id })
-                .getOne();
+                .where('sc.id = :id', { id });
+
+            if (req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user);
+                    if (centreIds === null || centreIds.length === 0) return res.status(404).json({ message: 'Safeguarding Contact not found', status: false });
+                    qb.innerJoin('u.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                } else {
+                    const orgIds = await getAccessibleOrganisationIds(req.user);
+                    if (orgIds === null || orgIds.length === 0) return res.status(404).json({ message: 'Safeguarding Contact not found', status: false });
+                    qb.innerJoin('u.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
+                }
+            }
+
+            const contact = await qb.getOne();
 
             if (!contact) {
                 return res.status(404).json({ 
