@@ -5,7 +5,7 @@ import { FundingBand } from '../entity/FundingBand.entity';
 import { Course } from '../entity/Course.entity';
 import { UserCourse } from '../entity/UserCourse.entity';
 import { Learner } from '../entity/Learner.entity';
-import { applyLearnerScope } from '../util/organisationFilter';
+import { applyLearnerScope, getScopeContext } from '../util/organisationFilter';
 
 class FundingBandController {
     
@@ -72,71 +72,38 @@ class FundingBandController {
             const { page = 1, limit = 10, course_id, is_active } = req.query;
 
             const fundingBandRepository = AppDataSource.getRepository(FundingBand);
+            const queryBuilder = fundingBandRepository.createQueryBuilder('funding_band')
+                .innerJoin('funding_band.course', 'course')
+                .innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
+                .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id')
+                .addSelect(['course.course_id', 'course.course_name', 'course.course_code', 'course.level', 'course.total_credits'])
+                .orderBy('funding_band.created_at', 'DESC');
+
+            if (req.user) {
+                await applyLearnerScope(queryBuilder, req.user, 'learner', { scopeContext: getScopeContext(req) });
+            }
+
+            // Apply filters
+            if (course_id) {
+                queryBuilder.andWhere('funding_band.course_id = :course_id', { course_id });
+            }
+
+            if (is_active !== undefined) {
+                queryBuilder.andWhere('funding_band.is_active = :is_active', { is_active: is_active === 'true' });
+            }
+
+            // Apply pagination
             const pageNumber = parseInt(page as string);
             const limitNumber = parseInt(limit as string);
             const skip = (pageNumber - 1) * limitNumber;
 
-            // Build scoped query for distinct funding_band ids only (avoids GROUP BY / created_at error)
-            // ORDER BY column must appear in SELECT when using DISTINCT (PostgreSQL)
-            const idsQb = fundingBandRepository.createQueryBuilder('funding_band')
-                .innerJoin('funding_band.course', 'course')
-                .innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
-                .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id')
-                .select('funding_band.id', 'id')
-                .addSelect('funding_band.created_at', 'created_at')
-                .distinct(true)
-                .orderBy('funding_band.created_at', 'DESC');
-
-            if (req.user) {
-                await applyLearnerScope(idsQb, req.user, 'learner');
-            }
-            if (course_id) {
-                idsQb.andWhere('funding_band.course_id = :course_id', { course_id });
-            }
-            if (is_active !== undefined) {
-                idsQb.andWhere('funding_band.is_active = :is_active', { is_active: is_active === 'true' });
-            }
-
-            const countQb = fundingBandRepository
-                .createQueryBuilder('funding_band')
-                .innerJoin('funding_band.course', 'course')
-                .innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
-                .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id')
-                .select('COUNT(DISTINCT funding_band.id)', 'count');
-            if (req.user) await applyLearnerScope(countQb, req.user, 'learner');
-            if (course_id) countQb.andWhere('funding_band.course_id = :course_id', { course_id });
-            if (is_active !== undefined) countQb.andWhere('funding_band.is_active = :is_active', { is_active: is_active === 'true' });
+            const countQb = queryBuilder.clone().select('COUNT(DISTINCT funding_band.id)', 'count');
             const totalResult = await countQb.getRawOne<{ count: string }>();
             const total = parseInt(totalResult?.count ?? '0', 10);
 
-            const idRows = await idsQb.skip(skip).take(limitNumber).getRawMany<{ id: number }>();
-            const ids = idRows.map((r) => r.id);
+            queryBuilder.select('funding_band').addSelect(['course.course_id', 'course.course_name', 'course.course_code', 'course.level', 'course.total_credits']).distinct(true).skip(skip).take(limitNumber);
 
-            if (ids.length === 0) {
-                return res.status(200).json({
-                    message: 'Funding bands fetched successfully',
-                    status: true,
-                    data: [],
-                    meta_data: {
-                        page: pageNumber,
-                        items: 0,
-                        page_size: limitNumber,
-                        pages: Math.ceil(total / limitNumber),
-                        total
-                    }
-                });
-            }
-
-            // Fetch full entities by id, preserving order
-            const fundingBands = await fundingBandRepository
-                .createQueryBuilder('funding_band')
-                .innerJoinAndSelect('funding_band.course', 'course')
-                .where('funding_band.id IN (:...ids)', { ids })
-                .orderBy('funding_band.created_at', 'DESC')
-                .getMany();
-
-            const idOrder = new Map(ids.map((id, i) => [id, i]));
-            fundingBands.sort((a, b) => (idOrder.get(a.id) ?? 0) - (idOrder.get(b.id) ?? 0));
+            const fundingBands = await queryBuilder.getMany();
 
             const totalPages = Math.ceil(total / limitNumber);
 
@@ -149,7 +116,7 @@ class FundingBandController {
                     items: fundingBands.length,
                     page_size: limitNumber,
                     pages: totalPages,
-                    total
+                    total: total
                 }
             });
 
@@ -185,7 +152,7 @@ class FundingBandController {
                 .where('funding_band.id = :id', { id: parseInt(id) });
 
             if (req.user) {
-                await applyLearnerScope(qb, req.user, 'learner');
+                await applyLearnerScope(qb, req.user, 'learner', { scopeContext: getScopeContext(req) });
             }
 
             const fundingBand = await qb.getOne();
@@ -349,7 +316,7 @@ class FundingBandController {
                 .orderBy('funding_band.effective_from', 'DESC');
 
             if (req.user) {
-                await applyLearnerScope(queryBuilder, req.user, 'learner');
+                await applyLearnerScope(queryBuilder, req.user, 'learner', { scopeContext: getScopeContext(req) });
             }
 
             if (is_active !== undefined) {

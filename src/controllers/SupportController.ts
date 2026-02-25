@@ -5,19 +5,9 @@ import { Support, SupportStatus } from "../entity/Support.entity";
 import { User } from "../entity/User.entity";
 import { SocketDomain } from "../util/constants";
 import { SendNotifications } from "../util/socket/notification";
-import { applyLearnerScope } from "../util/organisationFilter";
-import { Learner } from "../entity/Learner.entity";
+import { getAccessibleOrganisationIds, getScopeContext } from "../util/organisationFilter";
 
 class SupportController {
-    private async canAccessSupport(requestUserId: number | undefined, req: CustomRequest): Promise<boolean> {
-        if (!requestUserId) return false;
-        const qb = AppDataSource.getRepository(Learner)
-            .createQueryBuilder('learner')
-            .where('learner.user_id = :requestUserId', { requestUserId });
-        await applyLearnerScope(qb, req.user, 'learner');
-        return (await qb.getCount()) > 0;
-    }
-
     public async createSupport(req: CustomRequest, res: Response) {
         try {
             const supportRepository = AppDataSource.getRepository(Support);
@@ -90,16 +80,13 @@ class SupportController {
             }
 
             const supportRepository = AppDataSource.getRepository(Support);
-            const support = await supportRepository.findOne({ where: { support_id: supportId }, relations: ['request_id'] });
+            const support = await supportRepository.findOne({ where: { support_id: supportId } });
 
             if (!support) {
                 return res.status(404).json({
                     message: 'Support request not found',
                     status: false,
                 });
-            }
-            if (req.user && !(await this.canAccessSupport(support.request_id?.user_id, req))) {
-                return res.status(403).json({ message: 'Access denied', status: false });
             }
 
             support.title = title || support.title;
@@ -148,10 +135,28 @@ class SupportController {
                 qb.andWhere('request.user_id = :request_id', { request_id: request_id });
             }
 
-            // Org / centre / learner scope: only support requests from learners in scope
+            // Add organization filtering through request_id (User → UserOrganisation)
             if (req.user) {
-                qb.leftJoin(Learner, 'learner', 'learner.user_id = request.user_id');
-                await applyLearnerScope(qb, req.user, 'learner');
+                const accessibleIds = await getAccessibleOrganisationIds(req.user, getScopeContext(req));
+                if (accessibleIds !== null) {
+                    if (accessibleIds.length === 0) {
+                        return res.status(200).json({
+                            message: 'Support requests retrieved successfully',
+                            status: true,
+                            data: [],
+                            ...(meta === 'true' && {
+                                meta_data: {
+                                    page: req.pagination.page,
+                                    items: 0,
+                                    page_size: req.pagination.limit,
+                                    pages: 0,
+                                },
+                            }),
+                        });
+                    }
+                    qb.leftJoin('request.userOrganisations', 'userOrganisation')
+                      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+                }
             }
 
             const [supports, count] = await qb
@@ -187,16 +192,13 @@ class SupportController {
         try {
             const supportId = parseInt(req.params.id);
             const supportRepository = AppDataSource.getRepository(Support);
-            const support = await supportRepository.findOne({ where: { support_id: supportId }, relations: ['request_id'] });
+            const support = await supportRepository.findOne({ where: { support_id: supportId } });
 
             if (!support) {
                 return res.status(404).json({
                     message: 'Support request not found',
                     status: false,
                 });
-            }
-            if (req.user && !(await this.canAccessSupport(support.request_id?.user_id, req))) {
-                return res.status(403).json({ message: 'Access denied', status: false });
             }
 
             await supportRepository.remove(support);

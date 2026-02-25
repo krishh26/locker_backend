@@ -6,7 +6,7 @@ import { deleteFromS3, uploadToS3 } from '../util/aws';
 import { Course } from '../entity/Course.entity';
 import { UserCourse } from '../entity/UserCourse.entity';
 import { Learner } from '../entity/Learner.entity';
-import { applyLearnerScope } from '../util/organisationFilter';
+import { applyLearnerScope, getScopeContext } from '../util/organisationFilter';
 
 class ResourceController {
     public async createResource(req: CustomRequest, res: Response) {
@@ -77,7 +77,7 @@ class ResourceController {
                 .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id');
 
             if (req.user) {
-                await applyLearnerScope(query, req.user, 'learner');
+                await applyLearnerScope(query, req.user, 'learner', { scopeContext: getScopeContext(req) });
             }
 
             if (search) {
@@ -119,7 +119,7 @@ class ResourceController {
                 .where('resource.resource_id = :resourceId', { resourceId });
 
             if (req.user) {
-                await applyLearnerScope(qb, req.user, 'learner');
+                await applyLearnerScope(qb, req.user, 'learner', { scopeContext: getScopeContext(req) });
             }
 
             const resource = await qb.select('resource').getOne();

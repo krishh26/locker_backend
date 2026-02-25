@@ -5,7 +5,7 @@ import { SamplingPlanDetail } from "../entity/SamplingPlanDetail.entity";
 import { Form } from "../entity/Form.entity";
 import { UserCourse } from "../entity/UserCourse.entity";
 import { Learner } from "../entity/Learner.entity";
-import { applyLearnerScope } from "../util/organisationFilter";
+import { applyLearnerScope, getScopeContext } from "../util/organisationFilter";
 import { CustomRequest } from "../util/Interface/expressInterface";
 
 export class SamplingPlanFormController {
@@ -58,7 +58,7 @@ export class SamplingPlanFormController {
         .where("plan_detail.id = :plan_detail_id", { plan_detail_id: parseInt(plan_detail_id) });
 
       if ((req as any).user) {
-        await applyLearnerScope(qb, (req as any).user, "learner");
+        await applyLearnerScope(qb, (req as any).user, "learner", { scopeContext: getScopeContext(req as any) });
       }
 
       const forms = await qb.select("spf").addSelect("plan_detail").addSelect("form").distinct(true).orderBy("spf.created_at", "DESC").getMany();

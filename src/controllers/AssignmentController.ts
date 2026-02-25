@@ -10,7 +10,7 @@ import { Learner } from "../entity/Learner.entity";
 import { User } from "../entity/User.entity";
 import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
 import { AssessmentStatus } from "../util/constants";
-import { applyLearnerScope, canAccessOrganisation, canAccessCentre } from "../util/organisationFilter";
+import { applyLearnerScope, canAccessOrganisation, canAccessCentre, getScopeContext } from "../util/organisationFilter";
 class AssignmentController {
     /**
      * Check if user is authorized to access an assignment
@@ -94,7 +94,7 @@ class AssignmentController {
                 qb.leftJoin(Learner, 'learner', 'learner.user_id = learnerUser.user_id')
                   .leftJoin('learner.organisation', 'org')
                   .leftJoin('learner.centre', 'centre');
-                await applyLearnerScope(qb, req.user, 'learner');
+                await applyLearnerScope(qb, req.user, 'learner', { scopeContext: getScopeContext(req) });
             }
 
             // Pagination
@@ -433,7 +433,7 @@ class AssignmentController {
                 assignmentQB.leftJoin(Learner, 'learner', 'learner.user_id = user.user_id')
                             .leftJoin('learner.organisation', 'org')
                             .leftJoin('learner.centre', 'centre');
-                await applyLearnerScope(assignmentQB, req.user, 'learner');
+                await applyLearnerScope(assignmentQB, req.user, 'learner', { scopeContext: getScopeContext(req) });
             }
 
             const [assignments, count] = await assignmentQB.getManyAndCount();
@@ -856,14 +856,14 @@ class AssignmentController {
                     });
                 }
                 // Check organisation access
-                if (!(await canAccessOrganisation(req.user, learner.organisation_id))) {
+                if (!(await canAccessOrganisation(req.user, learner.organisation_id, getScopeContext(req)))) {
                     return res.status(403).json({
                         message: "You are not authorized to view this assignment",
                         status: false,
                     });
                 }
                 // Check centre access
-                if (!(await canAccessCentre(req.user, learner.centre_id))) {
+                if (!(await canAccessCentre(req.user, learner.centre_id, getScopeContext(req)))) {
                     return res.status(403).json({
                         message: "You are not authorized to view this assignment",
                         status: false,
@@ -1232,7 +1232,7 @@ class AssignmentController {
 
             // Apply scope filtering
             if (req.user) {
-                await applyLearnerScope(qb, req.user, 'learner');
+                await applyLearnerScope(qb, req.user, 'learner', { scopeContext: getScopeContext(req) });
             }
 
             const mappings = await qb

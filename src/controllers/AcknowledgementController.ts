@@ -4,14 +4,6 @@ import { CustomRequest } from '../util/Interface/expressInterface';
 import { Acknowledgement } from '../entity/Acknowledgement.entity';
 import { deleteFromS3, uploadToS3 } from '../util/aws';
 import { Learner } from '../entity/Learner.entity';
-import { getAccessibleOrganisationIds } from '../util/organisationFilter';
-
-async function canAccessAcknowledgement(user: CustomRequest['user'], item: Acknowledgement): Promise<boolean> {
-    if (!user) return false;
-    const orgIds = await getAccessibleOrganisationIds(user);
-    if (orgIds === null) return true;
-    return item.organisation_id != null && orgIds.includes(item.organisation_id);
-}
 
 export class AcknowledgementController {
     // POST /acknowledgement → Add new acknowledgement
@@ -38,18 +30,12 @@ export class AcknowledgementController {
             //     return res.status(400).json({ status: false, message: 'Either file or fileUrl must be provided' });
             // }
 
-            let organisation_id: number | null = (req.body as any).organisation_id ?? null;
-            if (organisation_id == null && req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user);
-                if (accessibleIds != null && accessibleIds.length > 0) organisation_id = accessibleIds[0];
-            }
             const repo = AppDataSource.getRepository(Acknowledgement);
             const entity = repo.create({
                 message: message || null,
                 fileName,
                 filePath,
                 fileUrl: fileUrl || null,
-                organisation_id,
             });
 
             const saved = await repo.save(entity);
@@ -63,17 +49,7 @@ export class AcknowledgementController {
     public async list(req: CustomRequest, res: Response) {
         try {
             const repo = AppDataSource.getRepository(Acknowledgement);
-            const qb = repo.createQueryBuilder('a').orderBy('a.createdAt', 'DESC');
-            if (req.user) {
-                const orgIds = await getAccessibleOrganisationIds(req.user);
-                if (orgIds !== null) {
-                    if (orgIds.length === 0) {
-                        return res.status(200).json({ status: true, message: 'OK', data: [] });
-                    }
-                    qb.andWhere('a.organisation_id IN (:...orgIds)', { orgIds });
-                }
-            }
-            const list = await qb.getMany();
+            const list = await repo.find({ order: { createdAt: 'DESC' } });
             const data = list.map(item => ({
                 id: item.id,
                 message: item.message,
@@ -103,9 +79,7 @@ export class AcknowledgementController {
             const repo = AppDataSource.getRepository(Acknowledgement);
             const existing = await repo.findOne({ where: { id } });
             if (!existing) return res.status(404).json({ status: false, message: 'Acknowledgement not found' });
-            if (!(await canAccessAcknowledgement(req.user, existing))) {
-                return res.status(403).json({ status: false, message: 'You do not have access to this acknowledgement' });
-            }
+            
             let filePath = existing.filePath;
             let fileName = existing.fileName;
             if(req.file){   
@@ -140,9 +114,7 @@ export class AcknowledgementController {
             const repo = AppDataSource.getRepository(Acknowledgement);
             const existing = await repo.findOne({ where: { id } });
             if (!existing) return res.status(404).json({ status: false, message: 'Acknowledgement not found' });
-            if (!(await canAccessAcknowledgement(req.user, existing))) {
-                return res.status(403).json({ status: false, message: 'You do not have access to this acknowledgement' });
-            }
+
             if(existing.filePath){
                 await deleteFromS3(existing.filePath);
             }
@@ -154,21 +126,11 @@ export class AcknowledgementController {
         }
     }
 
-    // DELETE /acknowledgement → Clear all learner's isShowMessage to true (scoped by org)
+    // DELETE /acknowledgement → Clear all learner's isShowMessage to true
     public async clearAll(req: CustomRequest, res: Response) {
         try {
             const repo = AppDataSource.getRepository(Learner);
-            const qb = repo.createQueryBuilder().update(Learner).set({ isShowMessage: true });
-            if (req.user) {
-                const orgIds = await getAccessibleOrganisationIds(req.user);
-                if (orgIds !== null) {
-                    if (orgIds.length === 0) {
-                        return res.status(200).json({ status: true, message: 'All acknowledgements cleared', data: null });
-                    }
-                    qb.where('organisation_id IN (:...orgIds)', { orgIds });
-                }
-            }
-            await qb.execute();
+            await repo.createQueryBuilder().update(Learner).set({ isShowMessage: true }).execute();
             return res.status(200).json({ status: true, message: 'All acknowledgements cleared', data: null });
         } catch (error: any) {
             return res.status(500).json({ status: false, message: 'Internal Server Error', data: { error: error.message } });

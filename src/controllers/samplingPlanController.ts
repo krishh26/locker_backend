@@ -16,7 +16,7 @@ import { UserRole } from "../util/constants";
 import { AssignmentPCReview } from "../entity/AssignmentPCReview.entity";
 //import { LearnerUnit } from "../entity/LearnerUnit.entity";
 import { getUnitCompletionStatus } from '../util/unitCompletion';
-import { applyLearnerScope } from "../util/organisationFilter";
+import { applyLearnerScope, getScopeContext } from "../util/organisationFilter";
 import {  deleteFromS3, uploadToS3 } from '../util/aws';
 import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
 
@@ -80,7 +80,7 @@ export class SamplingPlanController {
         .innerJoin(Learner, "learner", "learner.learner_id = uc.learner_id");
 
       if ((req as any).user) {
-        await applyLearnerScope(query, (req as any).user, "learner");
+        await applyLearnerScope(query, (req as any).user, "learner", { scopeContext: getScopeContext(req as any) });
       }
 
       if (iqa_id) {
@@ -146,7 +146,7 @@ export class SamplingPlanController {
           .createQueryBuilder("uc")
           .innerJoin("uc.learner_id", "learner")
           .where("uc.course ->> 'course_id' = :courseId", { courseId });
-        await applyLearnerScope(accessQb, (req as any).user, "learner");
+        await applyLearnerScope(accessQb, (req as any).user, "learner", { scopeContext: getScopeContext(req as any) });
         if ((await accessQb.getCount()) === 0) {
           return res.status(403).json({
             message: "You do not have access to this sampling plan",
@@ -179,7 +179,7 @@ export class SamplingPlanController {
         .where("uc.course ->> 'course_id' = :courseId", { courseId });
 
       if ((req as any).user) {
-        await applyLearnerScope(qb, (req as any).user, "learner");
+        await applyLearnerScope(qb, (req as any).user, "learner", { scopeContext: getScopeContext(req as any) });
       }
 
       if (eqaId) {
@@ -883,7 +883,7 @@ export class SamplingPlanController {
         .select("plan.id");
 
       if ((req as any).user) {
-        await applyLearnerScope(scopeQb, (req as any).user, "learner");
+        await applyLearnerScope(scopeQb, (req as any).user, "learner", { scopeContext: getScopeContext(req as any) });
       }
 
       if (iqa_id) scopeQb.andWhere("iqa.user_id = :iqa_id", { iqa_id });

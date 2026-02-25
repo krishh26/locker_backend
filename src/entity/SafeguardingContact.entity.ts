@@ -17,9 +17,6 @@ export class SafeguardingContact {
     @Column({ type: 'text', nullable: true })
     additionalInfo: string;
 
-    @Column({ name: 'organisation_id', type: 'int', nullable: true })
-    organisation_id: number | null;
-
     @Column({ type: 'varchar' })
     createdBy: string;
 

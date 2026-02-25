@@ -7,7 +7,7 @@ import { ResourceStatus } from '../entity/ResourceStatus.entity';
 import { uploadToS3 } from '../util/aws';
 import { UserCourse } from '../entity/UserCourse.entity';
 import { Learner } from '../entity/Learner.entity';
-import { applyLearnerScope } from '../util/organisationFilter';
+import { applyLearnerScope, getScopeContext } from '../util/organisationFilter';
 
 class ResourceStatusController {
 
@@ -68,7 +68,7 @@ class ResourceStatusController {
                 .innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
                 .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id')
                 .where('resource.resource_id = :resource_id', { resource_id });
-            if (req.user) await applyLearnerScope(resourceQb, req.user, 'learner');
+            if (req.user) await applyLearnerScope(resourceQb, req.user, 'learner', { scopeContext: getScopeContext(req) });
             const resource = await resourceQb.getOne();
             if (!resource) {
                 return res.status(404).json({ message: 'Resource not found', status: false });
@@ -113,7 +113,7 @@ class ResourceStatusController {
                 .innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
                 .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id')
                 .where('resource.resource_id = :resource_id', { resource_id });
-            if (req.user) await applyLearnerScope(resourceQb, req.user, 'learner');
+            if (req.user) await applyLearnerScope(resourceQb, req.user, 'learner', { scopeContext: getScopeContext(req) });
             const resourceInScope = await resourceQb.getOne();
             if (!resourceInScope) {
                 return res.status(404).json({ message: 'Resource not found', status: false });

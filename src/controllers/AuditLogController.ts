@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import { AppDataSource } from "../data-source";
 import { AuditLog, AuditActionType } from "../entity/AuditLog.entity";
 import { CustomRequest } from "../util/Interface/expressInterface";
-import { getAccessibleOrganisationIds, getAccessibleCentreIds, canAccessOrganisation, canAccessCentre } from "../util/organisationFilter";
+import { getAccessibleOrganisationIds, getAccessibleCentreIds, canAccessOrganisation, canAccessCentre, getScopeContext } from "../util/organisationFilter";
 import { In } from "typeorm";
 
 class AuditLogController {
@@ -160,8 +160,9 @@ class AuditLogController {
     public async GetAuditLogs(req: CustomRequest, res: Response) {
         try {
             const auditLogRepository = AppDataSource.getRepository(AuditLog);
-            const accessibleIds = await getAccessibleOrganisationIds(req.user);
-            const accessibleCentreIds = await getAccessibleCentreIds(req.user);
+            const scopeContext = getScopeContext(req);
+            const accessibleIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+            const accessibleCentreIds = await getAccessibleCentreIds(req.user, scopeContext);
 
             let queryBuilder = auditLogRepository.createQueryBuilder("log")
                 .leftJoinAndSelect("log.user", "user")
@@ -286,7 +287,7 @@ class AuditLogController {
             }
 
             if (log.organisation_id !== null) {
-                const canAccessOrg = await canAccessOrganisation(req.user, log.organisation_id);
+                const canAccessOrg = await canAccessOrganisation(req.user, log.organisation_id, getScopeContext(req));
                 if (!canAccessOrg) {
                     return res.status(403).json({
                         message: "You do not have access to this audit log",
@@ -295,7 +296,7 @@ class AuditLogController {
                 }
             }
             if (log.centre_id !== null) {
-                const canAccessCent = await canAccessCentre(req.user, log.centre_id);
+                const canAccessCent = await canAccessCentre(req.user, log.centre_id, getScopeContext(req));
                 if (!canAccessCent) {
                     return res.status(403).json({
                         message: "You do not have access to this audit log",

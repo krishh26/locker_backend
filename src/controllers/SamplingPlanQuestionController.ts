@@ -4,7 +4,7 @@ import { SamplingPlanQuestion } from "../entity/SamplingPlanQuestion.entity";
 import { SamplingPlanDetail } from "../entity/SamplingPlanDetail.entity";
 import { UserCourse } from "../entity/UserCourse.entity";
 import { Learner } from "../entity/Learner.entity";
-import { applyLearnerScope } from "../util/organisationFilter";
+import { applyLearnerScope, getScopeContext } from "../util/organisationFilter";
 
 export class SamplingPlanQuestionController {
 
@@ -58,7 +58,7 @@ export class SamplingPlanQuestionController {
         .where("plan_detail.id = :plan_detail_id", { plan_detail_id: parseInt(plan_detail_id) });
 
       if ((req as any).user) {
-        await applyLearnerScope(qb, (req as any).user, "learner");
+        await applyLearnerScope(qb, (req as any).user, "learner", { scopeContext: getScopeContext(req as any) });
       }
 
       const questions = await qb.select("spq").addSelect("plan_detail").addSelect("question").addSelect("answered_by").distinct(true).orderBy("spq.created_at", "ASC").getMany();

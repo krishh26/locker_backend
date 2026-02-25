@@ -8,7 +8,7 @@ import { AccountManager } from "../entity/AccountManager.entity";
 import { AccountManagerOrganisation } from "../entity/AccountManagerOrganisation.entity";
 import { Subscription } from "../entity/Subscription.entity";
 import { AuditLog } from "../entity/AuditLog.entity";
-import { getAccessibleOrganisationIds, getAccessibleCentreIds, addUserScopeFilter, applyLearnerScope } from "../util/organisationFilter";
+import { getAccessibleOrganisationIds, getAccessibleCentreIds, addUserScopeFilter, applyLearnerScope, getScopeContext } from "../util/organisationFilter";
 import { Learner } from "../entity/Learner.entity";
 
 class DashboardController {
@@ -20,7 +20,8 @@ class DashboardController {
             const userRepository = AppDataSource.getRepository(User);
             const subscriptionRepository = AppDataSource.getRepository(Subscription);
 
-            const accessibleIds = await getAccessibleOrganisationIds(req.user);
+            const scopeContext = getScopeContext(req);
+            const accessibleIds = await getAccessibleOrganisationIds(req.user, scopeContext);
 
             let orgQuery = organisationRepository.createQueryBuilder("org")
                 .where("org.deleted_at IS NULL");
@@ -53,7 +54,7 @@ class DashboardController {
             if (accessibleIds !== null) {
                 centreQuery.andWhere("centre.organisation_id IN (:...ids)", { ids: accessibleIds });
             }
-            const accessibleCentreIds = await getAccessibleCentreIds(req.user);
+            const accessibleCentreIds = await getAccessibleCentreIds(req.user, scopeContext);
             if (accessibleCentreIds !== null) {
                 if (accessibleCentreIds.length === 0) {
                     centreQuery.andWhere("1 = 0");
@@ -80,7 +81,7 @@ class DashboardController {
             let learnerCountQuery = learnerRepository.createQueryBuilder("learner")
                 .where("learner.deleted_at IS NULL")
                 .select("COUNT(DISTINCT learner.learner_id)", "count");
-            if (req.user) await applyLearnerScope(learnerCountQuery, req.user, "learner");
+            if (req.user) await applyLearnerScope(learnerCountQuery, req.user, "learner", { scopeContext: getScopeContext(req) });
             const totalLearnersResult = await learnerCountQuery.getRawOne<{ count: string }>();
             const totalLearners = parseInt(totalLearnersResult?.count ?? "0", 10);
 
@@ -120,7 +121,8 @@ class DashboardController {
     public async GetOrganisationMetrics(req: CustomRequest, res: Response) {
         try {
             const organisationRepository = AppDataSource.getRepository(Organisation);
-            const accessibleIds = await getAccessibleOrganisationIds(req.user);
+            const scopeContext = getScopeContext(req);
+            const accessibleIds = await getAccessibleOrganisationIds(req.user, scopeContext);
 
             let query = organisationRepository.createQueryBuilder("org")
                 .where("org.deleted_at IS NULL");
@@ -174,7 +176,7 @@ class DashboardController {
 
             const qb = userRepository.createQueryBuilder("user")
                 .where("user.deleted_at IS NULL");
-            await addUserScopeFilter(qb, req.user, "user");
+            await addUserScopeFilter(qb, req.user, "user", getScopeContext(req));
             const users = await qb.getMany();
 
             const metrics: Record<string, number> = {};
@@ -250,7 +252,8 @@ class DashboardController {
     public async GetActivityMetrics(req: CustomRequest, res: Response) {
         try {
             const auditLogRepository = AppDataSource.getRepository(AuditLog);
-            const accessibleIds = await getAccessibleOrganisationIds(req.user);
+            const scopeContext = getScopeContext(req);
+            const accessibleIds = await getAccessibleOrganisationIds(req.user, scopeContext);
 
             let query = auditLogRepository.createQueryBuilder("log");
 
@@ -269,7 +272,7 @@ class DashboardController {
                 }
                 query.andWhere("(log.organisation_id IN (:...ids) OR log.organisation_id IS NULL)", { ids: accessibleIds });
             }
-            const accessibleCentreIdsForLog = await getAccessibleCentreIds(req.user);
+            const accessibleCentreIdsForLog = await getAccessibleCentreIds(req.user, scopeContext);
             if (accessibleCentreIdsForLog !== null && accessibleCentreIdsForLog.length > 0) {
                 query.andWhere("(log.centre_id IS NULL OR log.centre_id IN (:...centreIds))", { centreIds: accessibleCentreIdsForLog });
             } else if (accessibleCentreIdsForLog !== null && accessibleCentreIdsForLog.length === 0) {
@@ -322,7 +325,8 @@ class DashboardController {
             const userRepository = AppDataSource.getRepository(User);
             const subscriptionRepository = AppDataSource.getRepository(Subscription);
 
-            const accessibleIds = await getAccessibleOrganisationIds(req.user);
+            const scopeContext = getScopeContext(req);
+            const accessibleIds = await getAccessibleOrganisationIds(req.user, scopeContext);
 
             let orgQuery = organisationRepository.createQueryBuilder("org")
                 .where("org.deleted_at IS NULL");
@@ -354,7 +358,7 @@ class DashboardController {
             if (accessibleIds !== null) {
                 centreQuery.andWhere("centre.organisation_id IN (:...ids)", { ids: accessibleIds });
             }
-            const accessibleCentreIds = await getAccessibleCentreIds(req.user);
+            const accessibleCentreIds = await getAccessibleCentreIds(req.user, scopeContext);
             if (accessibleCentreIds !== null) {
                 if (accessibleCentreIds.length === 0) {
                     centreQuery.andWhere("1 = 0");
@@ -372,13 +376,13 @@ class DashboardController {
             let userActiveQuery = userRepository.createQueryBuilder("user")
                 .where("user.deleted_at IS NULL")
                 .andWhere("user.status = :active", { active: 'Active' });
-            await addUserScopeFilter(userActiveQuery, req.user, "user");
+            await addUserScopeFilter(userActiveQuery, req.user, "user", getScopeContext(req));
             const userActive = await userActiveQuery.getCount();
 
             let userInactiveQuery = userRepository.createQueryBuilder("user")
                 .where("user.deleted_at IS NULL")
                 .andWhere("user.status = :inactive", { inactive: 'InActive' });
-            await addUserScopeFilter(userInactiveQuery, req.user, "user");
+            await addUserScopeFilter(userInactiveQuery, req.user, "user", getScopeContext(req));
             const userInactive = await userInactiveQuery.getCount();
 
             let subQuery = subscriptionRepository.createQueryBuilder("sub")

@@ -14,7 +14,7 @@ import { NotificationType, SocketDomain, UserRole, CourseType, CourseStatus } fr
 import { convertDataToJson } from "../util/convertDataToJson";
 import { EnhancedUnit, LearningOutcome, AssessmentCriterion } from "../types/courseBuilder.types";
 import { In, Raw } from 'typeorm';
-import { applyScope, canAccessOrganisation, getAccessibleOrganisationIds } from "../util/organisationFilter";
+import { applyScope, canAccessOrganisation, getScopeContext } from "../util/organisationFilter";
 
 const enhanceCourseData = (course: any) => {
     return {
@@ -59,7 +59,7 @@ class CourseController {
                     status: false,
                 });
             }
-            if (req.user && !(await canAccessOrganisation(req.user, organisation_id))) {
+            if (req.user && !(await canAccessOrganisation(req.user, organisation_id, getScopeContext(req)))) {
                 return res.status(403).json({
                     message: 'You do not have access to create courses for this organisation',
                     status: false,
@@ -225,7 +225,7 @@ class CourseController {
                 });
             }
 
-            if (req.user && courseToDelete.organisation_id != null && !(await canAccessOrganisation(req.user, courseToDelete.organisation_id))) {
+            if (req.user && courseToDelete.organisation_id != null && !(await canAccessOrganisation(req.user, courseToDelete.organisation_id, getScopeContext(req)))) {
                 return res.status(403).json({ message: 'You do not have access to delete this course', status: false });
             }
             if (req.user && courseToDelete.organisation_id == null) {
@@ -267,7 +267,7 @@ class CourseController {
                 });
             }
 
-            if (req.user && existingCourse.organisation_id != null && !(await canAccessOrganisation(req.user, existingCourse.organisation_id))) {
+            if (req.user && existingCourse.organisation_id != null && !(await canAccessOrganisation(req.user, existingCourse.organisation_id, getScopeContext(req)))) {
                 return res.status(403).json({ message: 'You do not have access to update this course', status: false });
             }
             if (req.user && existingCourse.organisation_id == null) {
@@ -277,7 +277,7 @@ class CourseController {
                     return res.status(403).json({ message: 'You do not have access to update this course', status: false });
                 }
             }
-            if (data.organisation_id != null && data.organisation_id !== existingCourse.organisation_id && req.user && !(await canAccessOrganisation(req.user, Number(data.organisation_id)))) {
+            if (data.organisation_id != null && data.organisation_id !== existingCourse.organisation_id && req.user && !(await canAccessOrganisation(req.user, Number(data.organisation_id), getScopeContext(req)))) {
                 return res.status(403).json({ message: 'You cannot assign this course to that organisation', status: false });
             }
 
@@ -362,7 +362,7 @@ class CourseController {
                     status: false,
                 });
             }
-            if (req.user && course.organisation_id != null && !(await canAccessOrganisation(req.user, course.organisation_id))) {
+            if (req.user && course.organisation_id != null && !(await canAccessOrganisation(req.user, course.organisation_id, getScopeContext(req)))) {
                 return res.status(403).json({ message: 'You do not have access to assign this course', status: false });
             }
 
@@ -483,7 +483,7 @@ class CourseController {
                 return res.status(404).json({ message: 'Course not found', status: false });
             }
 
-            if (req.user && course.organisation_id != null && !(await canAccessOrganisation(req.user, course.organisation_id))) {
+            if (req.user && course.organisation_id != null && !(await canAccessOrganisation(req.user, course.organisation_id, getScopeContext(req)))) {
                 return res.status(403).json({ message: 'You do not have access to this course', status: false });
             }
             if (req.user && course.organisation_id == null) {
@@ -535,7 +535,7 @@ class CourseController {
             const qb = courseRepository.createQueryBuilder("course");
 
             if (req.user) {
-                await applyScope(qb, req.user, 'course', { organisationOnly: true });
+                await applyScope(qb, req.user, 'course', { organisationOnly: true, scopeContext: getScopeContext(req) });
             }
 
             if (req.query.keyword) {
