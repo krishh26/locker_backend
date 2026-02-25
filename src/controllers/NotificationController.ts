@@ -2,7 +2,7 @@ import { Response } from "express";
 import { CustomRequest } from "../util/Interface/expressInterface";
 import { AppDataSource } from "../data-source";
 import { Notification } from "../entity/Notification.entity";
-import { getAccessibleOrganisationIds } from "../util/organisationFilter";
+import { getAccessibleOrganisationIds, getScopeContext } from "../util/organisationFilter";
 
 class NotificationController {
 
@@ -18,7 +18,7 @@ class NotificationController {
 
             // Add organization filtering - ensure user belongs to accessible organizations
             if (req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user);
+                const accessibleIds = await getAccessibleOrganisationIds(req.user, getScopeContext(req));
                 if (accessibleIds !== null && accessibleIds.length > 0) {
                     qb.leftJoin('user.userOrganisations', 'userOrganisation')
                       .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });

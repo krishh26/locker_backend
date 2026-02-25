@@ -1,29 +1,55 @@
 import { Response } from "express";
 import { AppDataSource } from "../data-source";
 import { CustomRequest } from "../util/Interface/expressInterface";
+import { Form } from "../entity/Form.entity";
+import { UserRole } from "../util/constants";
+import { User } from "../entity/User.entity";
+import { UserForm } from "../entity/UserForm.entity";
 import { FormTemplate } from "../entity/FormTemplate.entity";
-import { getAccessibleOrganisationIds } from "../util/organisationFilter";
-
-async function canAccessFormTemplate(user: CustomRequest['user'], template: FormTemplate): Promise<boolean> {
-    if (!user) return false;
-    const orgIds = await getAccessibleOrganisationIds(user);
-    if (orgIds === null) return true;
-    return template.organisation_id != null && orgIds.includes(template.organisation_id);
-}
+import { applyScope, getScopeContext, getAccessibleOrganisationIds, canAccessOrganisation, resolveUserRole } from "../util/organisationFilter";
 
 class FormTemplateController {
 
     public async CreateFormTemplate(req: CustomRequest, res: Response) {
         try {
-            const formTemplateRepository = AppDataSource.getRepository(FormTemplate);
-            const body = { ...req.body };
-            if (body.organisation_id == null && req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user);
-                if (accessibleIds != null && accessibleIds.length > 0) {
-                    body.organisation_id = accessibleIds[0];
+            const scopeContext = getScopeContext(req);
+            const role = resolveUserRole(req.user);
+            let organisationId: number | null = req.body.organisation_id != null ? Number(req.body.organisation_id) : null;
+
+            if (organisationId == null || isNaN(organisationId)) {
+                const accessibleIds = req.user ? await getAccessibleOrganisationIds(req.user, scopeContext) : null;
+                if (role === UserRole.MasterAdmin) {
+                    organisationId = scopeContext?.organisationId ?? null;
+                    if (organisationId == null) {
+                        return res.status(400).json({
+                            message: "organisation_id is required (or set X-Organisation-Id for MasterAdmin)",
+                            status: false,
+                        });
+                    }
+                } else if (accessibleIds != null && accessibleIds.length > 0) {
+                    organisationId = accessibleIds[0];
                 }
             }
-            const form = formTemplateRepository.create(body);
+
+            if (organisationId == null) {
+                return res.status(400).json({
+                    message: "organisation_id is required",
+                    status: false,
+                });
+            }
+
+            if (req.user && !(await canAccessOrganisation(req.user, organisationId, scopeContext))) {
+                return res.status(403).json({
+                    message: "You do not have access to this organisation",
+                    status: false,
+                });
+            }
+
+            const formTemplateRepository = AppDataSource.getRepository(FormTemplate);
+            const form = formTemplateRepository.create({
+                ...req.body,
+                organisation_id: organisationId,
+            });
             const savedForm = await formTemplateRepository.save(form);
             res.status(200).json({
                 message: "Form Template created successfully",
@@ -31,7 +57,7 @@ class FormTemplateController {
                 data: savedForm,
             });
 
-        } catch (error) {
+        } catch (error: any) {
             return res.status(500).json({
                 message: "Internal Server Error",
                 error: error.message,
@@ -46,19 +72,20 @@ class FormTemplateController {
             const { template_name, data } = req.body;
 
             const formTemplateRepository = AppDataSource.getRepository(FormTemplate);
-            const form = await formTemplateRepository.findOne({ where: { id } });
+            const qb = formTemplateRepository.createQueryBuilder("formtemplate")
+                .where("formtemplate.id = :id", { id });
+            if (req.user) {
+                await applyScope(qb, req.user, "formtemplate", { organisationOnly: true, scopeContext: getScopeContext(req) });
+            }
+            const form = await qb.getOne();
+
             if (!form) {
                 return res.status(404).json({
                     message: 'Form Template not found',
                     status: false,
                 });
             }
-            if (!(await canAccessFormTemplate(req.user, form))) {
-                return res.status(403).json({
-                    message: 'You do not have access to this form template',
-                    status: false,
-                });
-            }
+
             form.template_name = template_name || form.template_name;
             form.data = data || form.data;
 
@@ -69,7 +96,7 @@ class FormTemplateController {
                 status: true,
                 data: updatedForm,
             });
-        } catch (error) {
+        } catch (error: any) {
             return res.status(500).json({
                 message: 'Internal Server Error',
                 status: false,
@@ -83,27 +110,26 @@ class FormTemplateController {
             const id = parseInt(req.params.id);
 
             const formTemplateRepository = AppDataSource.getRepository(FormTemplate);
-            const form = await formTemplateRepository.createQueryBuilder('formtemplate')
-                .where('formtemplate.id = :id', { id })
-                .getOne();
+            const qb = formTemplateRepository.createQueryBuilder("formtemplate")
+                .where("formtemplate.id = :id", { id });
+            if (req.user) {
+                await applyScope(qb, req.user, "formtemplate", { organisationOnly: true, scopeContext: getScopeContext(req) });
+            }
+            const form = await qb.getOne();
+
             if (!form) {
                 return res.status(404).json({
                     message: 'Form Template not found',
                     status: false,
                 });
             }
-            if (!(await canAccessFormTemplate(req.user, form))) {
-                return res.status(403).json({
-                    message: 'You do not have access to this form template',
-                    status: false,
-                });
-            }
+
             return res.status(200).json({
                 message: 'Form Template retrieved successfully',
                 status: true,
                 data: form,
             });
-        } catch (error) {
+        } catch (error: any) {
             return res.status(500).json({
                 message: 'Internal Server Error',
                 status: false,
@@ -115,24 +141,12 @@ class FormTemplateController {
     public async getFormTemplates(req: CustomRequest, res: Response) {
         try {
             const formTemplateRepository = AppDataSource.getRepository(FormTemplate);
-            const qb = formTemplateRepository.createQueryBuilder('formtemplate');
-
+            const qb = formTemplateRepository.createQueryBuilder("formtemplate");
             if (req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user);
-                if (accessibleIds !== null) {
-                    if (accessibleIds.length === 0) {
-                        return res.status(200).json({
-                            message: 'Form Template retrieved successfully',
-                            status: true,
-                            data: []
-                        });
-                    }
-                    qb.andWhere('formtemplate.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
-                }
+                await applyScope(qb, req.user, "formtemplate", { organisationOnly: true, scopeContext: getScopeContext(req) });
             }
-
             const [forms, count] = await qb
-                .orderBy('formtemplate.created_at', 'DESC')
+                .orderBy("formtemplate.created_at", "DESC")
                 .getManyAndCount();
 
             return res.status(200).json({
@@ -140,7 +154,7 @@ class FormTemplateController {
                 status: true,
                 data: forms
             });
-        } catch (error) {
+        } catch (error: any) {
             return res.status(500).json({
                 message: 'Internal Server Error',
                 status: false,
@@ -153,33 +167,25 @@ class FormTemplateController {
         try {
             const id = parseInt(req.params.id);
             const formTemplateRepository = AppDataSource.getRepository(FormTemplate);
-            const form = await formTemplateRepository.findOne({ where: { id } });
+            const qb = formTemplateRepository.createQueryBuilder("formtemplate")
+                .where("formtemplate.id = :id", { id });
+            if (req.user) {
+                await applyScope(qb, req.user, "formtemplate", { organisationOnly: true, scopeContext: getScopeContext(req) });
+            }
+            const form = await qb.getOne();
             if (!form) {
                 return res.status(404).json({
                     message: 'Form Template not found',
                     status: false,
                 });
             }
-            if (!(await canAccessFormTemplate(req.user, form))) {
-                return res.status(403).json({
-                    message: 'You do not have access to this form template',
-                    status: false,
-                });
-            }
-            const deleteResult = await formTemplateRepository.delete(id);
-
-            if (deleteResult.affected === 0) {
-                return res.status(404).json({
-                    message: 'Form Template not found',
-                    status: false,
-                });
-            }
+            await formTemplateRepository.remove(form);
 
             return res.status(200).json({
                 message: 'Form Template deleted successfully',
                 status: true,
             });
-        } catch (error) {
+        } catch (error: any) {
             return res.status(500).json({
                 message: 'Internal Server Error',
                 status: false,

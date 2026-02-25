@@ -3,16 +3,8 @@ import { AppDataSource } from '../data-source';
 import { CustomRequest } from '../util/Interface/expressInterface';
 import { IQAQuestion, IQAQuestionType } from '../entity/IQAQuestion.entity';
 import { User } from '../entity/User.entity';
-import { getAccessibleOrganisationIds } from '../util/organisationFilter';
-
-async function canAccessIQAQuestion(user: CustomRequest['user'], question: IQAQuestion): Promise<boolean> {
-    if (!user) return false;
-    const orgIds = await getAccessibleOrganisationIds(user);
-    if (orgIds === null) return true;
-    // Legacy questions (organisation_id null) are accessible to all org users
-    if (question.organisation_id == null) return true;
-    return orgIds.includes(question.organisation_id);
-}
+import { getAccessibleOrganisationIds, getAccessibleCentreIds, resolveUserRole, getScopeContext } from '../util/organisationFilter';
+import { UserRole } from '../util/constants';
 
 export class IQAQuestionController {
     // Add new IQA Question
@@ -35,19 +27,14 @@ export class IQAQuestionController {
                 });
             }
 
-            let organisation_id: number | null = (req.body as any).organisation_id ?? null;
-            if (organisation_id == null && req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user);
-                if (accessibleIds != null && accessibleIds.length > 0) organisation_id = accessibleIds[0];
-            }
             const repo = AppDataSource.getRepository(IQAQuestion);
+
             const entity = repo.create({
                 question,
                 questionType,
                 isActive: true,
                 createdBy: String(req.user.user_id),
-                updatedBy: null,
-                organisation_id,
+                updatedBy: null
             });
 
             const saved = await repo.save(entity);
@@ -78,12 +65,6 @@ export class IQAQuestionController {
             if (!existing) {
                 return res.status(404).json({
                     message: 'IQA Question not found',
-                    status: false
-                });
-            }
-            if (!(await canAccessIQAQuestion(req.user, existing))) {
-                return res.status(403).json({
-                    message: 'You do not have access to this question',
                     status: false
                 });
             }
@@ -135,14 +116,17 @@ export class IQAQuestionController {
                 .leftJoin(User, 'uu', 'uu.user_id = CAST(q.updatedBy AS INT)')
                 .addSelect(['uu.first_name AS updated_first_name', 'uu.last_name AS updated_last_name']);
 
-            if (req.user) {
-                const orgIds = await getAccessibleOrganisationIds(req.user);
-                if (orgIds !== null) {
-                    if (orgIds.length === 0) {
-                        return res.status(200).json({ message: 'IQA Questions retrieved successfully', status: true, data: [] });
-                    }
-                    // Include legacy questions (organisation_id IS NULL)
-                    qb.andWhere('(q.organisation_id IN (:...orgIds) OR q.organisation_id IS NULL)', { orgIds });
+            if (req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                const scopeContext = getScopeContext(req);
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user, scopeContext);
+                    if (centreIds === null || centreIds.length === 0) return res.status(200).json({ message: 'IQA Questions retrieved successfully', status: true, data: [] });
+                    qb.innerJoin('u.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                } else {
+                    const orgIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+                    if (orgIds === null || orgIds.length === 0) return res.status(200).json({ message: 'IQA Questions retrieved successfully', status: true, data: [] });
+                    qb.innerJoin('u.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
                 }
             }
 
@@ -204,17 +188,33 @@ export class IQAQuestionController {
         try {
             const id = parseInt(req.params.id);
             const repo = AppDataSource.getRepository(IQAQuestion);
-            const question = await repo.findOne({ where: { id } });
+
+            const qb = repo.createQueryBuilder('q')
+                .leftJoin(User, 'u', 'u.user_id = CAST(q.createdBy AS INT)')
+                .addSelect(['u.first_name', 'u.last_name'])
+                .leftJoin(User, 'uu', 'uu.user_id = CAST(q.updatedBy AS INT)')
+                .addSelect(['uu.first_name AS updated_first_name', 'uu.last_name AS updated_last_name'])
+                .where('q.id = :id', { id });
+
+            if (req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                const scopeContext = getScopeContext(req);
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user, scopeContext);
+                    if (centreIds === null || centreIds.length === 0) return res.status(404).json({ message: 'IQA Question not found', status: false });
+                    qb.innerJoin('u.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                } else {
+                    const orgIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+                    if (orgIds === null || orgIds.length === 0) return res.status(404).json({ message: 'IQA Question not found', status: false });
+                    qb.innerJoin('u.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
+                }
+            }
+
+            const question = await qb.getOne();
 
             if (!question) {
                 return res.status(404).json({
                     message: 'IQA Question not found',
-                    status: false
-                });
-            }
-            if (!(await canAccessIQAQuestion(req.user, question))) {
-                return res.status(403).json({
-                    message: 'You do not have access to this question',
                     status: false
                 });
             }
@@ -247,12 +247,6 @@ export class IQAQuestionController {
                     status: false
                 });
             }
-            if (!(await canAccessIQAQuestion(req.user, question))) {
-                return res.status(403).json({
-                    message: 'You do not have access to this question',
-                    status: false
-                });
-            }
 
             question.isActive = !question.isActive;
             question.updatedBy = String(req.user.user_id);
@@ -282,19 +276,6 @@ export class IQAQuestionController {
         try {
             const id = parseInt(req.params.id);
             const repo = AppDataSource.getRepository(IQAQuestion);
-            const question = await repo.findOne({ where: { id } });
-            if (!question) {
-                return res.status(404).json({
-                    message: 'IQA Question not found',
-                    status: false
-                });
-            }
-            if (!(await canAccessIQAQuestion(req.user, question))) {
-                return res.status(403).json({
-                    message: 'You do not have access to this question',
-                    status: false
-                });
-            }
 
             const result = await repo.delete(id);
 
@@ -338,17 +319,6 @@ export class IQAQuestionController {
                 .leftJoin(User, 'u', 'u.user_id = CAST(q.createdBy AS INT)')
                 .addSelect(['u.first_name', 'u.last_name'])
                 .where('q.questionType = :type', { type });
-
-            if (req.user) {
-                const orgIds = await getAccessibleOrganisationIds(req.user);
-                if (orgIds !== null) {
-                    if (orgIds.length === 0) {
-                        return res.status(200).json({ message: `IQA Questions of type '${type}' retrieved successfully`, status: true, data: [] });
-                    }
-                    // Include legacy questions (organisation_id IS NULL) so previously added questions still appear
-                    qb.andWhere('(q.organisation_id IN (:...orgIds) OR q.organisation_id IS NULL)', { orgIds });
-                }
-            }
 
             // Filter by active status if provided
             if (isActive !== undefined) {
@@ -395,33 +365,33 @@ export class IQAQuestionController {
                 });
             }
 
-            let organisation_id: number | null = (req.body as any).organisation_id ?? null;
-            if (organisation_id == null && req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user);
-                if (accessibleIds != null && accessibleIds.length > 0) organisation_id = accessibleIds[0];
-            }
-
             const repo = AppDataSource.getRepository(IQAQuestion);
             const userId = String(req.user.user_id);
 
+            // Start a transaction
             await AppDataSource.transaction(async (transactionalEntityManager) => {
-                const updateWhere: { questionType: IQAQuestionType; isActive: boolean; organisation_id?: number | null } = { questionType, isActive: true };
-                if (organisation_id != null) updateWhere.organisation_id = organisation_id;
+                // First, deactivate all existing questions of this type
                 await transactionalEntityManager.update(
                     IQAQuestion,
-                    updateWhere,
+                    { questionType, isActive: true },
                     { isActive: false, updatedBy: userId }
                 );
 
+                // Then create/update questions
                 for (let i = 0; i < questions.length; i++) {
                     const questionData = questions[i];
-                    if (!questionData.question || questionData.question.trim() === '') continue;
+
+                    if (!questionData.question || questionData.question.trim() === '') {
+                        continue; // Skip empty questions
+                    }
 
                     if (questionData.id) {
+                        // Update existing question
                         const existingQuestion = await transactionalEntityManager.findOne(IQAQuestion, {
                             where: { id: questionData.id }
                         });
-                        if (existingQuestion && (organisation_id == null || existingQuestion.organisation_id === organisation_id)) {
+
+                        if (existingQuestion) {
                             transactionalEntityManager.merge(IQAQuestion, existingQuestion, {
                                 question: questionData.question.trim(),
                                 isActive: true,
@@ -430,23 +400,22 @@ export class IQAQuestionController {
                             await transactionalEntityManager.save(existingQuestion);
                         }
                     } else {
+                        // Create new question
                         const newQuestion = transactionalEntityManager.create(IQAQuestion, {
                             question: questionData.question.trim(),
                             questionType,
                             isActive: true,
                             createdBy: userId,
-                            updatedBy: null,
-                            organisation_id,
+                            updatedBy: null
                         });
                         await transactionalEntityManager.save(newQuestion);
                     }
                 }
             });
 
-            const where: { questionType: IQAQuestionType; isActive: boolean; organisation_id?: number | null } = { questionType, isActive: true };
-            if (organisation_id != null) where.organisation_id = organisation_id;
+            // Return updated questions for the type
             const updatedQuestions = await repo.find({
-                where,
+                where: { questionType, isActive: true },
                 order: { createdAt: 'ASC' }
             });
 
@@ -478,27 +447,12 @@ export class IQAQuestionController {
             }
 
             const repo = AppDataSource.getRepository(IQAQuestion);
-            let questions: IQAQuestion[] = [];
-            const baseWhere = { questionType: type as IQAQuestionType, isActive: true };
-            const baseOrder = { createdAt: 'ASC' as const };
 
-            if (req.user) {
-                const orgIds = await getAccessibleOrganisationIds(req.user);
-                if (orgIds !== null && orgIds.length > 0) {
-                    questions = await repo
-                        .createQueryBuilder('q')
-                        .where('q.questionType = :type', { type: type as IQAQuestionType })
-                        .andWhere('q.isActive = :active', { active: true })
-                        .andWhere('(q.organisation_id IN (:...orgIds) OR q.organisation_id IS NULL)', { orgIds })
-                        .orderBy('q.createdAt', 'ASC')
-                        .getMany();
-                } else {
-                    // Master Admin (orgIds null) or no orgs: fetch all so null/legacy questions appear
-                    questions = await repo.find({ where: baseWhere, order: baseOrder });
-                }
-            } else {
-                questions = await repo.find({ where: baseWhere, order: baseOrder });
-            }
+            // Get all active questions of this type, ordered by creation date
+            const questions = await repo.find({
+                where: { questionType: type as IQAQuestionType, isActive: true },
+                order: { createdAt: 'ASC' }
+            });
 
             // Format questions with sequential numbering
             const formattedQuestions = questions.map((question, index) => ({

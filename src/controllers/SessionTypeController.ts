@@ -2,52 +2,66 @@ import { Response } from "express";
 import { AppDataSource } from "../data-source";
 import { SessionType } from "../entity/SessionType.entity";
 import { CustomRequest } from "../util/Interface/expressInterface";
-import { getAccessibleOrganisationIds } from "../util/organisationFilter";
-
-async function canAccessSessionType(user: CustomRequest["user"], item: SessionType): Promise<boolean> {
-  if (!user) return false;
-  const orgIds = await getAccessibleOrganisationIds(user);
-  if (orgIds === null) return true;
-  if (item.organisation_id == null) return true;
-  return orgIds.includes(item.organisation_id);
-}
+import { applyScope, getScopeContext, getAccessibleOrganisationIds, canAccessOrganisation, resolveUserRole } from "../util/organisationFilter";
+import { UserRole } from "../util/constants";
 
 export class SessionTypeController {
 
   // ➕ Create
   public async create(req: CustomRequest, res: Response) {
     try {
-      const { name, is_off_the_job, active } = req.body;
+      const { name, is_off_the_job, active, organisation_id: bodyOrgId } = req.body;
 
       if (!name) {
         return res.status(400).json({ message: "Name is required", status: false });
       }
 
-      const repo = AppDataSource.getRepository(SessionType);
+      const scopeContext = getScopeContext(req);
+      const role = resolveUserRole(req.user);
+      let organisationId: number | null = bodyOrgId != null ? Number(bodyOrgId) : null;
 
-      // auto assign order value
-      const maxOrder = await repo
-        .createQueryBuilder("session_types")
-        .select("MAX(session_types.order)", "max")
-        .getRawOne();
-
-      let organisation_id: number | null = req.body.organisation_id ?? null;
-      if (organisation_id == null && req.user) {
-        const accessibleIds = await getAccessibleOrganisationIds(req.user);
-        if (accessibleIds != null && accessibleIds.length > 0) organisation_id = accessibleIds[0];
+      if (organisationId == null || isNaN(organisationId)) {
+        const accessibleIds = req.user ? await getAccessibleOrganisationIds(req.user, scopeContext) : null;
+        if (role === UserRole.MasterAdmin) {
+          organisationId = scopeContext?.organisationId ?? null;
+          if (organisationId == null) {
+            return res.status(400).json({
+              message: "organisation_id is required (or set X-Organisation-Id for MasterAdmin)",
+              status: false,
+            });
+          }
+        } else if (accessibleIds != null && accessibleIds.length > 0) {
+          organisationId = accessibleIds[0];
+        }
       }
+
+      if (organisationId == null) {
+        return res.status(400).json({ message: "organisation_id is required", status: false });
+      }
+
+      if (req.user && !(await canAccessOrganisation(req.user, organisationId, scopeContext))) {
+        return res.status(403).json({ message: "You do not have access to this organisation", status: false });
+      }
+
+      const repo = AppDataSource.getRepository(SessionType);
+      const maxOrderQb = repo.createQueryBuilder("session_type").where("session_type.organisation_id = :orgId", { orgId: organisationId });
+      if (req.user) {
+        await applyScope(maxOrderQb, req.user, "session_type", { organisationOnly: true, scopeContext });
+      }
+      const maxOrder = await maxOrderQb.select("MAX(session_type.order)", "max").getRawOne();
+
       const newItem = repo.create({
         name,
         is_off_the_job,
         active,
-        order: (maxOrder?.max || 0) + 1,
-        organisation_id,
+        order: (maxOrder?.max ?? 0) + 1,
+        organisation_id: organisationId,
       });
 
       const saved = await repo.save(newItem);
       return res.status(201).json({ message: "Session Type created", status: true, data: saved });
 
-    } catch (err) {
+    } catch (err: any) {
       return res.status(500).json({ message: "Internal Server Error", status: false, error: err.message });
     }
   }
@@ -59,11 +73,16 @@ export class SessionTypeController {
       const data = req.body;
 
       const repo = AppDataSource.getRepository(SessionType);
-      const item = await repo.findOne({ where: { id: parseInt(id) } });
+      const qb = repo.createQueryBuilder("session_type").where("session_type.id = :id", { id: parseInt(id) });
+      if (req.user) {
+        await applyScope(qb, req.user, "session_type", { organisationOnly: true, scopeContext: getScopeContext(req) });
+      }
+      const item = await qb.getOne();
 
       if (!item) return res.status(404).json({ message: "Not found", status: false });
-      if (!(await canAccessSessionType(req.user, item))) {
-        return res.status(403).json({ message: "You do not have access to this session type", status: false });
+
+      if (data.organisation_id != null && data.organisation_id !== item.organisation_id && req.user && !(await canAccessOrganisation(req.user, Number(data.organisation_id), getScopeContext(req)))) {
+        return res.status(403).json({ message: "You cannot assign this session type to that organisation", status: false });
       }
 
       repo.merge(item, data);
@@ -71,7 +90,7 @@ export class SessionTypeController {
 
       return res.status(200).json({ message: "Updated successfully", status: true, data: updated });
 
-    } catch (err) {
+    } catch (err: any) {
       return res.status(500).json({ message: "Internal Server Error", status: false, error: err.message });
     }
   }
@@ -82,19 +101,20 @@ export class SessionTypeController {
       const { id } = req.params;
 
       const repo = AppDataSource.getRepository(SessionType);
-      const item = await repo.findOne({ where: { id: parseInt(id) } });
+      const qb = repo.createQueryBuilder("session_type").where("session_type.id = :id", { id: parseInt(id) });
+      if (req.user) {
+        await applyScope(qb, req.user, "session_type", { organisationOnly: true, scopeContext: getScopeContext(req) });
+      }
+      const item = await qb.getOne();
 
       if (!item) return res.status(404).json({ message: "Not found", status: false });
-      if (!(await canAccessSessionType(req.user, item))) {
-        return res.status(403).json({ message: "You do not have access to this session type", status: false });
-      }
 
       item.active = false;
       await repo.save(item);
 
       return res.status(200).json({ message: "Disabled successfully", status: true });
 
-    } catch (err) {
+    } catch (err: any) {
       return res.status(500).json({ message: "Internal Server Error", status: false, error: err.message });
     }
   }
@@ -103,20 +123,15 @@ export class SessionTypeController {
   public async list(req: CustomRequest, res: Response) {
     try {
       const repo = AppDataSource.getRepository(SessionType);
-      const qb = repo.createQueryBuilder("st").orderBy("st.order", "ASC");
+      const qb = repo.createQueryBuilder("session_type").orderBy("session_type.order", "ASC");
       if (req.user) {
-        const orgIds = await getAccessibleOrganisationIds(req.user);
-        if (orgIds !== null) {
-          if (orgIds.length === 0) {
-            return res.status(200).json({ message: "Fetched successfully", status: true, data: [] });
-          }
-          qb.andWhere("(st.organisation_id IN (:...orgIds) OR st.organisation_id IS NULL)", { orgIds });
-        }
+        await applyScope(qb, req.user, "session_type", { organisationOnly: true, scopeContext: getScopeContext(req) });
       }
       const data = await qb.getMany();
+
       return res.status(200).json({ message: "Fetched successfully", status: true, data });
 
-    } catch (err) {
+    } catch (err: any) {
       return res.status(500).json({ message: "Internal Server Error", status: false, error: err.message });
     }
   }
@@ -127,23 +142,24 @@ export class SessionTypeController {
       const { id, direction } = req.body; // "UP" or "DOWN"
       const repo = AppDataSource.getRepository(SessionType);
 
-      const current = await repo.findOne({ where: { id } });
-      if (!current) return res.status(404).json({ message: "Not found" });
-      if (!(await canAccessSessionType(req.user, current))) {
-        return res.status(403).json({ message: "You do not have access to this session type", status: false });
+      const currentQb = repo.createQueryBuilder("session_type").where("session_type.id = :id", { id });
+      if (req.user) {
+        await applyScope(currentQb, req.user, "session_type", { organisationOnly: true, scopeContext: getScopeContext(req) });
       }
+      const current = await currentQb.getOne();
+      if (!current) return res.status(404).json({ message: "Not found" });
 
-      const swapWith = await repo.findOne({
-        where: direction === "UP"
-          ? { order: current.order - 1 }
-          : { order: current.order + 1 }
-      });
+      const nextOrder = direction === "UP" ? current.order - 1 : current.order + 1;
+      const swapQb = repo.createQueryBuilder("session_type")
+        .where("session_type.organisation_id = :orgId", { orgId: current.organisation_id })
+        .andWhere("session_type.order = :ord", { ord: nextOrder });
+      if (req.user) {
+        await applyScope(swapQb, req.user, "session_type", { organisationOnly: true, scopeContext: getScopeContext(req) });
+      }
+      const swapWith = await swapQb.getOne();
 
       if (!swapWith)
         return res.status(400).json({ message: "Reorder not possible" });
-      if (!(await canAccessSessionType(req.user, swapWith))) {
-        return res.status(403).json({ message: "You do not have access to this session type", status: false });
-      }
 
       [current.order, swapWith.order] = [swapWith.order, current.order];
 
@@ -151,7 +167,7 @@ export class SessionTypeController {
 
       return res.status(200).json({ message: "Order updated", status: true });
 
-    } catch (err) {
+    } catch (err: any) {
       return res.status(500).json({ message: "Internal Server Error", status: false, error: err.message });
     }
   }

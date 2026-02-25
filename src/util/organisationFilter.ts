@@ -1,3 +1,16 @@
+/**
+ * Multi-tenant scope helpers.
+ *
+ * Organisation resolution (no auto-selection):
+ * - OrganisationAdmin / CentreAdmin / Trainer: organisation_id from token (UserOrganisation / UserCentre / UserCourse). Do not require organisation_id from frontend.
+ * - MasterAdmin: two modes:
+ *   1. Global mode: no X-Organisation-Id or organisation_id → no organisation filter (full access).
+ *   2. Organisation mode: X-Organisation-Id header or organisation_id query provided → filter by that organisation. Validate org exists when needed.
+ * If an operation requires organisation context for MasterAdmin and none is provided, return 400 (use getRequiredOrganisationId).
+ *
+ * Scope order: Layer 1 organisation → Layer 2 centre (if CentreAdmin) → Layer 3 trainer/learner (if Trainer).
+ * One organisation per user is enforced at assignment time (validateOneOrganisationPerUser); schema still supports multiple for future use.
+ */
 import { SelectQueryBuilder } from 'typeorm';
 import { UserRole } from './constants';
 import { AppDataSource } from '../data-source';
@@ -7,13 +20,17 @@ import { UserOrganisation } from '../entity/UserOrganisation.entity';
 import { Centre } from '../entity/Centre.entity';
 import { Employer } from '../entity/Employer.entity';
 import { UserCentre } from '../entity/UserCentre.entity';
+import { UserCourse } from '../entity/UserCourse.entity';
+import { Organisation } from '../entity/Organisation.entity';
 import { In } from 'typeorm';
 
 /**
- * Get accessible organisation IDs for a user - fetches fresh from database
- * @param user - User object from request (req.user)
- * @returns null if MasterAdmin (all access), array of IDs otherwise
+ * Optional organisation context for MasterAdmin (e.g. from query or header).
+ * When set, MasterAdmin is restricted to that organisation only.
+ * Never auto-pick first organisation.
  */
+export type ScopeContext = { organisationId?: number } | undefined;
+
 /** Normalise role from user (single role or roles array). Exported for controllers/middleware. */
 export function resolveUserRole(user: any): string | undefined {
     if (user?.role) return user.role;
@@ -21,10 +38,66 @@ export function resolveUserRole(user: any): string | undefined {
     return undefined;
 }
 
-export async function getAccessibleOrganisationIds(user: any): Promise<number[] | null> {
+/**
+ * Get scope context from request (organisation_id for MasterAdmin).
+ * Reads req.query.organisation_id or req.headers['x-organisation-id'].
+ * Do not default to first organisation; return undefined if missing.
+ */
+export function getScopeContext(req: any): ScopeContext {
+    if (!req) return undefined;
+    const fromQuery = req.query?.organisation_id;
+    const fromHeader = req.headers?.['x-organisation-id'];
+    const raw = fromQuery ?? fromHeader;
+    if (raw == null || raw === '') return undefined;
+    const id = typeof raw === 'string' ? parseInt(raw, 10) : Number(raw);
+    if (isNaN(id)) return undefined;
+    return { organisationId: id };
+}
+
+/**
+ * Require organisation context for MasterAdmin when endpoint needs it.
+ * Returns organisationId if present or MasterAdmin has context; otherwise returns null (caller should return 400).
+ */
+export function getRequiredOrganisationId(user: any, scopeContext: ScopeContext): number | null {
     const role = resolveUserRole(user);
+    if (role !== UserRole.MasterAdmin) return null; // Non-MasterAdmin don't need this check
+    if (scopeContext?.organisationId != null) return scopeContext.organisationId;
+    return null;
+}
+
+/**
+ * Get accessible organisation IDs for a user - fetches fresh from database.
+ * Layer 1 — Organisation scope.
+ * - MasterAdmin: null (full access) unless scopeContext.organisationId set, then [that id].
+ * - OrganisationAdmin / CentreAdmin / AccountManager: as before.
+ * - Trainer: org IDs from learners they are assigned to (user_course.trainer_id).
+ * @param user - User object from request (req.user)
+ * @param scopeContext - Optional { organisationId } for MasterAdmin (from getScopeContext(req))
+ * @returns null if MasterAdmin with no context (all access), array of IDs otherwise
+ */
+export async function getAccessibleOrganisationIds(user: any, scopeContext?: ScopeContext): Promise<number[] | null> {
+    const role = resolveUserRole(user);
+    console.log(role)
     if (role === UserRole.MasterAdmin) {
-        return null; // All access
+        if (scopeContext?.organisationId != null) {
+            const orgRepo = AppDataSource.getRepository(Organisation);
+            const org = await orgRepo.findOne({ where: { id: scopeContext.organisationId }, select: ['id'] });
+            if (!org) return []; // Invalid org: no access (validate organisation exists)
+            return [scopeContext.organisationId];
+        }
+        return null; // Full system access
+    }
+
+    if (role === UserRole.Trainer) {
+        const ucRepo = AppDataSource.getRepository(UserCourse);
+        const rows = await ucRepo
+            .createQueryBuilder('uc')
+            .innerJoin('uc.learner_id', 'l')
+            .where('uc.trainer_id = :userId', { userId: user.user_id })
+            .select('DISTINCT l.organisation_id', 'organisation_id')
+            .getRawMany<{ organisation_id: number }>();
+        const ids = rows.map(r => r.organisation_id).filter((id): id is number => id != null);
+        return [...new Set(ids)];
     }
 
     if (role === UserRole.AccountManager) {
@@ -80,35 +153,81 @@ export async function getAccessibleOrganisationIds(user: any): Promise<number[] 
 }
 
 /**
- * Get accessible centre IDs for a user.
- * - MasterAdmin: null (all centres).
- * - If user is assigned to specific centre(s) via centre_admins: return only those centre IDs (centre-scoped).
- * - Otherwise (org-scoped): return all centre IDs that belong to the user's accessible organisations.
- * @param user - User object from request (req.user)
- * @returns null if MasterAdmin (all access), array of centre IDs otherwise
+ * Get organisation IDs assigned to a user (from UserOrganisation).
+ * Used for one-organisation-per-user business rule validation.
+ * Schema supports multiple; currently we enforce at most one per user.
  */
-export async function getAccessibleCentreIds(user: any): Promise<number[] | null> {
+export async function getUserOrganisationIds(userId: number): Promise<number[]> {
+    const userOrganisationRepository = AppDataSource.getRepository(UserOrganisation);
+    const rows = await userOrganisationRepository.find({
+        where: { user_id: userId },
+        select: ['organisation_id']
+    });
+    return rows.map(r => r.organisation_id);
+}
+
+/**
+ * Validate one-organisation-per-user rule before assigning a user to an organisation.
+ * Returns error message if user already has a different organisation; null if valid.
+ * Same organisation is allowed (idempotent assign).
+ */
+export async function validateOneOrganisationPerUser(userId: number, organisationIdToAssign: number): Promise<string | null> {
+    const existing = await getUserOrganisationIds(userId);
+    if (existing.length === 0) return null;
+    if (existing.includes(organisationIdToAssign)) return null; // same org, idempotent
+    return "User can only belong to one organisation. They are already assigned to another organisation.";
+}
+
+/**
+ * Get accessible centre IDs for a user.
+ * Layer 2 — Centre scope.
+ * - MasterAdmin: null (all) unless scopeContext.organisationId set, then centres in that org.
+ * - CentreAdmin: only assigned centre(s) via UserCentre.
+ * - Trainer: centre IDs from learners they are assigned to (user_course.trainer_id).
+ * - OrganisationAdmin / AccountManager: all centres in accessible orgs.
+ * @param user - User object from request (req.user)
+ * @param scopeContext - Optional for MasterAdmin (from getScopeContext(req))
+ */
+export async function getAccessibleCentreIds(user: any, scopeContext?: ScopeContext): Promise<number[] | null> {
     const role = resolveUserRole(user);
+
     if (role === UserRole.MasterAdmin) {
-        return null;
+        if (scopeContext?.organisationId == null) return null;
+        const centreRepository = AppDataSource.getRepository(Centre);
+        const centres = await centreRepository
+            .createQueryBuilder('centre')
+            .where('centre.deleted_at IS NULL')
+            .andWhere('centre.organisation_id = :orgId', { orgId: scopeContext.organisationId })
+            .select('centre.id')
+            .getMany();
+        return centres.map(c => c.id);
+    }
+
+    if (role === UserRole.Trainer) {
+        const ucRepo = AppDataSource.getRepository(UserCourse);
+        const rows = await ucRepo
+            .createQueryBuilder('uc')
+            .innerJoin('uc.learner_id', 'l')
+            .where('uc.trainer_id = :userId', { userId: user.user_id })
+            .select('DISTINCT l.centre_id', 'centre_id')
+            .getRawMany<{ centre_id: number }>();
+        const ids = rows.map(r => r.centre_id).filter((id): id is number => id != null);
+        return [...new Set(ids)];
     }
 
     const centreRepository = AppDataSource.getRepository(Centre);
     const userCentreRepository = AppDataSource.getRepository(UserCentre);
 
-    // First, check if the user has explicit centre assignments via user_centres
     const userCentreRows = await userCentreRepository.find({
         where: { user_id: user.user_id }
     });
 
     if (userCentreRows.length > 0) {
-        // Centre-scoped: only these centres
         const centreIds = [...new Set(userCentreRows.map(uc => uc.centre_id))];
         return centreIds;
     }
 
-    // Otherwise, org-scoped: all centres in accessible organisations
-    const orgIds = await getAccessibleOrganisationIds(user);
+    const orgIds = await getAccessibleOrganisationIds(user, scopeContext);
     if (orgIds === null) return null;
     if (orgIds.length === 0) return [];
 
@@ -128,15 +247,29 @@ export async function getAccessibleCentreIds(user: any): Promise<number[] | null
  * - CentreAdmin: user IDs assigned to their centres via UserCentre.
  * - OrganisationAdmin / AccountManager: user IDs in their organisation(s) via UserOrganisation.
  */
-export async function getAccessibleUserIds(user: any): Promise<number[] | null> {
+export async function getAccessibleUserIds(user: any, scopeContext?: ScopeContext): Promise<number[] | null> {
     const role = resolveUserRole(user);
-    if (role === UserRole.MasterAdmin) return null;
+    if (role === UserRole.MasterAdmin) {
+        if (scopeContext?.organisationId != null) {
+            const userOrgRepository = AppDataSource.getRepository(UserOrganisation);
+            const rows = await userOrgRepository
+                .createQueryBuilder('uo')
+                .select('DISTINCT uo.user_id', 'user_id')
+                .where('uo.organisation_id = :orgId', { orgId: scopeContext.organisationId })
+                .getRawMany();
+            return rows.map((r: { user_id: number }) => r.user_id);
+        }
+        return null;
+    }
 
+    if (role === UserRole.Trainer) {
+        return [user.user_id];
+    }
     if (role === UserRole.CentreAdmin) {
         return getAccessibleCentreAdminUserIds(user);
     }
 
-    const orgIds = await getAccessibleOrganisationIds(user);
+    const orgIds = await getAccessibleOrganisationIds(user, scopeContext);
     if (orgIds === null) return null;
     if (orgIds.length === 0) return [];
 
@@ -186,18 +319,16 @@ export async function getAccessibleCentreAdminUserIds(user: any): Promise<number
 }
 
 /**
- * Add centre filter to query builder.
- * Use for entities that have a centre_id column (e.g. AuditLog, Centre list).
- * @param qb - TypeORM QueryBuilder
- * @param user - User object from request
- * @param centreColumn - Column name for centre_id (default: 'centre_id'); use alias e.g. 'centre.id' for Centre entity
+ * Add centre filter to query builder (Layer 2).
+ * @param scopeContext - Optional for MasterAdmin (from getScopeContext(req))
  */
 export async function addCentreFilter(
     qb: SelectQueryBuilder<any>,
     user: any,
-    centreColumn: string = 'centre_id'
+    centreColumn: string = 'centre_id',
+    scopeContext?: ScopeContext
 ): Promise<void> {
-    const accessibleCentreIds = await getAccessibleCentreIds(user);
+    const accessibleCentreIds = await getAccessibleCentreIds(user, scopeContext);
 
     if (accessibleCentreIds === null) {
         return;
@@ -213,34 +344,39 @@ export async function addCentreFilter(
 
 /**
  * Check whether the user can access the given organisation (for single-resource checks).
+ * MasterAdmin with scopeContext: only true if organisationId matches context.
  */
-export async function canAccessOrganisation(user: any, organisationId: number): Promise<boolean> {
-    const ids = await getAccessibleOrganisationIds(user);
+export async function canAccessOrganisation(user: any, organisationId: number, scopeContext?: ScopeContext): Promise<boolean> {
+    console.log(organisationId)
+    const ids = await getAccessibleOrganisationIds(user, scopeContext);
+    console.log("???",ids)
     if (ids === null) return true;
-    return ids.includes(organisationId);
+    console.log(ids.includes(organisationId))
+    let tempid = Number(organisationId)
+    return ids.includes(tempid);
 }
 
 /**
  * Check whether the user can access the given centre (for single-resource checks).
  */
-export async function canAccessCentre(user: any, centreId: number): Promise<boolean> {
-    const ids = await getAccessibleCentreIds(user);
+export async function canAccessCentre(user: any, centreId: number, scopeContext?: ScopeContext): Promise<boolean> {
+    const ids = await getAccessibleCentreIds(user, scopeContext);
     if (ids === null) return true;
-    return ids.includes(centreId);
+    let tempid = Number(centreId)
+    return ids.includes(tempid);
 }
 
 /**
- * Add organization filter to query builder
- * @param qb - TypeORM QueryBuilder
- * @param user - User object from request
- * @param organisationColumn - Column name for organisation_id (default: 'organisation_id')
+ * Add organization filter to query builder (Layer 1).
+ * @param scopeContext - Optional for MasterAdmin (from getScopeContext(req))
  */
 export async function addOrganisationFilter(
     qb: SelectQueryBuilder<any>,
     user: any,
-    organisationColumn: string = 'organisation_id'
+    organisationColumn: string = 'organisation_id',
+    scopeContext?: ScopeContext
 ): Promise<void> {
-    const accessibleIds = await getAccessibleOrganisationIds(user);
+    const accessibleIds = await getAccessibleOrganisationIds(user, scopeContext);
 
     if (accessibleIds === null) {
         // MasterAdmin - no filter needed
@@ -297,16 +433,17 @@ export async function addUserOrganisationFilter(
 export async function addUserScopeFilter(
     qb: SelectQueryBuilder<any>,
     user: any,
-    userAlias: string = 'user'
+    userAlias: string = 'user',
+    scopeContext?: ScopeContext
 ): Promise<void> {
     const role = resolveUserRole(user);
 
-    if (role === UserRole.MasterAdmin) {
+    if (role === UserRole.MasterAdmin && !scopeContext?.organisationId) {
         return;
     }
 
     if (role === UserRole.CentreAdmin) {
-        const centreIds = await getAccessibleCentreIds(user);
+        const centreIds = await getAccessibleCentreIds(user, scopeContext);
         if (centreIds === null || centreIds.length === 0) {
             qb.andWhere('1 = 0');
             return;
@@ -319,8 +456,7 @@ export async function addUserScopeFilter(
         return;
     }
 
-    // OrganisationAdmin, AccountManager, and fallback: filter by organisation via UserOrganisation
-    const accessibleIds = await getAccessibleOrganisationIds(user);
+    const accessibleIds = await getAccessibleOrganisationIds(user, scopeContext);
     if (accessibleIds === null) return;
     if (accessibleIds.length === 0) {
         qb.andWhere('1 = 0');
@@ -337,22 +473,21 @@ export type ScopeOptions = {
     centreColumn?: string | null;
     /** When true, only organisation filter is applied (no centre filter). Use for Employer and other org-only entities. */
     organisationOnly?: boolean;
+    /** Organisation context for MasterAdmin (from getScopeContext(req)). When set, MasterAdmin is restricted to that org. */
+    scopeContext?: ScopeContext;
+    /** For Trainer: column for trainer_id (e.g. 'session.trainer_id'). When set, Layer 3 trainer filter is applied. */
+    trainerIdColumn?: string;
 };
 
 /**
- * Central scope helper - apply organisation/centre filters based on user role.
- * Use in every query builder. Do not duplicate filtering logic in controllers.
+ * Central scope helper — applies Layer 1 (organisation) and Layer 2 (centre) and optionally Layer 3 (trainer).
+ * Use in every query builder. All three layers apply together; no OR-based visibility.
  *
- * Rules:
- * - MasterAdmin: no filter.
- * - OrganisationAdmin: WHERE entity.organisation_id = user's org(s).
- * - CentreAdmin: WHERE entity.centre_id IN assignedCentreIds (or org filter if organisationOnly).
- * - AccountManager: WHERE entity.organisation_id IN assignedOrgIds.
- *
- * @param qb - TypeORM QueryBuilder
- * @param user - User object from request (req.user)
- * @param entityAlias - Alias of the main entity in the query (e.g. 'learner', 'employer', 'centre')
- * @param options - organisationColumn, centreColumn, or organisationOnly (for entities without centre_id)
+ * - MasterAdmin: no filter unless scopeContext.organisationId set, then org (and centre in that org if applicable).
+ * - OrganisationAdmin: org filter only (no centre restriction).
+ * - CentreAdmin: org + centre (assigned centres only).
+ * - AccountManager: org filter (assigned orgs).
+ * - Trainer: org + centre (from their assigned learners) + optional trainerIdColumn = current user (Layer 3).
  */
 export async function applyScope(
     qb: SelectQueryBuilder<any>,
@@ -363,60 +498,39 @@ export async function applyScope(
     const orgCol = options?.organisationColumn ?? `${entityAlias}.organisation_id`;
     const applyCentre = options?.organisationOnly !== true && options?.centreColumn !== null;
     const centreCol = options?.centreColumn ?? `${entityAlias}.centre_id`;
-
+    const scopeContext = options?.scopeContext;
     const role = resolveUserRole(user);
 
-    if (role === UserRole.MasterAdmin) {
+    if (role === UserRole.MasterAdmin && !scopeContext?.organisationId) {
         return;
     }
 
-    if (role === UserRole.OrganisationAdmin) {
-        const orgIds = await getAccessibleOrganisationIds(user);
-        if (orgIds === null || orgIds.length === 0) {
-            qb.andWhere('1 = 0');
-            return;
-        }
-        qb.andWhere(`${orgCol} IN (:...orgIds)`, { orgIds });
+    const orgIds = await getAccessibleOrganisationIds(user, scopeContext);
+    if (orgIds === null) {
+        if (role === UserRole.MasterAdmin) return;
+        qb.andWhere('1 = 0');
         return;
     }
-
-    if (role === UserRole.CentreAdmin) {
-        if (applyCentre) {
-            const centreIds = await getAccessibleCentreIds(user);
-            if (centreIds === null || centreIds.length === 0) {
-                qb.andWhere('1 = 0');
-                return;
-            }
-            qb.andWhere(`${centreCol} IN (:...centreIds)`, { centreIds });
-        } else {
-            const orgIds = await getAccessibleOrganisationIds(user);
-            if (orgIds === null || orgIds.length === 0) {
-                qb.andWhere('1 = 0');
-                return;
-            }
-            qb.andWhere(`${orgCol} IN (:...orgIds)`, { orgIds });
-        }
-        return;
-    }
-
-    if (role === UserRole.AccountManager) {
-        const orgIds = await getAccessibleOrganisationIds(user);
-        if (orgIds === null || orgIds.length === 0) {
-            qb.andWhere('1 = 0');
-            return;
-        }
-        qb.andWhere(`${orgCol} IN (:...orgIds)`, { orgIds });
-        return;
-    }
-
-    // Other roles: organisation filter only
-    const orgIds = await getAccessibleOrganisationIds(user);
-    if (orgIds === null) return;
     if (orgIds.length === 0) {
         qb.andWhere('1 = 0');
         return;
     }
     qb.andWhere(`${orgCol} IN (:...orgIds)`, { orgIds });
+
+    if (applyCentre) {
+        const centreIds = await getAccessibleCentreIds(user, scopeContext);
+        if (centreIds !== null && centreIds.length === 0) {
+            qb.andWhere('1 = 0');
+            return;
+        }
+        if (centreIds != null && centreIds.length > 0) {
+            qb.andWhere(`${centreCol} IN (:...centreIds)`, { centreIds });
+        }
+    }
+
+    if (role === UserRole.Trainer && options?.trainerIdColumn) {
+        qb.andWhere(`${options.trainerIdColumn} = :trainerUserId`, { trainerUserId: user.user_id });
+    }
 }
 
 /**
@@ -437,23 +551,33 @@ export async function applyUserScopedFilter(
     qb.andWhere(`${userIdColumn} IN (:...userIds)`, { userIds });
 }
 
+export type LearnerScopeOptions = { scopeContext?: ScopeContext };
+
 /**
- * Apply scope filter to Learner query builder. Wraps applyScope with learner-specific logic.
+ * Apply scope filter to Learner query builder. Layer 1 (org) + Layer 2 (centre) + Layer 3 (Trainer: only assigned learners).
  */
 export async function applyLearnerScope(
     qb: SelectQueryBuilder<any>,
     user: any,
-    learnerAlias: string = 'learner'
+    learnerAlias: string = 'learner',
+    options?: LearnerScopeOptions
 ): Promise<void> {
     const role = resolveUserRole(user);
-    if (role === UserRole.MasterAdmin) return;
+    const scopeContext = options?.scopeContext;
+    if (role === UserRole.MasterAdmin && !scopeContext?.organisationId) return;
 
-    if (role === UserRole.OrganisationAdmin || role === UserRole.AccountManager || role === UserRole.CentreAdmin) {
-        return applyScope(qb, user, learnerAlias);
+    if (role === UserRole.OrganisationAdmin || role === UserRole.AccountManager || role === UserRole.CentreAdmin || role === UserRole.Trainer) {
+        await applyScope(qb, user, learnerAlias, { scopeContext });
+        if (role === UserRole.Trainer) {
+            qb.andWhere(
+                `${learnerAlias}.learner_id IN (SELECT uc.learner_id FROM user_course uc WHERE uc.trainer_id = :trainerUserId)`,
+                { trainerUserId: user.user_id }
+            );
+        }
+        return;
     }
 
-    // For other roles: join via UserOrganisation (learners may not have organisation_id yet)
-    const orgIds = await getAccessibleOrganisationIds(user);
+    const orgIds = await getAccessibleOrganisationIds(user, scopeContext);
     if (orgIds === null) return;
     if (orgIds.length === 0) {
         qb.andWhere('1 = 0');

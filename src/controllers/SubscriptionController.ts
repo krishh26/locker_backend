@@ -7,7 +7,7 @@ import { Feature } from "../entity/Feature.entity";
 import { CustomRequest } from "../util/Interface/expressInterface";
 import { UserRole } from "../util/constants";
 import { In } from "typeorm";
-import { getAccessibleOrganisationIds } from "../util/organisationFilter";
+import { getAccessibleOrganisationIds, getScopeContext } from "../util/organisationFilter";
 
 class SubscriptionController {
     public async CreatePlan(req: CustomRequest, res: Response) {
@@ -639,7 +639,7 @@ class SubscriptionController {
     public async GetSubscriptions(req: CustomRequest, res: Response) {
         try {
             const subscriptionRepository = AppDataSource.getRepository(Subscription);
-            const accessibleIds = await getAccessibleOrganisationIds(req.user);
+            const accessibleIds = await getAccessibleOrganisationIds(req.user, getScopeContext(req));
 
             let query = subscriptionRepository.createQueryBuilder("sub")
                 .leftJoinAndSelect("sub.plan", "plan")

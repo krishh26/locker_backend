@@ -4,7 +4,7 @@ import { AppDataSource } from '../data-source';
 import { TimeLog } from '../entity/TimeLog.entity';
 import { Learner } from '../entity/Learner.entity';
 import { getOTJSummary } from '../util/services/otj.service';
-import { applyLearnerScope } from '../util/organisationFilter';
+import { applyLearnerScope, getScopeContext } from '../util/organisationFilter';
 import { getAccessibleOrganisationIds } from '../util/organisationFilter';
 
 class TimeLogController {
@@ -181,7 +181,7 @@ class TimeLogController {
             // Apply scope: organisation + centre via learner (timelog.user_id is learner's user)
             if (req.user) {
                 qb.leftJoin(Learner, 'learner', 'learner.user_id = user_id.user_id');
-                await applyLearnerScope(qb, req.user, 'learner');
+                await applyLearnerScope(qb, req.user, 'learner', { scopeContext: getScopeContext(req) });
             }
 
             if (pagination) {
@@ -250,7 +250,7 @@ class TimeLogController {
 
             // Add organization filtering through user_id (User → UserOrganisation)
             if (req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user);
+                const accessibleIds = await getAccessibleOrganisationIds(req.user, getScopeContext(req));
                 if (accessibleIds !== null && accessibleIds.length > 0) {
                     qb.leftJoin('user_id.userOrganisations', 'userOrganisation')
                       .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });

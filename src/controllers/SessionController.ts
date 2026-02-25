@@ -4,7 +4,7 @@ import { AppDataSource } from '../data-source';
 import { Session } from '../entity/Session.entity';
 import { SendNotification } from '../util/socket/notification';
 import { NotificationType, SocketDomain } from '../util/constants';
-import { applyLearnerScope } from '../util/organisationFilter';
+import { applyLearnerScope, getScopeContext } from '../util/organisationFilter';
 
 class SessionController {
 
@@ -181,7 +181,7 @@ class SessionController {
 
             // Filter via learner scope (organisation + centre)
             if (req.user) {
-                await applyLearnerScope(qb, req.user, 'learner');
+                await applyLearnerScope(qb, req.user, 'learner', { scopeContext: getScopeContext(req) });
             }
 
             // Add sorting for startDate
@@ -245,7 +245,7 @@ class SessionController {
 
             // Filter via learner scope
             if (req.user) {
-                await applyLearnerScope(qb, req.user, 'learner');
+                await applyLearnerScope(qb, req.user, 'learner', { scopeContext: getScopeContext(req) });
             }
 
             const session = await qb.getOne();
@@ -302,7 +302,7 @@ class SessionController {
 
             // Filter via learner scope
             if (req.user) {
-                await applyLearnerScope(qb, req.user, 'learner');
+                await applyLearnerScope(qb, req.user, 'learner', { scopeContext: getScopeContext(req) });
             }
 
             const sessions = await qb

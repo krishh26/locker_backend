@@ -8,7 +8,7 @@ import { deleteFromS3, uploadToS3 } from "../util/aws";
 import { Course } from "../entity/Course.entity";
 import { sendDataToUser } from "../socket/socket";
 import { User } from "../entity/User.entity";
-import { getAccessibleOrganisationIds, getAccessibleCentreAdminUserIds, applyLearnerScope, applyScope } from "../util/organisationFilter";
+import { getAccessibleOrganisationIds, getAccessibleCentreAdminUserIds, applyLearnerScope, getScopeContext } from "../util/organisationFilter";
 
 class ForumController {
     constructor() {
@@ -39,7 +39,7 @@ class ForumController {
                 'employer.user_id AS employer_id'
             ]);
         if (req?.user) {
-            await applyLearnerScope(qb, req.user, 'learner');
+            await applyLearnerScope(qb, req.user, 'learner', { scopeContext: getScopeContext(req) });
         }
         const userCourses = await qb.getRawMany();
 
@@ -191,7 +191,7 @@ class ForumController {
                 const accessQb = userCourseRepository.createQueryBuilder('uc')
                     .innerJoin('uc.learner_id', 'learner')
                     .where("uc.course ->> 'course_id' = :cid", { cid: String(course_id) });
-                await applyLearnerScope(accessQb, req.user, 'learner');
+                await applyLearnerScope(accessQb, req.user, 'learner', { scopeContext: getScopeContext(req) });
                 const canAccess = await accessQb.getCount() > 0;
                 if (!canAccess) {
                     return res.status(403).json({
@@ -217,7 +217,7 @@ class ForumController {
 
             // Add organization filtering through sender (User → UserOrganisation)
             if (req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user);
+                const accessibleIds = await getAccessibleOrganisationIds(req.user, getScopeContext(req));
                 if (accessibleIds !== null) {
                     if (accessibleIds.length === 0) {
                         return res.status(200).json({
@@ -327,11 +327,6 @@ class ForumController {
                 } else {
                     query.where('0 = 1'); // This ensures no data is returned when courseIds is empty
                 }
-            }
-
-            // Restrict courses to user's accessible organisation(s) (multi-tenant)
-            if (req.user) {
-                await applyScope(query, req.user, 'course', { organisationOnly: true });
             }
 
             const chatList = await query.getRawMany();

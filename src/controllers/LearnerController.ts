@@ -18,7 +18,7 @@ import { Course } from "../entity/Course.entity";
 import { getUnitCompletionStatus, unitCompletionStatus } from '../util/unitCompletion';
 import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
 import { In } from "typeorm";
-import { getAccessibleOrganisationIds, getAccessibleCentreAdminUserIds, applyLearnerScope, validateLearnerOrganisationCentre, canAccessOrganisation, canAccessCentre } from "../util/organisationFilter";
+import { getAccessibleOrganisationIds, getAccessibleCentreAdminUserIds, applyLearnerScope, validateLearnerOrganisationCentre, canAccessOrganisation, canAccessCentre, getScopeContext } from "../util/organisationFilter";
 class LearnerController {
 
     public async CreateLearner(req: CustomRequest, res: Response) {
@@ -43,7 +43,7 @@ class LearnerController {
 
             // Validate user has access to create learners in this organisation/centre
             if (req.user) {
-                const hasOrgAccess = await canAccessOrganisation(req.user, organisation_id);
+                const hasOrgAccess = await canAccessOrganisation(req.user, organisation_id, getScopeContext(req));
                 if (!hasOrgAccess) {
                     return res.status(403).json({
                         message: "You do not have access to create learners in this organisation",
@@ -51,7 +51,7 @@ class LearnerController {
                     })
                 }
 
-                const hasCentreAccess = await canAccessCentre(req.user, centre_id);
+                const hasCentreAccess = await canAccessCentre(req.user, centre_id, getScopeContext(req));
                 if (!hasCentreAccess) {
                     return res.status(403).json({
                         message: "You do not have access to create learners in this centre",
@@ -329,7 +329,7 @@ class LearnerController {
 
             // Apply scope filtering based on user role (organisation/centre)
             if (req.user) {
-                await applyLearnerScope(qb, req.user, "learner");
+                await applyLearnerScope(qb, req.user, "learner", { scopeContext: getScopeContext(req) });
             }
 
             if (status.includes("Show only archived users")) {
@@ -1335,7 +1335,7 @@ class LearnerController {
                 .leftJoinAndSelect(`user_course.employer_id`, `employer_id`)
                 .leftJoinAndSelect(`employer_id.employer`, `employer`);
             if (req.user) {
-                await applyLearnerScope(qbUserCourse, req.user, 'learner');
+                await applyLearnerScope(qbUserCourse, req.user, 'learner', { scopeContext: getScopeContext(req) });
             }
             let usercourses = await qbUserCourse.getMany();
 
@@ -1345,7 +1345,7 @@ class LearnerController {
                 .orderBy('CASE WHEN learner.deleted_at IS NULL THEN 0 ELSE 1 END', 'ASC')
                 .addOrderBy("learner.learner_id", "ASC");
             if (req.user) {
-                await applyLearnerScope(qbLearner, req.user, 'learner');
+                await applyLearnerScope(qbLearner, req.user, 'learner', { scopeContext: getScopeContext(req) });
             }
             const learners = await qbLearner.getMany();
 
@@ -1475,7 +1475,7 @@ class LearnerController {
                     "COUNT(*) FILTER (WHERE learner.deleted_at IS NOT NULL) AS archivedLearnerCount"
                 ]);
             if (req.user) {
-                await applyLearnerScope(qb, req.user, 'learner');
+                await applyLearnerScope(qb, req.user, 'learner', { scopeContext: getScopeContext(req) });
             }
             const counts = await qb.getRawOne();
 
@@ -1710,7 +1710,8 @@ class LearnerController {
             const courseRepository = AppDataSource.getRepository(Course);
 
             // Get accessible org/centre IDs once
-            const accessibleOrgIds = req.user ? await getAccessibleOrganisationIds(req.user) : null;
+            const scopeContext = getScopeContext(req);
+            const accessibleOrgIds = req.user ? await getAccessibleOrganisationIds(req.user, scopeContext) : null;
             const centreAdminUserIds = req.user ? await getAccessibleCentreAdminUserIds(req.user) : null;
 
             // Helper functions for applying filters
@@ -1758,7 +1759,7 @@ class LearnerController {
                         .createQueryBuilder("learner")
                         .leftJoinAndSelect("learner.user_id", "user_id")
                         .where("user_id.status = 'Active'");
-                    if (req.user) await applyLearnerScope(qb, req.user, "learner");
+                    if (req.user) await applyLearnerScope(qb, req.user, "learner", { scopeContext });
                     const active_learners = await qb.getMany();
 
                     return res.status(200).json({
@@ -2040,7 +2041,7 @@ class LearnerController {
                 .createQueryBuilder("learner")
                 .leftJoin("learner.user_id", "user_id")
                 .where("user_id.status = 'Active'");
-            if (req.user) await applyLearnerScope(activeLearnersQb, req.user, "learner");
+            if (req.user) await applyLearnerScope(activeLearnersQb, req.user, "learner", { scopeContext: getScopeContext(req) });
             const activeLearnersCountRaw = await activeLearnersQb
                 .select("COUNT(DISTINCT learner.learner_id)", "count")
                 .getRawOne();

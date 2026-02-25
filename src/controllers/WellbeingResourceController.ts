@@ -3,25 +3,43 @@ import { AppDataSource } from '../data-source';
 import { CustomRequest } from '../util/Interface/expressInterface';
 import { WellbeingResource, WellbeingResourceType } from '../entity/WellbeingResource.entity';
 import { LearnerResourceActivity } from '../entity/LearnerResourceActivity.entity';
+import { Learner } from '../entity/Learner.entity';
 import { uploadToS3 } from '../util/aws';
 import { User } from '../entity/User.entity';
-import { getAccessibleOrganisationIds } from '../util/organisationFilter';
-
-async function canAccessWellbeingResource(user: CustomRequest['user'], resource: WellbeingResource): Promise<boolean> {
-    if (!user) return false;
-    const orgIds = await getAccessibleOrganisationIds(user);
-    if (orgIds === null) return true;
-    return resource.organisation_id != null && orgIds.includes(resource.organisation_id);
-}
+import { applyScope, getScopeContext, getAccessibleOrganisationIds, canAccessOrganisation, resolveUserRole } from '../util/organisationFilter';
+import { UserRole } from '../util/constants';
 
 export class WellbeingResourceController {
     // Admin: Add Resource
     public async addResource(req: CustomRequest, res: Response) {
         try {
-            let { resource_name, resourceType, description, url } = req.body as any;
+            let { resource_name, resourceType, description, url, organisation_id: bodyOrgId } = req.body as any;
 
             if (!resourceType) {
                 return res.status(400).json({ message: 'resourceType is required', status: false });
+            }
+
+            const scopeContext = getScopeContext(req);
+            const role = resolveUserRole(req.user);
+            let organisationId: number | null = bodyOrgId != null ? Number(bodyOrgId) : null;
+
+            if (organisationId == null || isNaN(organisationId)) {
+                const accessibleIds = req.user ? await getAccessibleOrganisationIds(req.user, scopeContext) : null;
+                if (role === UserRole.MasterAdmin) {
+                    organisationId = scopeContext?.organisationId ?? null;
+                    if (organisationId == null) {
+                        return res.status(400).json({
+                            message: 'organisation_id is required (or set X-Organisation-Id for MasterAdmin)',
+                            status: false,
+                        });
+                    }
+                } else if (accessibleIds != null && accessibleIds.length > 0) {
+                    organisationId = accessibleIds[0];
+                }
+            }
+
+            if (organisationId != null && req.user && !(await canAccessOrganisation(req.user, organisationId, scopeContext))) {
+                return res.status(403).json({ message: 'You do not have access to this organisation', status: false });
             }
 
             const repo = AppDataSource.getRepository(WellbeingResource);
@@ -44,12 +62,7 @@ export class WellbeingResourceController {
             } else {
                 return res.status(400).json({ message: 'Invalid resourceType', status: false });
             }
-            console.log(resourceType, location, description)
-            let organisation_id: number | null = (req.body as any).organisation_id ?? null;
-            if (organisation_id == null && req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user);
-                if (accessibleIds != null && accessibleIds.length > 0) organisation_id = accessibleIds[0];
-            }
+
             const entity = repo.create({
                 resourceType,
                 location,
@@ -58,9 +71,8 @@ export class WellbeingResourceController {
                 createdBy: String(req.user.user_id),
                 updatedBy: null,
                 resource_name: resource_name || null,
-                organisation_id,
+                organisation_id: organisationId,
             });
-            console.log(repo.exists)
             const saved = await repo.save(entity);
             return res.status(201).json({ message: 'Resource created', status: true, data: saved });
 
@@ -76,11 +88,12 @@ export class WellbeingResourceController {
             const { description, resourceType, url, isActive } = req.body as any;
 
             const repo = AppDataSource.getRepository(WellbeingResource);
-            const existing = await repo.findOne({ where: { id } });
-            if (!existing) return res.status(404).json({ message: 'Resource not found', status: false });
-            if (!(await canAccessWellbeingResource(req.user, existing))) {
-                return res.status(403).json({ message: 'You do not have access to this resource', status: false });
+            const qb = repo.createQueryBuilder('r').where('r.id = :id', { id });
+            if (req.user) {
+                await applyScope(qb, req.user, 'r', { organisationOnly: true, scopeContext: getScopeContext(req) });
             }
+            const existing = await qb.getOne();
+            if (!existing) return res.status(404).json({ message: 'Resource not found', status: false });
 
             let location: string = existing.location;
 
@@ -139,15 +152,8 @@ export class WellbeingResourceController {
                 ]);
 
             if (req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user);
-                if (accessibleIds !== null) {
-                    if (accessibleIds.length === 0) {
-                        return res.status(200).json({ message: 'OK', status: true, data: [] });
-                    }
-                    qb.andWhere('r.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
-                }
+                await applyScope(qb, req.user, 'r', { organisationOnly: true, scopeContext: getScopeContext(req) });
             }
-
             if (search) {
                 qb.andWhere('r.location ILIKE :search', { search: `%${search}%` });
             }
@@ -203,11 +209,12 @@ export class WellbeingResourceController {
         try {
             const id = parseInt(req.params.id);
             const repo = AppDataSource.getRepository(WellbeingResource);
-            const resource = await repo.findOne({ where: { id } });
-            if (!resource) return res.status(404).json({ message: 'Resource not found', status: false });
-            if (!(await canAccessWellbeingResource(req.user, resource))) {
-                return res.status(403).json({ message: 'You do not have access to this resource', status: false });
+            const qb = repo.createQueryBuilder('r').where('r.id = :id', { id });
+            if (req.user) {
+                await applyScope(qb, req.user, 'r', { organisationOnly: true, scopeContext: getScopeContext(req) });
             }
+            const resource = await qb.getOne();
+            if (!resource) return res.status(404).json({ message: 'Resource not found', status: false });
             resource.isActive = !resource.isActive;
             resource.updatedBy = String(req.user.user_id);
             await repo.save(resource);
@@ -217,17 +224,21 @@ export class WellbeingResourceController {
         }
     }
 
-    // Learner: Get all active resources with lastOpenedDate for this learner
+    // Learner: Get all active resources with lastOpenedDate for this learner (scoped by learner's organisation)
     public async getAllActiveForLearner(req: CustomRequest, res: Response) {
         try {
             const learnerId = req.user.user_id;
+            const learnerRepo = AppDataSource.getRepository(Learner);
+            const learner = await learnerRepo.findOne({ where: { user_id: { user_id: learnerId } } as any, select: ['learner_id', 'organisation_id'] });
             const repo = AppDataSource.getRepository(WellbeingResource);
             const actRepo = AppDataSource.getRepository(LearnerResourceActivity);
 
-            const resources = await repo.createQueryBuilder('r')
-                .where('r.isActive = :active', { active: true })
-                .orderBy('r.createdAt', 'DESC')
-                .getMany();
+            const resourcesQb = repo.createQueryBuilder('r')
+                .where('r.isActive = :active', { active: true });
+            if (learner?.organisation_id != null) {
+                resourcesQb.andWhere('(r.organisation_id IS NULL OR r.organisation_id = :learnerOrgId)', { learnerOrgId: learner.organisation_id });
+            }
+            const resources = await resourcesQb.orderBy('r.createdAt', 'DESC').getMany();
 
             const activities: LearnerResourceActivity[] = await actRepo.createQueryBuilder('a')
                 .leftJoinAndSelect('a.resource', 'r')
@@ -264,8 +275,12 @@ export class WellbeingResourceController {
             const resourceRepo = AppDataSource.getRepository(WellbeingResource);
             const actRepo = AppDataSource.getRepository(LearnerResourceActivity);
 
+            const learnerRec = await AppDataSource.getRepository(Learner).findOne({ where: { user_id: { user_id: learnerId } } as any, select: ['organisation_id'] });
             const resource = await resourceRepo.findOne({ where: { id: Number(resourceId) } });
             if (!resource || !resource.isActive) return res.status(404).json({ message: 'Resource not found or inactive', status: false });
+            if (resource.organisation_id != null && learnerRec?.organisation_id !== resource.organisation_id) {
+                return res.status(403).json({ message: 'You do not have access to this resource', status: false });
+            }
 
             let activity = await actRepo.findOne({ where: { learner: { user_id: learnerId } as any, resource: { id: resource.id } as any }, relations: ['learner', 'resource'] });
             if (!activity) {
@@ -293,8 +308,12 @@ export class WellbeingResourceController {
 
             const actRepo = AppDataSource.getRepository(LearnerResourceActivity);
             const resourceRepo = AppDataSource.getRepository(WellbeingResource);
+            const learnerRec = await AppDataSource.getRepository(Learner).findOne({ where: { user_id: { user_id: learnerId } } as any, select: ['organisation_id'] });
             const resource = await resourceRepo.findOne({ where: { id: Number(resourceId) } });
             if (!resource) return res.status(404).json({ message: 'Resource not found', status: false });
+            if (resource.organisation_id != null && learnerRec?.organisation_id !== resource.organisation_id) {
+                return res.status(403).json({ message: 'You do not have access to this resource', status: false });
+            }
 
             let activity = await actRepo.findOne({ where: { learner: { user_id: learnerId } as any, resource: { id: Number(resourceId) } as any }, relations: ['learner', 'resource'] });
             if (!activity) {

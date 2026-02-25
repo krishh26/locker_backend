@@ -7,7 +7,7 @@ import { Learner } from '../entity/Learner.entity';
 import { User } from '../entity/User.entity';
 import { Course } from '../entity/Course.entity';
 import { uploadToS3 } from '../util/aws';
-import { applyLearnerScope } from '../util/organisationFilter';
+import { applyLearnerScope, getScopeContext } from '../util/organisationFilter';
 
 export class SessionLearnerActionController {
 
@@ -190,7 +190,7 @@ export class SessionLearnerActionController {
                 .where('learner_plan.learner_plan_id = :learner_plan_id', { learner_plan_id });
 
             if (req.user) {
-                await applyLearnerScope(queryBuilder, req.user, 'learner');
+                await applyLearnerScope(queryBuilder, req.user, 'learner', { scopeContext: getScopeContext(req) });
             }
 
             const actions = await queryBuilder
@@ -224,7 +224,7 @@ export class SessionLearnerActionController {
                 .where('action.action_id = :session_id', { session_id });
 
             if (req.user) {
-                await applyLearnerScope(queryBuilder, req.user, 'learner');
+                await applyLearnerScope(queryBuilder, req.user, 'learner', { scopeContext: getScopeContext(req) });
             }
 
             const actions = await queryBuilder

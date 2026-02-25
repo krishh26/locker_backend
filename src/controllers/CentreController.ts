@@ -4,7 +4,7 @@ import { Centre, CentreStatus } from "../entity/Centre.entity";
 import { Organisation } from "../entity/Organisation.entity";
 import { CustomRequest } from "../util/Interface/expressInterface";
 import { User } from "../entity/User.entity";
-import { applyScope, canAccessOrganisation, canAccessCentre, getAccessibleCentreIds } from "../util/organisationFilter";
+import { applyScope, canAccessOrganisation, canAccessCentre, getAccessibleCentreIds, getScopeContext } from "../util/organisationFilter";
 import { UserRole } from "../util/constants";
 import { In } from "typeorm";
 import { UserCentre } from "../entity/UserCentre.entity";
@@ -38,7 +38,7 @@ class CentreController {
             }
 
             // Check access permission (organisation-based)
-            const canAccess = await canAccessOrganisation(req.user, organisation_id);
+            const canAccess = await canAccessOrganisation(req.user, organisation_id, getScopeContext(req));
             if (!canAccess) {
                 return res.status(403).json({
                     message: "You do not have access to this organisation",
@@ -88,7 +88,8 @@ class CentreController {
             if (req.user) {
                 await applyScope(queryBuilder, req.user, "centre", {
                     organisationColumn: "centre.organisation_id",
-                    centreColumn: "centre.id"
+                    centreColumn: "centre.id",
+                    scopeContext: getScopeContext(req)
                 });
             }
 
@@ -147,7 +148,7 @@ class CentreController {
                 });
             }
 
-            const canAccess = await canAccessCentre(req.user, centre.id);
+            const canAccess = await canAccessCentre(req.user, centre.id, getScopeContext(req));
             if (!canAccess) {
                 return res.status(403).json({
                     message: "You do not have access to this centre",
@@ -203,7 +204,7 @@ class CentreController {
                 });
             }
 
-            const canAccess = await canAccessCentre(req.user, centre.id);
+            const canAccess = await canAccessCentre(req.user, centre.id, getScopeContext(req));
             if (!canAccess) {
                 return res.status(403).json({
                     message: "You do not have access to this centre",
@@ -247,7 +248,7 @@ class CentreController {
                 });
             }
 
-            const canAccess = await canAccessCentre(req.user, centre.id);
+            const canAccess = await canAccessCentre(req.user, centre.id, getScopeContext(req));
             if (!canAccess) {
                 return res.status(403).json({
                     message: "You do not have access to this centre",
@@ -289,7 +290,7 @@ class CentreController {
                 });
             }
 
-            const canAccess = await canAccessCentre(req.user, centre.id);
+            const canAccess = await canAccessCentre(req.user, centre.id, getScopeContext(req));
             if (!canAccess) {
                 return res.status(403).json({
                     message: "You do not have access to this centre",
@@ -344,7 +345,7 @@ class CentreController {
                 });
             }
 
-            const canAccess = await canAccessCentre(req.user, centre.id);
+            const canAccess = await canAccessCentre(req.user, centre.id, getScopeContext(req));
             if (!canAccess) {
                 return res.status(403).json({
                     message: "You do not have access to this centre",
@@ -435,7 +436,7 @@ class CentreController {
                 });
             }
 
-            const canAccess = await canAccessCentre(req.user, centre.id);
+            const canAccess = await canAccessCentre(req.user, centre.id, getScopeContext(req));
             if (!canAccess) {
                 return res.status(403).json({
                     message: "You do not have access to this centre",
@@ -499,7 +500,7 @@ class CentreController {
                 });
             }
 
-            const canAccess = await canAccessCentre(req.user, centre.id);
+            const canAccess = await canAccessCentre(req.user, centre.id, getScopeContext(req));
             if (!canAccess) {
                 return res.status(403).json({
                     message: "You do not have access to this centre",
@@ -594,7 +595,7 @@ class CentreController {
             const centreRepository = AppDataSource.getRepository(Centre);
 
             // Ensure caller has organisation-level access; leverage existing centre/org filters via getAccessibleCentreIds
-            const accessibleCentreIds = await getAccessibleCentreIds(req.user);
+            const accessibleCentreIds = await getAccessibleCentreIds(req.user, getScopeContext(req));
 
             const userCentres = await userCentreRepository.find({
                 where: { user_id: userId }
@@ -633,7 +634,7 @@ class CentreController {
     public async GetCentreUsers(req: CustomRequest, res: Response) {
         try {
             const centreId = parseInt(req.params.id);
-            const canAccess = await canAccessCentre(req.user, centreId);
+            const canAccess = await canAccessCentre(req.user, centreId, getScopeContext(req));
             if (!canAccess) {
                 return res.status(403).json({
                     message: "You do not have access to this centre",

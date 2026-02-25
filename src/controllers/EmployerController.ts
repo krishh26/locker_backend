@@ -7,7 +7,7 @@ import { sendPasswordByEmail } from "../util/mailSend";
 import { CustomRequest } from "../util/Interface/expressInterface";
 import { Employer } from "../entity/Employer.entity";
 import { UserRole } from "../util/constants";
-import { applyScope, applyLearnerScope, canAccessOrganisation } from "../util/organisationFilter";
+import { applyScope, applyLearnerScope, canAccessOrganisation, getScopeContext } from "../util/organisationFilter";
 
 
 class EmployerController {
@@ -60,7 +60,7 @@ class EmployerController {
                     status: false
                 })
             }
-            if (req.user && !(await canAccessOrganisation(req.user, organisation_id))) {
+            if (req.user && !(await canAccessOrganisation(req.user, organisation_id, getScopeContext(req)))) {
                 return res.status(403).json({
                     message: "You do not have access to create employers in this organisation",
                     status: false
@@ -181,6 +181,7 @@ class EmployerController {
                     "employer.deleted_at",
                     "employer.created_at",
                     "employer.updated_at",
+                    "employer.organisation_id",
                     "user.email",
                     "user.mobile"
                 ])
@@ -190,7 +191,7 @@ class EmployerController {
             }
 
             if (req.user) {
-                await applyScope(qb, req.user, "employer", { organisationOnly: true });
+                await applyScope(qb, req.user, "employer", { organisationOnly: true, scopeContext: getScopeContext(req) });
             }
 
             const [employer, count] = await qb
@@ -205,7 +206,7 @@ class EmployerController {
                 const qb = learnerRepository
                     .createQueryBuilder("learner")
                     .where("learner.employer_id = :id", { id: emp.employer_id });
-                if (req.user) await applyLearnerScope(qb, req.user, "learner");
+                if (req.user) await applyLearnerScope(qb, req.user, "learner", { scopeContext: getScopeContext(req) });
                 const learnerCount = await qb.getCount();
 
                 return {
@@ -294,7 +295,7 @@ class EmployerController {
                         errors.push({ index: i, email: email || 'unknown', error: "organisation_id is required" });
                         continue;
                     }
-                    if (req.user && !(await canAccessOrganisation(req.user, organisation_id))) {
+                    if (req.user && !(await canAccessOrganisation(req.user, organisation_id, getScopeContext(req)))) {
                         errors.push({ index: i, email: email || 'unknown', error: "No access to this organisation" });
                         continue;
                     }
@@ -399,7 +400,7 @@ class EmployerController {
                 });
             }
 
-            if (req.user && existingEmployer.organisation_id != null && !(await canAccessOrganisation(req.user, existingEmployer.organisation_id))) {
+            if (req.user && existingEmployer.organisation_id != null && !(await canAccessOrganisation(req.user, existingEmployer.organisation_id, getScopeContext(req)))) {
                 return res.status(403).json({
                     message: 'You do not have access to this employer',
                     status: false,
@@ -456,7 +457,7 @@ class EmployerController {
                 });
             }
 
-            if (req.user && employer.organisation_id != null && !(await canAccessOrganisation(req.user, employer.organisation_id))) {
+            if (req.user && employer.organisation_id != null && !(await canAccessOrganisation(req.user, employer.organisation_id, getScopeContext(req)))) {
                 return res.status(403).json({
                     message: 'You do not have access to this employer',
                     status: false,

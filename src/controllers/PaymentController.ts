@@ -4,7 +4,7 @@ import { Payment } from '../entity/Payment.entity';
 import { Plan } from '../entity/Plan.entity';
 import { CustomRequest } from '../util/Interface/expressInterface';
 import { UserRole } from '../util/constants';
-import { applyScope } from '../util/organisationFilter';
+import { applyScope, getScopeContext } from '../util/organisationFilter';
 
 interface LineItemInput {
     periodIndex: number;
@@ -109,7 +109,7 @@ export default class PaymentController {
                 .addOrderBy('payment.id', 'DESC');
 
             if (req.user) {
-                await applyScope(qb, req.user, 'payment', { organisationOnly: true });
+                await applyScope(qb, req.user, 'payment', { organisationOnly: true, scopeContext: getScopeContext(req) });
             }
 
             if (organisationId != null && !isNaN(organisationId)) {

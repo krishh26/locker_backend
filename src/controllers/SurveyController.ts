@@ -22,7 +22,7 @@ import { User } from '../entity/User.entity';
 import { Notification } from '../entity/Notification.entity';
 import { SendEmailTemplet } from '../util/nodemailer';
 import { generateSurveyAllocationEmailHTML } from '../util/mailSend';
-import { getAccessibleOrganisationIds } from '../util/organisationFilter';
+import { getAccessibleOrganisationIds, getScopeContext } from '../util/organisationFilter';
 
 type ErrorDetail = { field?: string; message: string };
 
@@ -48,14 +48,14 @@ class SurveyController {
             if (userId) {
                 qb.andWhere('survey.userId = :userId', { userId });
             }
-
+            let tempid = Number(organizationId)
             if (organizationId) {
-                qb.andWhere('survey.organizationId = :organizationId', { organizationId });
+                qb.andWhere('survey.organizationId = :organizationId', { organizationId: tempid });
             }
 
             // Add organization filtering (Survey has organizationId field)
             if (req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user);
+                const accessibleIds = await getAccessibleOrganisationIds(req.user, getScopeContext(req));
                 if (accessibleIds !== null) {
                     if (accessibleIds.length === 0) {
                         return res.status(200).json({
@@ -208,15 +208,6 @@ class SurveyController {
                 });
             }
 
-            // When organizationId is not provided, set from user's context so survey appears in org-scoped fetch
-            let resolvedOrganizationId: string | null = organizationId != null ? String(organizationId) : null;
-            if (resolvedOrganizationId == null && req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user);
-                if (accessibleIds != null && accessibleIds.length > 0) {
-                    resolvedOrganizationId = String(accessibleIds[0]);
-                }
-            }
-
             const repo = AppDataSource.getRepository(Survey);
             const survey = repo.create({
                 name: String(name).trim(),
@@ -225,7 +216,7 @@ class SurveyController {
                 backgroundType: parsedBackground?.type ?? null,
                 backgroundValue: parsedBackground?.value ?? null,
                 userId: req.user?.user_id ? String(req.user.user_id) : null,
-                organizationId: resolvedOrganizationId,
+                organizationId: organizationId ?? null,
                 expirationDate: expirationDate ?? null
             });
 

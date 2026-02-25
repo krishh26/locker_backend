@@ -6,7 +6,7 @@ import { UserRole } from "../util/constants";
 import { In } from "typeorm";
 import AuditLogController from "./AuditLogController";
 import { AuditActionType } from "../entity/AuditLog.entity";
-import { getAccessibleOrganisationIds, canAccessOrganisation } from "../util/organisationFilter";
+import { getAccessibleOrganisationIds, canAccessOrganisation, getScopeContext, validateOneOrganisationPerUser, getUserOrganisationIds } from "../util/organisationFilter";
 class OrganisationController {
     // Helper method to get accessible organisation IDs for user
 
@@ -83,7 +83,8 @@ class OrganisationController {
     public async GetOrganisations(req: CustomRequest, res: Response) {
         try {
             const organisationRepository = AppDataSource.getRepository(Organisation);
-            const accessibleIds = await getAccessibleOrganisationIds(req.user);
+            const scopeContext = getScopeContext(req);
+            const accessibleIds = await getAccessibleOrganisationIds(req.user, scopeContext);
 
             let queryBuilder = organisationRepository.createQueryBuilder("organisation")
                 .where("organisation.deleted_at IS NULL");
@@ -160,7 +161,7 @@ class OrganisationController {
             const organisationRepository = AppDataSource.getRepository(Organisation);
 
             // Check access permission
-            if (!await canAccessOrganisation(req.user, organisationId)) {
+            if (!await canAccessOrganisation(req.user, organisationId, getScopeContext(req))) {
                 return res.status(403).json({
                     message: "You do not have access to this organisation",
                     status: false
@@ -438,6 +439,15 @@ class OrganisationController {
                 });
             }
 
+            // One organisation per user: block if user already belongs to a different organisation
+            const oneOrgError = await validateOneOrganisationPerUser(user.user_id, organisationId);
+            if (oneOrgError) {
+                return res.status(400).json({
+                    message: oneOrgError,
+                    status: false
+                });
+            }
+
             // Add OrganisationAdmin and Admin roles if not present (so JWT gets OrganisationAdmin for scoping)
             const rolesToAdd: UserRole[] = [];
             if (!user.roles.includes(UserRole.OrganisationAdmin)) rolesToAdd.push(UserRole.OrganisationAdmin);
@@ -606,6 +616,14 @@ class OrganisationController {
             if (user_ids.length > 0) {
                 const users = await userRepository.find({ where: { user_id: In(user_ids) } });
                 for (const user of users) {
+                    // One organisation per user: block if user is already in another organisation
+                    const existingOrgs = await getUserOrganisationIds(user.user_id);
+                    if (existingOrgs.length > 0) {
+                        return res.status(400).json({
+                            message: "User can only belong to one organisation. One or more selected users are already assigned to another organisation.",
+                            status: false
+                        });
+                    }
                     const rolesToAdd: UserRole[] = [];
                     if (!user.roles.includes(UserRole.OrganisationAdmin)) rolesToAdd.push(UserRole.OrganisationAdmin);
                     if (!user.roles.includes(UserRole.Admin)) rolesToAdd.push(UserRole.Admin);
