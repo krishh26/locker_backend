@@ -5,9 +5,11 @@ import { Learner } from '../entity/Learner.entity';
 import { Course } from '../entity/Course.entity';
 import { UserCourse } from '../entity/UserCourse.entity';
 import { getUnitCompletionStatus } from '../util/unitCompletion';
+import { CustomRequest } from '../util/Interface/expressInterface';
+import { applyLearnerScope, getScopeContext } from '../util/organisationFilter';
 
 class LearnerUnitController {
-    public async saveSelectedUnits(req: Request, res: Response) {
+    public async saveSelectedUnits(req: CustomRequest, res: Response) {
         try {
             const { learner_id, course_id, unit_ids } = req.body;
 
@@ -19,11 +21,21 @@ class LearnerUnitController {
             const courseRepository = AppDataSource.getRepository(Course);
             const learnerUnitRepository = AppDataSource.getRepository(LearnerUnit);
 
-            const learner = await learnerRepository.findOne({ where: { learner_id }});
+            const learnerExists = await learnerRepository.findOne({ where: { learner_id } });
+            if (!learnerExists) {
+                return res.status(404).json({ message: 'Learner not found', status: false });
+            }
+            const learnerQb = learnerRepository.createQueryBuilder('learner').where('learner.learner_id = :learner_id', { learner_id });
+            if (req.user) {
+                await applyLearnerScope(learnerQb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+            }
+            const learner = await learnerQb.getOne();
+            if (req.user && !learner) {
+                return res.status(403).json({ message: 'You do not have access to this learner', status: false });
+            }
             const course = await courseRepository.findOne({ where: { course_id } });
-
-            if (!learner || !course) {
-                return res.status(404).json({ message: 'learner or course not found', status: false });
+            if (!course) {
+                return res.status(404).json({ message: 'Course not found', status: false });
             }
 
             // Fetch existing learner_unit records for this learner+course
@@ -103,9 +115,20 @@ class LearnerUnitController {
         }
     }
 
-    public async getChosenUnits(req: Request, res: Response) {
+    public async getChosenUnits(req: CustomRequest, res: Response) {
         try {
             const { learner_id, course_id } = req.params;
+            const learnerIdNum = Number(learner_id);
+
+            const learnerRepo = AppDataSource.getRepository(Learner);
+            const learnerQb = learnerRepo.createQueryBuilder('learner').where('learner.learner_id = :learner_id', { learner_id: learnerIdNum });
+            if (req.user) {
+                await applyLearnerScope(learnerQb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+            }
+            const learnerInScope = await learnerQb.getOne();
+            if (req.user && !learnerInScope) {
+                return res.status(403).json({ status: false, message: 'You do not have access to this learner' });
+            }
 
             const learnerUnitRepo = AppDataSource.getRepository(LearnerUnit);
             const courseRepo = AppDataSource.getRepository(Course);
@@ -125,7 +148,7 @@ class LearnerUnitController {
             const selectedUnits = await learnerUnitRepo
                 .createQueryBuilder('lu')
                 .where('lu.learnerIdLearnerId = :learner_id', {
-                    learner_id: Number(learner_id)
+                    learner_id: learnerIdNum
                 })
                 .andWhere('lu.courseCourseId = :course_id', {
                     course_id: Number(course_id)
@@ -141,7 +164,7 @@ class LearnerUnitController {
             const userCourse = await userCourseRepo
                 .createQueryBuilder('uc')
                 .leftJoinAndSelect('uc.learner_id', 'learner')
-                .where('learner.learner_id = :learner_id', { learner_id: Number(learner_id) })
+                .where('learner.learner_id = :learner_id', { learner_id: learnerIdNum })
                 .andWhere(`uc.course->>'course_id' = :course_id`, { course_id: String(course_id) })
                 .getOne();
 

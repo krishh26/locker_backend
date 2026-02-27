@@ -10,6 +10,7 @@ import { UserCourse } from '../entity/UserCourse.entity';
 import { SendNotification } from '../util/socket/notification';
 import { NotificationType, SocketDomain } from '../util/constants';
 import { uploadToS3 } from '../util/aws';
+import { applyLearnerScope, getScopeContext } from '../util/organisationFilter';
 
 class LearnerPlanController {
 
@@ -70,6 +71,17 @@ class LearnerPlanController {
                     message: "One or more learners not found",
                     status: false
                 });
+            }
+            if (req.user && allLearnerIds.length > 0) {
+                const learnerQb = learnerRepository.createQueryBuilder('learner').where('learner.learner_id IN (:...ids)', { ids: allLearnerIds });
+                await applyLearnerScope(learnerQb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+                const inScopeLearners = await learnerQb.getMany();
+                if (inScopeLearners.length !== allLearnerIds.length) {
+                    return res.status(403).json({
+                        message: "You do not have access to one or more of the selected learners",
+                        status: false
+                    });
+                }
             }
 
             // Validate all courses exist
@@ -221,12 +233,24 @@ class LearnerPlanController {
             const id = parseInt(req.params.id);
             const { title, description, location, startDate, Duration, type, Attended, repeatSession, feedback, numberOfParticipants, status } = req.body;
 
-            let learnerPlan = await learnerPlanRepository.findOne({ where: { learner_plan_id: id } });
+            let learnerPlan = await learnerPlanRepository.findOne({ where: { learner_plan_id: id }, relations: ['learners'] });
             if (!learnerPlan) {
                 return res.status(404).json({
                     message: "Learner plan not found",
                     status: false
                 });
+            }
+            if (req.user && learnerPlan.learners?.length) {
+                const learnerIds = learnerPlan.learners.map((l: any) => l.learner_id);
+                const learnerRepo = AppDataSource.getRepository(Learner);
+                const learnerQb = learnerRepo.createQueryBuilder('learner').where('learner.learner_id IN (:...ids)', { ids: learnerIds });
+                await applyLearnerScope(learnerQb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+                if ((await learnerQb.getCount()) === 0) {
+                    return res.status(403).json({
+                        message: "You do not have access to this learner plan",
+                        status: false
+                    });
+                }
             }
 
             learnerPlan.title = title || learnerPlan.title;
@@ -262,15 +286,27 @@ class LearnerPlanController {
         try {
             const id = parseInt(req.params.id);
             const learnerPlanRepository = AppDataSource.getRepository(LearnerPlan);
-
-            const deleteResult = await learnerPlanRepository.delete(id);
-
-            if (deleteResult.affected === 0) {
+            const learnerPlan = await learnerPlanRepository.findOne({ where: { learner_plan_id: id }, relations: ['learners'] });
+            if (!learnerPlan) {
                 return res.status(404).json({
                     message: 'Learner plan not found',
                     status: false,
                 });
             }
+            if (req.user && learnerPlan.learners?.length) {
+                const learnerIds = learnerPlan.learners.map((l: any) => l.learner_id);
+                const learnerRepo = AppDataSource.getRepository(Learner);
+                const learnerQb = learnerRepo.createQueryBuilder('learner').where('learner.learner_id IN (:...ids)', { ids: learnerIds });
+                await applyLearnerScope(learnerQb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+                if ((await learnerQb.getCount()) === 0) {
+                    return res.status(403).json({
+                        message: "You do not have access to this learner plan",
+                        status: false
+                    });
+                }
+            }
+
+            const deleteResult = await learnerPlanRepository.delete(id);
 
             return res.status(200).json({
                 message: 'Learner plan deleted successfully',
@@ -290,6 +326,22 @@ class LearnerPlanController {
             const learnerPlanRepository = AppDataSource.getRepository(LearnerPlan);
 
             const { assessor_id, learners, type, Attended, sortBy } = req.query as any;
+
+            let scopePlanIds: number[] | null = null;
+            if (req.user) {
+                const scopeQb = learnerPlanRepository.createQueryBuilder('lp').innerJoin('lp.learners', 'l').select('DISTINCT lp.learner_plan_id', 'learner_plan_id');
+                await applyLearnerScope(scopeQb, req.user, 'l', { scopeContext: getScopeContext(req) });
+                const scopeRows = await scopeQb.getRawMany<{ learner_plan_id: number }>();
+                scopePlanIds = scopeRows.map(r => r.learner_plan_id);
+                if (scopePlanIds.length === 0) {
+                    return res.status(200).json({
+                        message: "Learner plans fetched successfully",
+                        status: true,
+                        data: [],
+                        ...(req.query.meta === 'true' && { meta_data: { page: req.pagination?.page ?? 1, items: 0, page_size: req.pagination?.limit ?? 10, pages: 0 } })
+                    });
+                }
+            }
 
             const qb = learnerPlanRepository.createQueryBuilder('learnerPlan')
                 .leftJoinAndSelect('learnerPlan.assessor_id', 'assessor')
@@ -334,6 +386,9 @@ class LearnerPlanController {
                     'course.units'
                 ]);
 
+            if (scopePlanIds && scopePlanIds.length > 0) {
+                qb.andWhere('learnerPlan.learner_plan_id IN (:...scopePlanIds)', { scopePlanIds });
+            }
             if (assessor_id) {
                 qb.andWhere('assessor.user_id = :assessor_id', { assessor_id });
             }
@@ -490,12 +545,15 @@ class LearnerPlanController {
             const learnerPlanRepository = AppDataSource.getRepository(LearnerPlan);
             const { id } = req.params;
 
-            const learnerPlan = await learnerPlanRepository.createQueryBuilder('learnerPlan')
+            const qbPlan = learnerPlanRepository.createQueryBuilder('learnerPlan')
                 .leftJoinAndSelect('learnerPlan.assessor_id', 'assessor')
                 .leftJoinAndSelect('learnerPlan.learners', 'learner')
                 .leftJoinAndSelect('learnerPlan.courses', 'courses')
-                .where('learnerPlan.learner_plan_id = :id', { id })
-                .select([
+                .where('learnerPlan.learner_plan_id = :id', { id });
+            if (req.user) {
+                await applyLearnerScope(qbPlan, req.user, 'learner', { scopeContext: getScopeContext(req) });
+            }
+            const learnerPlan = await qbPlan.select([
                     'learnerPlan.learner_plan_id',
                     'learnerPlan.title',
                     'learnerPlan.description',
@@ -533,6 +591,15 @@ class LearnerPlanController {
                     message: "Learner plan not found",
                     status: false
                 });
+            }
+            if (req.user && (!(learnerPlan as any).learners || (learnerPlan as any).learners.length === 0)) {
+                const planExists = await learnerPlanRepository.findOne({ where: { learner_plan_id: Number(id) }, relations: ['learners'] });
+                if (planExists?.learners?.length) {
+                    return res.status(403).json({
+                        message: "You do not have access to this learner plan",
+                        status: false
+                    });
+                }
             }
 
             return res.status(200).json({
@@ -577,6 +644,9 @@ class LearnerPlanController {
 
             if (learner_id) {
                 qb.andWhere('learner.learner_id = :learner_id', { learner_id });
+            }
+            if (req.user) {
+                await applyLearnerScope(qb, req.user, 'learner', { scopeContext: getScopeContext(req) });
             }
 
             const learnerPlans = await qb

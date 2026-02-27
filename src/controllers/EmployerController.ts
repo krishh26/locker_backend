@@ -7,7 +7,7 @@ import { sendPasswordByEmail } from "../util/mailSend";
 import { CustomRequest } from "../util/Interface/expressInterface";
 import { Employer } from "../entity/Employer.entity";
 import { UserRole } from "../util/constants";
-import { applyScope, applyLearnerScope, canAccessOrganisation, getScopeContext } from "../util/organisationFilter";
+import { applyEmployerScope, applyLearnerScope, canAccessOrganisation, getScopeContext } from "../util/organisationFilter";
 
 
 class EmployerController {
@@ -191,7 +191,7 @@ class EmployerController {
             }
 
             if (req.user) {
-                await applyScope(qb, req.user, "employer", { organisationOnly: true, scopeContext: getScopeContext(req) });
+                await applyEmployerScope(qb, req.user, "employer", { scopeContext: getScopeContext(req) });
             }
 
             const [employer, count] = await qb

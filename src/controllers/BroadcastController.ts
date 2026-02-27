@@ -7,6 +7,7 @@ import { User } from "../entity/User.entity";
 import { SendNotifications } from "../util/socket/notification";
 import { UserCourse } from "../entity/UserCourse.entity";
 import { In } from "typeorm";
+import { addUserScopeFilter, getScopeContext, getAccessibleUserIds, applyLearnerScope } from "../util/organisationFilter";
 
 class BroadcastController {
     public async createBroadcast(req: CustomRequest, res: Response) {
@@ -49,13 +50,22 @@ class BroadcastController {
             const { title, description } = req.body;
 
             const broadcastRepository = AppDataSource.getRepository(Broadcast);
-            const broadcast = await broadcastRepository.findOne({ where: { id: supportId } });
-
+            const broadcast = await broadcastRepository.findOne({ where: { id: supportId }, relations: ['user_id'] });
             if (!broadcast) {
                 return res.status(404).json({
                     message: 'Broadcast not found',
                     status: false,
                 });
+            }
+            if (req.user && (broadcast.user_id as any)?.user_id) {
+                const creatorId = (broadcast.user_id as any).user_id;
+                const allowed = await getAccessibleUserIds(req.user, getScopeContext(req));
+                if (allowed !== null && !allowed.includes(creatorId)) {
+                    return res.status(403).json({
+                        message: 'You do not have access to this broadcast',
+                        status: false,
+                    });
+                }
             }
 
             broadcast.title = title || broadcast.title;
@@ -82,7 +92,10 @@ class BroadcastController {
             const broadcastRepository = AppDataSource.getRepository(Broadcast);
 
             const qb = broadcastRepository.createQueryBuilder('broadcast')
-                .leftJoinAndSelect('broadcast.user_id', 'user')
+                .leftJoinAndSelect('broadcast.user_id', 'user');
+            if (req.user) {
+                await addUserScopeFilter(qb, req.user, 'user', getScopeContext(req));
+            }
 
             const [broadCast, count] = await qb
                 .skip(Number(req.pagination.skip))
@@ -116,13 +129,22 @@ class BroadcastController {
         try {
             const id = parseInt(req.params.id);
             const broadcastRepository = AppDataSource.getRepository(Broadcast);
-            const broadcast = await broadcastRepository.findOne({ where: { id } });
-
+            const broadcast = await broadcastRepository.findOne({ where: { id }, relations: ['user_id'] });
             if (!broadcast) {
                 return res.status(404).json({
                     message: 'Broadcast not found',
                     status: false,
                 });
+            }
+            if (req.user && (broadcast.user_id as any)?.user_id) {
+                const creatorId = (broadcast.user_id as any).user_id;
+                const allowed = await getAccessibleUserIds(req.user, getScopeContext(req));
+                if (allowed !== null && !allowed.includes(creatorId)) {
+                    return res.status(403).json({
+                        message: 'You do not have access to this broadcast',
+                        status: false,
+                    });
+                }
             }
 
             await broadcastRepository.remove(broadcast);
@@ -145,26 +167,33 @@ class BroadcastController {
             const userCourseRepository = AppDataSource.getRepository(UserCourse);
             const { title, description, user_ids, assign, course_ids } = req.body;
 
-            let usersToAdd = []
+            let usersToAdd: any[] = [];
             if (user_ids) {
-                usersToAdd = await userRepository.findByIds(user_ids);
-
-                if (!usersToAdd.length) {
-                    return res.status(404).json({
-                        message: 'Users not found',
+                const allowedIds = req.user ? await getAccessibleUserIds(req.user, getScopeContext(req)) : null;
+                const idsToUse = allowedIds !== null ? (Array.isArray(user_ids) ? user_ids.filter((id: number) => allowedIds.includes(Number(id))) : (allowedIds.includes(Number(user_ids)) ? [user_ids] : [])) : user_ids;
+                if (Array.isArray(idsToUse) && idsToUse.length > 0) {
+                    usersToAdd = await userRepository.find({ where: { user_id: In(idsToUse) }, select: ['user_id', 'roles'] });
+                }
+                if (req.user && allowedIds !== null && usersToAdd.length !== (Array.isArray(user_ids) ? user_ids.length : 1)) {
+                    return res.status(403).json({
+                        message: 'One or more users are outside your scope',
                         status: false,
                     });
                 }
             } else if (course_ids) {
-                usersToAdd = await userCourseRepository
+                const ucQb = userCourseRepository
                     .createQueryBuilder('userCourse')
                     .innerJoin('userCourse.learner_id', 'learner')
                     .innerJoin('learner.user_id', 'user')
                     .where('userCourse.course ->> \'course_id\' IN (:...course_ids)', { course_ids })
-                    .select('DISTINCT user.user_id', 'user_id')
-                    .getRawMany();
+                    .select('DISTINCT user.user_id', 'user_id');
+                if (req.user) {
+                    await applyLearnerScope(ucQb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+                }
+                const rows = await ucQb.getRawMany<{ user_id: number }>();
+                usersToAdd = rows.map(r => ({ user_id: r.user_id }));
             } else if (assign) {
-                const roleMap = {
+                const roleMap: Record<string, string | null> = {
                     "All": null,
                     "All Learner": UserRole.Learner,
                     "All Trainer": UserRole.Trainer,
@@ -174,23 +203,19 @@ class BroadcastController {
                     "All EQA": UserRole.EQA
                 };
                 if (assign in roleMap) {
-                    if (assign === "All") {
-                        usersToAdd = await userRepository
-                            .createQueryBuilder("user")
-                            .select(["user.user_id", "user.roles"])
-                            .getMany();
-                    } else {
-                        usersToAdd = await userRepository
-                            .createQueryBuilder("user")
-                            .select(["user.user_id", "user.roles"])
-                            .where(":role = ANY(user.roles)", { role: roleMap[assign] })
-                            .getMany();
+                    const role = roleMap[assign];
+                    const userQb = userRepository.createQueryBuilder("user").select(["user.user_id", "user.roles"]);
+                    if (req.user) {
+                        await addUserScopeFilter(userQb, req.user, 'user', getScopeContext(req));
                     }
+                    if (role) {
+                        userQb.andWhere(":role = ANY(user.roles)", { role });
+                    }
+                    usersToAdd = await userQb.getMany();
                 }
             }
 
-            const userIds = usersToAdd.map((user) => user.user_id);
-            console.log(userIds, title, description);
+            const userIds = usersToAdd.map((u: any) => u.user_id ?? u);
             const data = {
                 data: {
                     title,

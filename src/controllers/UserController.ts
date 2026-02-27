@@ -15,7 +15,7 @@ import { Raw, In } from 'typeorm';
 import { AssignmentSignature } from "../entity/AssignmentSignature.entity";
 import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
 import { UserEmployer } from '../entity/UserEmployers.entity';
-import { addUserScopeFilter, getAccessibleOrganisationIds, getAccessibleCentreIds, resolveUserRole, getScopeContext } from "../util/organisationFilter";
+import { addUserScopeFilter, getAccessibleOrganisationIds, getAccessibleCentreIds, resolveUserRole, getScopeContext, validateCentreOrganisation, canAccessOrganisation, canAccessCentre } from "../util/organisationFilter";
 
 class UserController {
 
@@ -89,6 +89,44 @@ class UserController {
                 await userEmployerRepo.save(mappings);
             }
 
+            // Trainer must have exactly one organisation and one centre (centre selection mandatory)
+            const isTrainer = Array.isArray(roles) && roles.includes(UserRole.Trainer);
+            if (isTrainer) {
+                if (!Array.isArray(req.body.organisation_ids) || req.body.organisation_ids.length !== 1) {
+                    return res.status(400).json({
+                        message: "Trainer must have exactly one organisation assigned.",
+                        status: false
+                    });
+                }
+                if (!Array.isArray(req.body.centre_ids) || req.body.centre_ids.length !== 1) {
+                    return res.status(400).json({
+                        message: "Trainer must have exactly one centre assigned. Centre selection is mandatory.",
+                        status: false
+                    });
+                }
+                const orgId = req.body.organisation_ids[0];
+                const centreId = req.body.centre_ids[0];
+                if (req.user && !(await canAccessOrganisation(req.user, orgId, getScopeContext(req)))) {
+                    return res.status(403).json({
+                        message: "You do not have access to assign this organisation.",
+                        status: false
+                    });
+                }
+                if (req.user && !(await canAccessCentre(req.user, centreId, getScopeContext(req)))) {
+                    return res.status(403).json({
+                        message: "You do not have access to assign this centre.",
+                        status: false
+                    });
+                }
+                const centreBelongsToOrg = await validateCentreOrganisation(centreId, orgId);
+                if (!centreBelongsToOrg) {
+                    return res.status(400).json({
+                        message: "Centre does not belong to the specified organisation.",
+                        status: false
+                    });
+                }
+            }
+
             // Handle organisation_ids assignment (one organisation per user)
             if (Array.isArray(req.body.organisation_ids) && req.body.organisation_ids.length) {
                 if (req.body.organisation_ids.length > 1) {
@@ -122,6 +160,18 @@ class UserController {
                 );
 
                 await userOrganisationRepo.save(organisationMappings);
+            }
+
+            // Handle centre_ids for Trainer (exactly one centre)
+            if (isTrainer && Array.isArray(req.body.centre_ids) && req.body.centre_ids.length === 1) {
+                const { UserCentre } = await import("../entity/UserCentre.entity");
+                const userCentreRepo = AppDataSource.getRepository(UserCentre);
+                const centreId = req.body.centre_ids[0];
+                const userCentre = userCentreRepo.create({
+                    user_id: users.user_id,
+                    centre_id: centreId
+                });
+                await userCentreRepo.save(userCentre);
             }
 
             res.status(200).json({
@@ -311,6 +361,44 @@ class UserController {
 
                     await userOrganisationRepo.save(organisationMappings);
                 }
+            }
+
+            // Trainer must have exactly one centre (centre selection mandatory)
+            const isTrainer = Array.isArray(roles) && roles.includes(UserRole.Trainer);
+            if (isTrainer) {
+                if (!Array.isArray(req.body.centre_ids) || req.body.centre_ids.length !== 1) {
+                    return res.status(400).json({
+                        message: "Trainer must have exactly one centre assigned. Centre selection is mandatory.",
+                        status: false
+                    });
+                }
+                const centreId = req.body.centre_ids[0];
+                let orgId: number | undefined = Array.isArray(req.body.organisation_ids) && req.body.organisation_ids.length === 1 ? req.body.organisation_ids[0] : undefined;
+                if (orgId == null) {
+                    const { UserOrganisation } = await import("../entity/UserOrganisation.entity");
+                    const uoRepo = AppDataSource.getRepository(UserOrganisation);
+                    const uo = await uoRepo.findOne({ where: { user_id: userId }, select: ['organisation_id'] });
+                    orgId = uo?.organisation_id;
+                }
+                if (orgId != null) {
+                    if (req.user && !(await canAccessCentre(req.user, centreId, getScopeContext(req)))) {
+                        return res.status(403).json({
+                            message: "You do not have access to assign this centre.",
+                            status: false
+                        });
+                    }
+                    const centreBelongsToOrg = await validateCentreOrganisation(centreId, orgId);
+                    if (!centreBelongsToOrg) {
+                        return res.status(400).json({
+                            message: "Centre does not belong to the specified organisation.",
+                            status: false
+                        });
+                    }
+                }
+                const { UserCentre } = await import("../entity/UserCentre.entity");
+                const userCentreRepo = AppDataSource.getRepository(UserCentre);
+                await userCentreRepo.delete({ user_id: userId });
+                await userCentreRepo.save(userCentreRepo.create({ user_id: userId, centre_id: centreId }));
             }
 
             const updatedUser = await userRepository.save(user)

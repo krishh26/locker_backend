@@ -61,7 +61,10 @@ class LearnerController {
             }
 
             // Validate centre belongs to organisation and employer belongs to organisation
-            const validation = await validateLearnerOrganisationCentre(organisation_id, centre_id, employer_id);
+            let tempid = Number(organisation_id)
+            let tempid2 = Number(centre_id)
+            let tempid3 = Number(employer_id)
+            const validation = await validateLearnerOrganisationCentre(tempid, tempid2, tempid3);
             if (!validation.valid) {
                 return res.status(400).json({
                     message: validation.error,

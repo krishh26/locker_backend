@@ -324,6 +324,15 @@ class TimeLogController {
                 return res.status(400).json({ status: false, message: 'Invalid learnerId' });
             }
 
+            if (req.user) {
+                const learnerRepo = AppDataSource.getRepository(Learner);
+                const qb = learnerRepo.createQueryBuilder('learner').where('learner.learner_id = :learnerId', { learnerId });
+                await applyLearnerScope(qb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+                if ((await qb.getCount()) === 0) {
+                    return res.status(403).json({ status: false, message: 'You do not have access to this learner' });
+                }
+            }
+
             const courseId = req.query.courseId ? Number(req.query.courseId) : undefined;
 
             // new toggle

@@ -77,7 +77,6 @@ export function getRequiredOrganisationId(user: any, scopeContext: ScopeContext)
  */
 export async function getAccessibleOrganisationIds(user: any, scopeContext?: ScopeContext): Promise<number[] | null> {
     const role = resolveUserRole(user);
-    console.log(role)
     if (role === UserRole.MasterAdmin) {
         if (scopeContext?.organisationId != null) {
             const orgRepo = AppDataSource.getRepository(Organisation);
@@ -347,13 +346,9 @@ export async function addCentreFilter(
  * MasterAdmin with scopeContext: only true if organisationId matches context.
  */
 export async function canAccessOrganisation(user: any, organisationId: number, scopeContext?: ScopeContext): Promise<boolean> {
-    console.log(organisationId)
     const ids = await getAccessibleOrganisationIds(user, scopeContext);
-    console.log("???",ids)
     if (ids === null) return true;
-    console.log(ids.includes(organisationId))
-    let tempid = Number(organisationId)
-    return ids.includes(tempid);
+    return ids.includes(Number(organisationId));
 }
 
 /**
@@ -530,6 +525,58 @@ export async function applyScope(
 
     if (role === UserRole.Trainer && options?.trainerIdColumn) {
         qb.andWhere(`${options.trainerIdColumn} = :trainerUserId`, { trainerUserId: user.user_id });
+    }
+}
+
+export type EmployerScopeOptions = {
+    scopeContext?: ScopeContext;
+    /** Alias for the employer entity in the query (default 'employer'). employer_id column used. */
+    entityAlias?: string;
+};
+
+/**
+ * Apply scope to Employer list/get. Organisation-only filter; for CentreAdmin, only employers
+ * linked to at least one learner in their centre(s) are visible (no cross-centre employer visibility).
+ * Order: 1) Organisation, 2) CentreAdmin → employer_id IN (learners in their centre).
+ */
+export async function applyEmployerScope(
+    qb: SelectQueryBuilder<any>,
+    user: any,
+    entityAlias: string = 'employer',
+    options?: EmployerScopeOptions
+): Promise<void> {
+    const scopeContext = options?.scopeContext;
+    const role = resolveUserRole(user);
+
+    if (role === UserRole.MasterAdmin && !scopeContext?.organisationId) {
+        return;
+    }
+
+    const orgIds = await getAccessibleOrganisationIds(user, scopeContext);
+    if (orgIds === null) {
+        if (role === UserRole.MasterAdmin) return;
+        qb.andWhere('1 = 0');
+        return;
+    }
+    if (orgIds.length === 0) {
+        qb.andWhere('1 = 0');
+        return;
+    }
+
+    const orgCol = `${entityAlias}.organisation_id`;
+    qb.andWhere(`${orgCol} IN (:...orgIds)`, { orgIds });
+
+    if (role === UserRole.CentreAdmin) {
+        const centreIds = await getAccessibleCentreIds(user, scopeContext);
+        if (centreIds === null || centreIds.length === 0) {
+            qb.andWhere('1 = 0');
+            return;
+        }
+        const idCol = `${entityAlias}.employer_id`;
+        qb.andWhere(
+            `${idCol} IN (SELECT DISTINCT learner.employer_id FROM learner WHERE learner.centre_id IN (:...centreIds) AND learner.organisation_id IN (:...orgIds) AND learner.employer_id IS NOT NULL AND learner.deleted_at IS NULL)`,
+            { centreIds, orgIds }
+        );
     }
 }
 

@@ -8,7 +8,8 @@ import { UserForm } from "../entity/UserForm.entity";
 import { LearnerPlan } from "../entity/LearnerPlan.entity";
 import { SendEmailTemplet } from "../util/nodemailer";
 import { uploadToS3, uploadMultipleFilesToS3 } from "../util/aws";
-import { getAccessibleOrganisationIds, getAccessibleCentreAdminUserIds, getScopeContext } from "../util/organisationFilter";
+import { getAccessibleOrganisationIds, getAccessibleCentreAdminUserIds, getScopeContext, applyLearnerScope } from "../util/organisationFilter";
+import { Learner } from "../entity/Learner.entity";
 
 class FormController {
 
@@ -443,6 +444,27 @@ class FormController {
                                 });
                             }
                         }
+                    }
+                }
+            }
+
+            // If learner_plan_id provided, ensure learner plan is in scope
+            if (learner_plan_id && req.user) {
+                const learnerPlanRepo = AppDataSource.getRepository(LearnerPlan);
+                const plan = await learnerPlanRepo.findOne({
+                    where: { learner_plan_id: Number(learner_plan_id) },
+                    relations: ['learners'],
+                });
+                if (plan?.learners?.length) {
+                    const learnerIds = plan.learners.map((l: any) => l.learner_id);
+                    const learnerRepo = AppDataSource.getRepository(Learner);
+                    const learnerQb = learnerRepo.createQueryBuilder('learner').where('learner.learner_id IN (:...ids)', { ids: learnerIds });
+                    await applyLearnerScope(learnerQb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+                    if ((await learnerQb.getCount()) === 0) {
+                        return res.status(403).json({
+                            message: 'You do not have access to this learner plan',
+                            status: false,
+                        });
                     }
                 }
             }

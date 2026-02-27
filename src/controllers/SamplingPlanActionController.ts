@@ -2,9 +2,23 @@ import { Request, Response } from "express";
 import { AppDataSource } from "../data-source";
 import { SamplingPlanAction } from "../entity/SamplingPlanAction.entity";
 import { SamplingPlanDetail } from "../entity/SamplingPlanDetail.entity";
+import { Learner } from "../entity/Learner.entity";
+import { applyLearnerScope, getScopeContext } from "../util/organisationFilter";
 
 export class SamplingPlanActionController {
-  
+
+  private async assertPlanDetailLearnerInScope(planDetail: SamplingPlanDetail, req: any, res: Response): Promise<boolean> {
+    if (!req.user || !planDetail.learner?.learner_id) return true;
+    const learnerRepo = AppDataSource.getRepository(Learner);
+    const qb = learnerRepo.createQueryBuilder("learner").where("learner.learner_id = :id", { id: planDetail.learner.learner_id });
+    await applyLearnerScope(qb, req.user, "learner", { scopeContext: getScopeContext(req) });
+    if ((await qb.getCount()) === 0) {
+      res.status(403).json({ message: "You do not have access to this sampling plan detail", status: false });
+      return false;
+    }
+    return true;
+  }
+
   // ✅ Create Action
   public async createSamplingPlanAction(req: Request, res: Response) {
     try {
@@ -15,8 +29,9 @@ export class SamplingPlanActionController {
       }
 
       const detailRepo = AppDataSource.getRepository(SamplingPlanDetail);
-      const planDetail = await detailRepo.findOne({ where: { id: plan_detail_id } });
+      const planDetail = await detailRepo.findOne({ where: { id: plan_detail_id }, relations: ["learner"] });
       if (!planDetail) return res.status(404).json({ message: "Sampling plan detail not found", status: false });
+      if (!(await this.assertPlanDetailLearnerInScope(planDetail, req, res))) return;
 
       const repo = AppDataSource.getRepository(SamplingPlanAction);
       const newAction = repo.create({
@@ -80,10 +95,14 @@ export class SamplingPlanActionController {
       const { plan_detail_id } = req.params;
 
       const repo = AppDataSource.getRepository(SamplingPlanAction);
-      const actions = await repo.find({
-        where: { plan_detail: { id: parseInt(plan_detail_id) } },
-        order: { created_at: "DESC" }
-      });
+      const qb = repo.createQueryBuilder("action")
+        .leftJoinAndSelect("action.plan_detail", "plan_detail")
+        .where("plan_detail.id = :plan_detail_id", { plan_detail_id: parseInt(plan_detail_id) });
+      if ((req as any).user) {
+        qb.leftJoin("plan_detail.learner", "learner");
+        await applyLearnerScope(qb, (req as any).user, "learner", { scopeContext: getScopeContext(req as any) });
+      }
+      const actions = await qb.orderBy("action.created_at", "DESC").getMany();
 
       return res.status(200).json({ message: "Actions fetched successfully", status: true, data: actions });
 

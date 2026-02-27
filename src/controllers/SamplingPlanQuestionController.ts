@@ -18,8 +18,16 @@ export class SamplingPlanQuestionController {
       }
 
       const detailRepo = AppDataSource.getRepository(SamplingPlanDetail);
-      const planDetail = await detailRepo.findOne({ where: { id: plan_detail_id } });
+      const planDetail = await detailRepo.findOne({ where: { id: plan_detail_id }, relations: ["learner"] });
       if (!planDetail) return res.status(404).json({ message: "Sampling plan detail not found", status: false });
+      if ((req as any).user && planDetail.learner?.learner_id) {
+        const learnerRepo = AppDataSource.getRepository(Learner);
+        const qb = learnerRepo.createQueryBuilder("learner").where("learner.learner_id = :id", { id: planDetail.learner.learner_id });
+        await applyLearnerScope(qb, (req as any).user, "learner", { scopeContext: getScopeContext(req as any) });
+        if ((await qb.getCount()) === 0) {
+          return res.status(403).json({ message: "You do not have access to this sampling plan detail", status: false });
+        }
+      }
 
       const repo = AppDataSource.getRepository(SamplingPlanQuestion);
 

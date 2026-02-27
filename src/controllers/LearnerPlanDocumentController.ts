@@ -10,11 +10,41 @@ import {
     SignatureRole
 } from '../entity/LearnerPlanDocument.entity';
 import { LearnerPlan } from '../entity/LearnerPlan.entity';
+import { Learner } from '../entity/Learner.entity';
 import { Form } from '../entity/Form.entity';
 import { User } from '../entity/User.entity';
 import { uploadMultipleFilesToS3 } from '../util/aws';
+import { applyLearnerScope, getScopeContext } from '../util/organisationFilter';
 
 export class LearnerPlanDocumentController {
+
+    /** Returns learner plan if in scope; sends 403/404 and returns null otherwise. */
+    private async assertLearnerPlanInScope(
+        learnerPlanId: number,
+        req: CustomRequest,
+        res: Response
+    ): Promise<LearnerPlan | null> {
+        const learnerPlanRepository = AppDataSource.getRepository(LearnerPlan);
+        const plan = await learnerPlanRepository.findOne({
+            where: { learner_plan_id: learnerPlanId },
+            relations: ['learners'],
+        });
+        if (!plan) {
+            res.status(404).json({ message: 'Learner plan not found', status: false });
+            return null;
+        }
+        if (req.user && plan.learners?.length) {
+            const learnerIds = plan.learners.map((l: any) => l.learner_id);
+            const learnerRepo = AppDataSource.getRepository(Learner);
+            const learnerQb = learnerRepo.createQueryBuilder('learner').where('learner.learner_id IN (:...ids)', { ids: learnerIds });
+            await applyLearnerScope(learnerQb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+            if ((await learnerQb.getCount()) === 0) {
+                res.status(403).json({ message: 'You do not have access to this learner plan', status: false });
+                return null;
+            }
+        }
+        return plan;
+    }
 
     public async createDocument(req: CustomRequest, res: Response) {
         try {
@@ -42,16 +72,9 @@ export class LearnerPlanDocumentController {
             const formRepository = AppDataSource.getRepository(Form);
             const signatureRepository = AppDataSource.getRepository(LearnerPlanDocumentSignature);
 
-            // Verify learner plan exists
-            const learnerPlan = await learnerPlanRepository.findOne({ 
-                where: { learner_plan_id } 
-            });
-            if (!learnerPlan) {
-                return res.status(404).json({
-                    message: 'Learner plan not found',
-                    status: false,
-                });
-            }
+            // Verify learner plan exists and is in scope
+            const learnerPlan = await this.assertLearnerPlanInScope(Number(learner_plan_id), req, res);
+            if (!learnerPlan) return;
 
             let documentData: any = {
                 learner_plan: learnerPlan,
@@ -158,6 +181,9 @@ export class LearnerPlanDocumentController {
                 });
             }
 
+            const plan = await this.assertLearnerPlanInScope(parseInt(learner_plan_id, 10), req, res);
+            if (!plan) return;
+
             const documentRepository = AppDataSource.getRepository(LearnerPlanDocument);
 
             const documents = await documentRepository.find({
@@ -229,7 +255,7 @@ export class LearnerPlanDocumentController {
 
             const signature = await signatureRepository.findOne({
                 where: { signature_id: parseInt(signature_id) },
-                relations: ['document', 'signed_by', 'requested_by']
+                relations: ['document', 'document.learner_plan', 'document.learner_plan.learners', 'signed_by', 'requested_by']
             });
 
             if (!signature) {
@@ -237,6 +263,17 @@ export class LearnerPlanDocumentController {
                     message: 'Signature not found',
                     status: false,
                 });
+            }
+
+            const lp = signature.document?.learner_plan;
+            if (lp && req.user && lp.learners?.length) {
+                const learnerIds = lp.learners.map((l: any) => l.learner_id);
+                const learnerRepo = AppDataSource.getRepository(Learner);
+                const learnerQb = learnerRepo.createQueryBuilder('learner').where('learner.learner_id IN (:...ids)', { ids: learnerIds });
+                await applyLearnerScope(learnerQb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+                if ((await learnerQb.getCount()) === 0) {
+                    return res.status(403).json({ message: 'You do not have access to this learner plan', status: false });
+                }
             }
 
             // Update signature checkboxes
@@ -299,7 +336,7 @@ export class LearnerPlanDocumentController {
             const documentRepository = AppDataSource.getRepository(LearnerPlanDocument);
 
             const document = await documentRepository.findOne({
-                where: { document_id: parseInt(document_id) }
+                where: { document_id: parseInt(document_id) },
             });
 
             if (!document) {
