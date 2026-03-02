@@ -27,12 +27,19 @@ class ResourceController {
 
             const resourceRepository = AppDataSource.getRepository(Resource);
             const courseRepository = AppDataSource.getRepository(Course);
+            const userCourseRepository = AppDataSource.getRepository(UserCourse);
 
-            const course = await courseRepository.findOne({ where: { course_id } });
-
+            const courseQb = courseRepository.createQueryBuilder('course')
+                .innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
+                .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id')
+                .where('course.course_id = :course_id', { course_id });
+            if (req.user) {
+                await applyLearnerScope(courseQb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+            }
+            const course = await courseQb.getOne();
             if (!course) {
-                return res.status(404).json({
-                    message: 'Course not found',
+                return res.status(403).json({
+                    message: 'Course not found or you do not have access',
                     status: false,
                 });
             }
@@ -159,25 +166,38 @@ class ResourceController {
             const resourceRepository = AppDataSource.getRepository(Resource);
             const courseRepository = AppDataSource.getRepository(Course);
 
-            const resource = await resourceRepository.findOne({ where: { resource_id: resourceId } });
+            const resQb = resourceRepository.createQueryBuilder('resource')
+                .innerJoinAndSelect('resource.course_id', 'course')
+                .innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
+                .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id')
+                .where('resource.resource_id = :resourceId', { resourceId });
+            if (req.user) {
+                await applyLearnerScope(resQb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+            }
+            const resource = await resQb.getOne();
 
             if (!resource) {
-                return res.status(404).json({
-                    message: 'Resource not found',
+                return res.status(403).json({
+                    message: 'Resource not found or you do not have access',
                     status: false,
                 });
             }
 
             if (course_id) {
-                const course = await courseRepository.findOne({ where: { course_id } });
-
+                const courseQb = courseRepository.createQueryBuilder('course')
+                    .innerJoin(UserCourse, 'uc2', "uc2.course ->> 'course_id' = CAST(course.course_id AS text)")
+                    .innerJoin(Learner, 'learner2', 'learner2.learner_id = uc2.learner_id')
+                    .where('course.course_id = :course_id', { course_id });
+                if (req.user) {
+                    await applyLearnerScope(courseQb, req.user, 'learner2', { scopeContext: getScopeContext(req) });
+                }
+                const course = await courseQb.getOne();
                 if (!course) {
-                    return res.status(404).json({
-                        message: 'Course not found',
+                    return res.status(403).json({
+                        message: 'Course not found or you do not have access',
                         status: false,
                     });
                 }
-
                 resource.course_id = course;
             }
 
@@ -215,11 +235,19 @@ class ResourceController {
             const resourceId = parseInt(req.params.id);
             const resourceRepository = AppDataSource.getRepository(Resource);
 
-            const resource = await resourceRepository.findOne({ where: { resource_id: resourceId } });
+            const resQb = resourceRepository.createQueryBuilder('resource')
+                .innerJoin('resource.course_id', 'course')
+                .innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
+                .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id')
+                .where('resource.resource_id = :resourceId', { resourceId });
+            if (req.user) {
+                await applyLearnerScope(resQb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+            }
+            const resource = await resQb.getOne();
 
             if (!resource) {
-                return res.status(404).json({
-                    message: 'Resource not found',
+                return res.status(403).json({
+                    message: 'Resource not found or you do not have access',
                     status: false,
                 });
             }

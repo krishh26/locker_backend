@@ -63,17 +63,22 @@ class SessionController {
 
     public async updateSession(req: CustomRequest, res: Response) {
         try {
-            const sessionRepository = AppDataSource.getRepository(Session)
-
+            const sessionRepository = AppDataSource.getRepository(Session);
             const id = parseInt(req.params.id);
-            const { title, description, location, startDate, Duration, type, Attended } = req.body
+            const { title, description, location, startDate, Duration, type, Attended } = req.body;
 
-            let session = await sessionRepository.findOne({ where: { session_id: id } });
+            const qb = sessionRepository.createQueryBuilder('session')
+                .innerJoin('session.learners', 'learner')
+                .where('session.session_id = :id', { id });
+            if (req.user) {
+                await applyLearnerScope(qb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+            }
+            let session = await qb.getOne();
             if (!session) {
-                return res.status(404).json({
-                    message: "Session not found",
-                    status: true
-                })
+                return res.status(403).json({
+                    message: "Session not found or you do not have access",
+                    status: false
+                });
             }
 
             session.title = title || session.title
@@ -104,13 +109,26 @@ class SessionController {
     public async deleteSession(req: CustomRequest, res: Response) {
         try {
             const id = parseInt(req.params.id);
-            const sessionRepository = AppDataSource.getRepository(Session)
+            const sessionRepository = AppDataSource.getRepository(Session);
+
+            const qb = sessionRepository.createQueryBuilder('session')
+                .innerJoin('session.learners', 'learner')
+                .where('session.session_id = :id', { id });
+            if (req.user) {
+                await applyLearnerScope(qb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+            }
+            const session = await qb.getOne();
+            if (!session) {
+                return res.status(403).json({
+                    message: 'Session not found or you do not have access',
+                    status: false,
+                });
+            }
 
             const deleteResult = await sessionRepository.delete(id);
-
             if (deleteResult.affected === 0) {
-                return res.status(404).json({
-                    message: 'Session not found',
+                return res.status(500).json({
+                    message: 'Delete failed',
                     status: false,
                 });
             }

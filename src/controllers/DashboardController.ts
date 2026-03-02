@@ -210,17 +210,40 @@ class DashboardController {
             const amoRepository = AppDataSource.getRepository(AccountManagerOrganisation);
             const userRepository = AppDataSource.getRepository(User);
 
-            const accountManagers = await accountManagerRepository.find({
-                where: { deleted_at: null as any }
-            });
+            const scopeContext = getScopeContext(req);
+            const accessibleIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+
+            let accountManagers: AccountManager[];
+            if (accessibleIds !== null) {
+                if (accessibleIds.length === 0) {
+                    return res.status(200).json({
+                        message: "Account manager metrics retrieved successfully",
+                        status: true,
+                        data: { totalAccountManagers: 0, totalManagedOrganisations: 0, managers: [] }
+                    });
+                }
+                accountManagers = await accountManagerRepository.createQueryBuilder("am")
+                    .innerJoin("am.accountManagerOrganisations", "amo")
+                    .where("amo.organisation_id IN (:...ids)", { ids: accessibleIds })
+                    .andWhere("am.deleted_at IS NULL")
+                    .distinct(true)
+                    .getMany();
+            } else {
+                accountManagers = await accountManagerRepository.find({
+                    where: { deleted_at: null as any }
+                });
+            }
 
             const metrics = await Promise.all(accountManagers.map(async (manager) => {
                 const user = await userRepository.findOne({
                     where: { user_id: manager.user_id }
                 });
-                const assignments = await amoRepository.find({
-                    where: { account_manager_id: manager.id }
-                });
+                const assignmentsQb = amoRepository.createQueryBuilder("amo")
+                    .where("amo.account_manager_id = :id", { id: manager.id });
+                if (accessibleIds !== null) {
+                    assignmentsQb.andWhere("amo.organisation_id IN (:...ids)", { ids: accessibleIds });
+                }
+                const assignments = await assignmentsQb.getMany();
                 return {
                     accountManagerId: manager.id,
                     email: user?.email || '',

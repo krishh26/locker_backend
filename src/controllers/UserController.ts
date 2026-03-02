@@ -163,7 +163,7 @@ class UserController {
             }
 
             // Handle centre_ids for Trainer (exactly one centre)
-            if (isTrainer && Array.isArray(req.body.centre_ids) && req.body.centre_ids.length === 1) {
+            if (Array.isArray(req.body.centre_ids) && req.body.centre_ids.length === 1) {
                 const { UserCentre } = await import("../entity/UserCentre.entity");
                 const userCentreRepo = AppDataSource.getRepository(UserCentre);
                 const centreId = req.body.centre_ids[0];
@@ -228,6 +228,39 @@ class UserController {
                 name: uo.organisation.name
             })) || [];
 
+            // Load centres for each assigned organisation so FE can see organisation → centres tree
+            const orgIds = assignedOrganisations.map(o => o.id);
+            let centresByOrg: Record<number, { id: number; name: string; status: string }[]> = {};
+
+            if (orgIds.length) {
+                const { Centre } = await import("../entity/Centre.entity");
+                const centreRepo = AppDataSource.getRepository(Centre);
+                const centres = await centreRepo.find({
+                    where: { organisation_id: In(orgIds) },
+                    select: ["id", "name", "status", "organisation_id"],
+                });
+
+                const activeCentres = centres.filter(
+                    (c) => (c as any).status === "active"
+                );
+
+                centresByOrg = activeCentres.reduce((acc, centre) => {
+                    const orgId = (centre as any).organisation_id as number;
+                    if (!acc[orgId]) acc[orgId] = [];
+                    acc[orgId].push({
+                        id: centre.id,
+                        name: centre.name,
+                        status: centre.status as string,
+                    });
+                    return acc;
+                }, {} as Record<number, { id: number; name: string; status: string }[]>);
+            }
+
+            const enrichedAssignedOrganisations = assignedOrganisations.map(org => ({
+                ...org,
+                centres: centresByOrg[org.id] ?? [],
+            }));
+
             const assignedCentres = user.userCentres?.map(uc => ({
                 id: uc.centre.id,
                 name: uc.centre.name
@@ -240,7 +273,7 @@ class UserController {
                 data: {
                     ...user,
                     assigned_employers: assignedEmployers,
-                    assigned_organisations: assignedOrganisations,
+                    assigned_organisations: enrichedAssignedOrganisations,
                     assigned_centers: assignedCentres
                 }
             })
@@ -683,7 +716,7 @@ class UserController {
                 .leftJoinAndSelect('user.userEmployers', 'userEmployers')
                 .leftJoinAndSelect('userEmployers.employer', 'employer');
 
-            // Apply scope: organisation for OrgAdmin/AccountManager, centre for CentreAdmin (from UserCentre)
+            // Apply scope: organisation for OrgAdmin/AccountManager, centre for CentreAdmin and organisationadmin (from UserOrganisation)
             if (req.user) {
                 await addUserScopeFilter(qb, req.user, 'user', getScopeContext(req));
             }

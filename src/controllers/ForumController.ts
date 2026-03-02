@@ -3,12 +3,13 @@ import { CustomRequest } from "../util/Interface/expressInterface";
 import { AppDataSource } from "../data-source";
 import { Forum } from "../entity/Forum.entity";
 import { UserCourse } from "../entity/UserCourse.entity";
-import { SocketDomain, UserRole } from "../util/constants";
+import { SocketDomain } from "../util/constants";
 import { deleteFromS3, uploadToS3 } from "../util/aws";
 import { Course } from "../entity/Course.entity";
 import { sendDataToUser } from "../socket/socket";
 import { User } from "../entity/User.entity";
-import { getAccessibleOrganisationIds, getAccessibleCentreAdminUserIds, applyLearnerScope, getScopeContext } from "../util/organisationFilter";
+import { Learner } from "../entity/Learner.entity";
+import { applyLearnerScope, getScopeContext } from "../util/organisationFilter";
 
 class ForumController {
     constructor() {
@@ -67,16 +68,30 @@ class ForumController {
 
     public async sendMessage(req: CustomRequest, res: Response) {
         try {
-            const forumRepository = AppDataSource.getRepository(Forum)
-            const { course_id, message, sender_id } = req.body
+            const forumRepository = AppDataSource.getRepository(Forum);
+            const userCourseRepository = AppDataSource.getRepository(UserCourse);
+            const { course_id, message, sender_id } = req.body;
 
-            let file
-            if (req.file) {
-                file = await uploadToS3(req.file, "Forum")
+            if (req.user) {
+                const accessQb = userCourseRepository.createQueryBuilder('uc')
+                    .innerJoin('uc.learner_id', 'learner')
+                    .where("uc.course ->> 'course_id' = :cid", { cid: String(course_id) });
+                await applyLearnerScope(accessQb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+                if ((await accessQb.getCount()) === 0) {
+                    return res.status(403).json({
+                        message: 'You do not have access to this course',
+                        status: false,
+                    });
+                }
             }
 
-            let forum = forumRepository.create({ sender: sender_id, course: course_id, message, file })
-            forum = await forumRepository.save(forum)
+            let file;
+            if (req.file) {
+                file = await uploadToS3(req.file, "Forum");
+            }
+
+            let forum = forumRepository.create({ sender: sender_id, course: course_id, message, file });
+            forum = await forumRepository.save(forum);
 
             const uniqueUserIdArray = await this.getCourseUserIds(course_id, sender_id, req)
             const qb = await forumRepository.createQueryBuilder('forum')
@@ -114,20 +129,29 @@ class ForumController {
 
     public async updateMessage(req: CustomRequest, res: Response) {
         try {
-            const forumRepository = AppDataSource.getRepository(Forum)
-            const id = parseInt(req.params.id)
-            const { message } = req.body
+            const forumRepository = AppDataSource.getRepository(Forum);
+            const userCourseRepository = AppDataSource.getRepository(UserCourse);
+            const id = parseInt(req.params.id);
+            const { message } = req.body;
 
-            let forum = await forumRepository.findOne({ where: { id }, relations: ['course'] })
+            const qb = forumRepository.createQueryBuilder('forum')
+                .innerJoinAndSelect('forum.course', 'course')
+                .innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
+                .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id')
+                .where('forum.id = :id', { id });
+            if (req.user) {
+                await applyLearnerScope(qb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+            }
+            let forum = await qb.getOne();
 
             if (!forum) {
-                return res.status(404).json({
-                    message: "Message Not Found",
+                return res.status(403).json({
+                    message: "Message not found or you do not have access",
                     status: false
-                })
+                });
             }
 
-            forum.message = message || forum.message
+            forum.message = message || forum.message;
             if (req.file) {
                 deleteFromS3(forum.file)
                 forum.file = await uploadToS3(req.file, "Forum")
@@ -155,14 +179,29 @@ class ForumController {
 
     public async deleteForum(req: CustomRequest, res: Response) {
         try {
-            const forumRepository = AppDataSource.getRepository(Forum)
-            const id = parseInt(req.params.id)
+            const forumRepository = AppDataSource.getRepository(Forum);
+            const id = parseInt(req.params.id);
+
+            const qb = forumRepository.createQueryBuilder('forum')
+                .innerJoin('forum.course', 'course')
+                .innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
+                .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id')
+                .where('forum.id = :id', { id });
+            if (req.user) {
+                await applyLearnerScope(qb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+            }
+            const forum = await qb.getOne();
+            if (!forum) {
+                return res.status(403).json({
+                    message: 'Message not found or you do not have access',
+                    status: false,
+                });
+            }
 
             const deleteResult = await forumRepository.delete(id);
-
             if (deleteResult.affected === 0) {
-                return res.status(404).json({
-                    message: 'Message not found',
+                return res.status(500).json({
+                    message: 'Delete failed',
                     status: false,
                 });
             }
@@ -201,6 +240,7 @@ class ForumController {
                 }
             }
 
+            // Scope: only messages for this course (course access already verified above via learner scope)
             const qb = forumRepository.createQueryBuilder('forum')
                 .innerJoin('forum.course', 'course')
                 .innerJoin('forum.sender', 'sender')
@@ -213,45 +253,7 @@ class ForumController {
                     'sender.user_id',
                     'sender.user_name',
                     'sender.avatar',
-                ])
-
-            // Add organization filtering through sender (User → UserOrganisation)
-            if (req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user, getScopeContext(req));
-                if (accessibleIds !== null) {
-                    if (accessibleIds.length === 0) {
-                        return res.status(200).json({
-                            message: 'Messages retrieved successfully',
-                            status: true,
-                            data: [],
-                            ...(req.query.meta === "true" && {
-                                meta_data: {
-                                    page: req.pagination.page,
-                                    items: 0,
-                                    page_size: req.pagination.limit,
-                                    pages: 0
-                                }
-                            })
-                        });
-                    }
-                    qb.leftJoin('sender.userOrganisations', 'userOrganisation')
-                      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
-                }
-                const centreAdminUserIds = await getAccessibleCentreAdminUserIds(req.user);
-                if (centreAdminUserIds !== null) {
-                    if (centreAdminUserIds.length === 0) {
-                        return res.status(200).json({
-                            message: 'Messages retrieved successfully',
-                            status: true,
-                            data: [],
-                            ...(req.query.meta === "true" && {
-                                meta_data: { page: req.pagination.page, items: 0, page_size: req.pagination.limit, pages: 0 }
-                            })
-                        });
-                    }
-                    qb.andWhere('sender.user_id IN (:...centreAdminUserIds)', { centreAdminUserIds });
-                }
-            }
+                ]);
 
             const [forum, count] = await qb
                 .skip(Number(req.pagination.skip))
@@ -285,11 +287,11 @@ class ForumController {
     public async getForumChat(req: CustomRequest, res: Response) {
         try {
             const { user_id } = req.query;
-            const courseRepository = AppDataSource.getRepository(Course)
-            const userCourseRepository = AppDataSource.getRepository(UserCourse)
+            const courseRepository = AppDataSource.getRepository(Course);
+            const userCourseRepository = AppDataSource.getRepository(UserCourse);
 
-            const query = await courseRepository.createQueryBuilder('course')
-                .leftJoinAndSelect(
+            const query = courseRepository.createQueryBuilder('course')
+                .leftJoin(
                     subQuery => {
                         return subQuery
                             .select('forum.course_id', 'course_id')
@@ -305,10 +307,17 @@ class ForumController {
                     'course.course_name',
                     'course.course_code',
                     'latest_forum.latest_forum_created_at'
-                ])
+                ]);
+
+            if (req.user) {
+                query.innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
+                    .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id');
+                await applyLearnerScope(query, req.user, 'learner', { scopeContext: getScopeContext(req) });
+                query.distinct(true);
+            }
 
             if (user_id) {
-                const userCourses = await userCourseRepository.createQueryBuilder('user_course')
+                const userCoursesQb = userCourseRepository.createQueryBuilder('user_course')
                     .leftJoin('user_course.learner_id', 'learner')
                     .leftJoin('learner.user_id', 'learner_user')
                     .leftJoin('user_course.trainer_id', 'trainer')
@@ -316,16 +325,17 @@ class ForumController {
                     .leftJoin('user_course.LIQA_id', 'LIQA')
                     .leftJoin('user_course.EQA_id', 'EQA')
                     .leftJoin('user_course.employer_id', 'employer')
-                    .where('learner_user.user_id = :user_id OR trainer.user_id = :user_id OR IQA.user_id = :user_id OR LIQA.user_id = :user_id OR EQA.user_id = :user_id  OR employer.user_id = :user_id', { user_id })
-                    .select([
-                        'user_course.course->\'course_id\' AS course_id'
-                    ])
-                    .getRawMany();
-                const courseIds = Array.from(new Set(userCourses.map(course => course.course_id)))
+                    .where('learner_user.user_id = :user_id OR trainer.user_id = :user_id OR IQA.user_id = :user_id OR LIQA.user_id = :user_id OR EQA.user_id = :user_id OR employer.user_id = :user_id', { user_id })
+                    .select(['user_course.course->\'course_id\' AS course_id']);
+                if (req.user) {
+                    await applyLearnerScope(userCoursesQb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+                }
+                const userCourses = await userCoursesQb.getRawMany();
+                const courseIds = Array.from(new Set(userCourses.map((c: any) => c.course_id).filter(Boolean)));
                 if (courseIds.length > 0) {
-                    query.where('course.course_id IN (:...courseIds)', { courseIds });
+                    query.andWhere('course.course_id IN (:...courseIds)', { courseIds });
                 } else {
-                    query.where('0 = 1'); // This ensures no data is returned when courseIds is empty
+                    query.andWhere('0 = 1');
                 }
             }
 

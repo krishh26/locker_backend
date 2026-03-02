@@ -1,14 +1,12 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, DeleteDateColumn, ManyToOne, JoinColumn, OneToOne } from 'typeorm';
 import { User } from './User.entity';
 import { Organisation } from './Organisation.entity';
+import { Centre } from './Centre.entity';
 
 @Entity('employer')
 export class Employer {
   @PrimaryGeneratedColumn()
   employer_id: number;
-
-  // @ManyToOne(() => User, user => user.employer_id)
-  // user_id: User;
 
   @OneToOne(() => User, user => user.employer)
   @JoinColumn()
@@ -20,6 +18,13 @@ export class Employer {
 
   @Column({ type: 'int', nullable: true })
   organisation_id: number;
+
+  @ManyToOne(() => Centre, { nullable: true })
+  @JoinColumn({ name: 'centre_id', referencedColumnName: 'id' })
+  centre: Centre;
+
+  @Column({ type: 'int', nullable: true})
+  centre_id: number;
 
   @Column({ type: 'varchar' })
   employer_name: string;

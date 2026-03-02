@@ -67,67 +67,147 @@ class FundingBandController {
     }
 
     // GET /api/v1/funding-band → list all funding bands (scoped by learner enrolments)
-    public async getFundingBands(req: CustomRequest, res: Response) {
-        try {
-            const { page = 1, limit = 10, course_id, is_active } = req.query;
+public async getFundingBands(req: CustomRequest, res: Response) {
+    try {
+        const { page = 1, limit = 10, course_id, is_active } = req.query;
 
-            const fundingBandRepository = AppDataSource.getRepository(FundingBand);
-            const queryBuilder = fundingBandRepository.createQueryBuilder('funding_band')
-                .innerJoin('funding_band.course', 'course')
-                .innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
-                .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id')
-                .addSelect(['course.course_id', 'course.course_name', 'course.course_code', 'course.level', 'course.total_credits'])
-                .orderBy('funding_band.created_at', 'DESC');
+        const fundingBandRepository = AppDataSource.getRepository(FundingBand);
 
-            if (req.user) {
-                await applyLearnerScope(queryBuilder, req.user, 'learner', { scopeContext: getScopeContext(req) });
-            }
+        /* -------------------- IDS QUERY -------------------- */
+        const idsQb = fundingBandRepository
+            .createQueryBuilder('funding_band')
+            .distinct(true)
+            .innerJoin('funding_band.course', 'course')
+            .innerJoin(
+                UserCourse,
+                'uc',
+                "uc.course ->> 'course_id' = CAST(course.course_id AS text)"
+            )
+            .innerJoin(
+                Learner,
+                'learner',
+                'learner.learner_id = uc.learner_id'
+            )
+            .select('funding_band.id', 'id')
+            .addSelect('funding_band.created_at', 'created_at')
+            .orderBy('funding_band.created_at', 'DESC');
 
-            // Apply filters
-            if (course_id) {
-                queryBuilder.andWhere('funding_band.course_id = :course_id', { course_id });
-            }
+        if (req.user) {
+            await applyLearnerScope(idsQb, req.user, 'learner', {
+                scopeContext: getScopeContext(req),
+            });
+        }
 
-            if (is_active !== undefined) {
-                queryBuilder.andWhere('funding_band.is_active = :is_active', { is_active: is_active === 'true' });
-            }
+        if (course_id) {
+            idsQb.andWhere('funding_band.course_id = :course_id', { course_id });
+        }
 
-            // Apply pagination
-            const pageNumber = parseInt(page as string);
-            const limitNumber = parseInt(limit as string);
-            const skip = (pageNumber - 1) * limitNumber;
+        if (is_active !== undefined) {
+            idsQb.andWhere('funding_band.is_active = :is_active', {
+                is_active: is_active === 'true',
+            });
+        }
 
-            const countQb = queryBuilder.clone().select('COUNT(DISTINCT funding_band.id)', 'count');
-            const totalResult = await countQb.getRawOne<{ count: string }>();
-            const total = parseInt(totalResult?.count ?? '0', 10);
+        const pageNumber = parseInt(page as string);
+        const limitNumber = parseInt(limit as string);
+        const skip = (pageNumber - 1) * limitNumber;
 
-            queryBuilder.select('funding_band').addSelect(['course.course_id', 'course.course_name', 'course.course_code', 'course.level', 'course.total_credits']).distinct(true).skip(skip).take(limitNumber);
+        /* -------------------- COUNT QUERY -------------------- */
+        const countQb = fundingBandRepository
+            .createQueryBuilder('funding_band')
+            .innerJoin('funding_band.course', 'course')
+            .innerJoin(
+                UserCourse,
+                'uc',
+                "uc.course ->> 'course_id' = CAST(course.course_id AS text)"
+            )
+            .innerJoin(
+                Learner,
+                'learner',
+                'learner.learner_id = uc.learner_id'
+            )
+            .select('COUNT(DISTINCT funding_band.id)', 'count');
 
-            const fundingBands = await queryBuilder.getMany();
+        if (req.user) {
+            await applyLearnerScope(countQb, req.user, 'learner', {
+                scopeContext: getScopeContext(req),
+            });
+        }
 
-            const totalPages = Math.ceil(total / limitNumber);
+        if (course_id) {
+            countQb.andWhere('funding_band.course_id = :course_id', { course_id });
+        }
 
+        if (is_active !== undefined) {
+            countQb.andWhere('funding_band.is_active = :is_active', {
+                is_active: is_active === 'true',
+            });
+        }
+
+        const totalResult = await countQb.getRawOne<{ count: string }>();
+        const total = parseInt(totalResult?.count ?? '0', 10);
+
+        /* -------------------- PAGINATED IDS -------------------- */
+        const idsResult = await idsQb
+            .skip(skip)
+            .take(limitNumber)
+            .getRawMany<{ id: number }>();
+
+        const ids = idsResult.map((r) => r.id);
+
+        if (ids.length === 0) {
             return res.status(200).json({
                 message: 'Funding bands fetched successfully',
                 status: true,
-                data: fundingBands,
+                data: [],
                 meta_data: {
                     page: pageNumber,
-                    items: fundingBands.length,
+                    items: 0,
                     page_size: limitNumber,
-                    pages: totalPages,
-                    total: total
-                }
-            });
-
-        } catch (error) {
-            return res.status(500).json({
-                message: 'Internal Server Error',
-                status: false,
-                error: error.message,
+                    pages: Math.ceil(total / limitNumber),
+                    total,
+                },
             });
         }
+
+        /* -------------------- FETCH DATA -------------------- */
+        const fundingBandsUnsorted = await fundingBandRepository
+            .createQueryBuilder('funding_band')
+            .innerJoinAndSelect('funding_band.course', 'course')
+            .where('funding_band.id IN (:...ids)', { ids })
+            .getMany();
+
+        const byId = new Map(
+            fundingBandsUnsorted.map((fb) => [fb.id, fb])
+        );
+
+        const fundingBands = ids
+            .map((id) => byId.get(id))
+            .filter(Boolean) as FundingBand[];
+
+        const totalPages = Math.ceil(total / limitNumber);
+
+        return res.status(200).json({
+            message: 'Funding bands fetched successfully',
+            status: true,
+            data: fundingBands,
+            meta_data: {
+                page: pageNumber,
+                items: fundingBands.length,
+                page_size: limitNumber,
+                pages: totalPages,
+                total,
+            },
+        });
+
+    } catch (error: any) {
+        return res.status(500).json({
+            message: 'Internal Server Error',
+            status: false,
+            error: error.message,
+        });
     }
+}
 
     // GET /api/v1/funding-band/:id → get single funding band by id (scoped)
     public async getFundingBandById(req: CustomRequest, res: Response) {
@@ -307,23 +387,34 @@ class FundingBandController {
                 });
             }
 
-            const queryBuilder = fundingBandRepository.createQueryBuilder('funding_band')
+            const idsQb = fundingBandRepository.createQueryBuilder('funding_band')
                 .innerJoin('funding_band.course', 'course')
                 .innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
                 .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id')
-                .addSelect(['course.course_id', 'course.course_name', 'course.course_code'])
+                .select('DISTINCT funding_band.id', 'id')
                 .where('funding_band.course_id = :course_id', { course_id })
                 .orderBy('funding_band.effective_from', 'DESC');
 
             if (req.user) {
-                await applyLearnerScope(queryBuilder, req.user, 'learner', { scopeContext: getScopeContext(req) });
+                await applyLearnerScope(idsQb, req.user, 'learner', { scopeContext: getScopeContext(req) });
             }
 
             if (is_active !== undefined) {
-                queryBuilder.andWhere('funding_band.is_active = :is_active', { is_active: is_active === 'true' });
+                idsQb.andWhere('funding_band.is_active = :is_active', { is_active: is_active === 'true' });
             }
 
-            const fundingBands = await queryBuilder.select('funding_band').distinct(true).getMany();
+            const idsResult = await idsQb.getRawMany<{ id: number }>();
+            const ids = idsResult.map((r) => r.id);
+            let fundingBands: FundingBand[] = [];
+            if (ids.length > 0) {
+                const list = await fundingBandRepository
+                    .createQueryBuilder('funding_band')
+                    .innerJoinAndSelect('funding_band.course', 'course')
+                    .where('funding_band.id IN (:...ids)', { ids })
+                    .getMany();
+                const byId = new Map(list.map((fb) => [fb.id, fb]));
+                fundingBands = ids.map((id) => byId.get(id)).filter(Boolean) as FundingBand[];
+            }
 
             return res.status(200).json({
                 message: 'Course funding bands fetched successfully',

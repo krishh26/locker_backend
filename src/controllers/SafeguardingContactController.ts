@@ -21,8 +21,31 @@ export class SafeguardingContactController {
 
             const repo = AppDataSource.getRepository(SafeguardingContact);
 
-            // Check if record exists by email
             let existing = await repo.findOne({ where: { emailAddress } });
+            if (existing && req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                const scopeContext = getScopeContext(req);
+                const role = resolveUserRole(req.user);
+                const checkQb = repo.createQueryBuilder('sc')
+                    .leftJoin(User, 'u', 'u.user_id = CAST(sc.createdBy AS INT)')
+                    .where('sc.id = :id', { id: existing.id });
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user, scopeContext);
+                    if (centreIds === null || centreIds.length === 0) {
+                        return res.status(403).json({ message: 'You do not have access to this contact', status: false });
+                    }
+                    checkQb.innerJoin('u.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                } else {
+                    const orgIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+                    if (orgIds === null || orgIds.length === 0) {
+                        return res.status(403).json({ message: 'You do not have access to this contact', status: false });
+                    }
+                    checkQb.innerJoin('u.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
+                }
+                const inScope = await checkQb.getOne();
+                if (!inScope) {
+                    return res.status(403).json({ message: 'You do not have access to this contact', status: false });
+                }
+            }
 
             if (existing) {
                 // Update existing
@@ -73,11 +96,31 @@ export class SafeguardingContactController {
             const { telNumber, mobileNumber, emailAddress, additionalInfo } = req.body as any;
 
             const repo = AppDataSource.getRepository(SafeguardingContact);
-            const existing = await repo.findOne({ where: { id } });
-            
+            const qb = repo.createQueryBuilder('sc')
+                .leftJoin(User, 'u', 'u.user_id = CAST(sc.createdBy AS INT)')
+                .where('sc.id = :id', { id });
+            if (req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                const scopeContext = getScopeContext(req);
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user, scopeContext);
+                    if (centreIds === null || centreIds.length === 0) {
+                        return res.status(403).json({ message: 'Safeguarding Contact not found or you do not have access', status: false });
+                    }
+                    qb.innerJoin('u.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                } else {
+                    const orgIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+                    if (orgIds === null || orgIds.length === 0) {
+                        return res.status(403).json({ message: 'Safeguarding Contact not found or you do not have access', status: false });
+                    }
+                    qb.innerJoin('u.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
+                }
+            }
+            const existing = await qb.getOne();
+
             if (!existing) {
-                return res.status(404).json({ 
-                    message: 'Safeguarding Contact not found', 
+                return res.status(403).json({ 
+                    message: 'Safeguarding Contact not found or you do not have access', 
                     status: false 
                 });
             }
@@ -206,11 +249,30 @@ export class SafeguardingContactController {
         try {
             const id = parseInt(req.params.id);
             const repo = AppDataSource.getRepository(SafeguardingContact);
-            
-            const contact = await repo.findOne({ where: { id } });
+            const qb = repo.createQueryBuilder('sc')
+                .leftJoin(User, 'u', 'u.user_id = CAST(sc.createdBy AS INT)')
+                .where('sc.id = :id', { id });
+            if (req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                const scopeContext = getScopeContext(req);
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user, scopeContext);
+                    if (centreIds === null || centreIds.length === 0) {
+                        return res.status(403).json({ message: 'Safeguarding Contact not found or you do not have access', status: false });
+                    }
+                    qb.innerJoin('u.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                } else {
+                    const orgIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+                    if (orgIds === null || orgIds.length === 0) {
+                        return res.status(403).json({ message: 'Safeguarding Contact not found or you do not have access', status: false });
+                    }
+                    qb.innerJoin('u.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
+                }
+            }
+            const contact = await qb.getOne();
             if (!contact) {
-                return res.status(404).json({ 
-                    message: 'Safeguarding Contact not found', 
+                return res.status(403).json({ 
+                    message: 'Safeguarding Contact not found or you do not have access', 
                     status: false 
                 });
             }

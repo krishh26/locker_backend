@@ -7,7 +7,7 @@ import { Feature } from "../entity/Feature.entity";
 import { CustomRequest } from "../util/Interface/expressInterface";
 import { UserRole } from "../util/constants";
 import { In } from "typeorm";
-import { getAccessibleOrganisationIds, getScopeContext } from "../util/organisationFilter";
+import { getAccessibleOrganisationIds, getScopeContext, canAccessOrganisation } from "../util/organisationFilter";
 
 class SubscriptionController {
     public async CreatePlan(req: CustomRequest, res: Response) {
@@ -494,13 +494,22 @@ class SubscriptionController {
             const subscriptionRepository = AppDataSource.getRepository(Subscription);
             const planRepository = AppDataSource.getRepository(Plan);
 
+            if (req.user) {
+                const accessibleIds = await getAccessibleOrganisationIds(req.user, getScopeContext(req));
+                if (accessibleIds !== null && (accessibleIds.length === 0 || !accessibleIds.includes(organisationId))) {
+                    return res.status(403).json({
+                        message: "Subscription not found or you do not have access",
+                        status: false
+                    });
+                }
+            }
             const subscription = await subscriptionRepository.findOne({
                 where: { organisation_id: organisationId }
             });
 
             if (!subscription) {
-                return res.status(404).json({
-                    message: "Subscription not found",
+                return res.status(403).json({
+                    message: "Subscription not found or you do not have access",
                     status: false
                 });
             }
@@ -560,13 +569,22 @@ class SubscriptionController {
 
             const subscriptionRepository = AppDataSource.getRepository(Subscription);
 
-            const subscription = await subscriptionRepository.findOne({
-                where: { organisation_id: organisationId }
-            });
+            const scopeQb = subscriptionRepository.createQueryBuilder('sub')
+                .where('sub.organisation_id = :organisationId', { organisationId });
+            if (req.user) {
+                const accessibleIds = await getAccessibleOrganisationIds(req.user, getScopeContext(req));
+                if (accessibleIds !== null && (accessibleIds.length === 0 || !accessibleIds.includes(organisationId))) {
+                    return res.status(403).json({
+                        message: "Subscription not found or you do not have access",
+                        status: false
+                    });
+                }
+            }
+            const subscription = await scopeQb.getOne();
 
             if (!subscription) {
-                return res.status(404).json({
-                    message: "Subscription not found",
+                return res.status(403).json({
+                    message: "Subscription not found or you do not have access",
                     status: false
                 });
             }
@@ -599,6 +617,12 @@ class SubscriptionController {
     public async GetSubscription(req: CustomRequest, res: Response) {
         try {
             const organisationId = parseInt(req.params.organisationId);
+            if (req.user && !(await canAccessOrganisation(req.user, organisationId, getScopeContext(req)))) {
+                return res.status(403).json({
+                    message: "You do not have access to this organisation",
+                    status: false
+                });
+            }
             const subscriptionRepository = AppDataSource.getRepository(Subscription);
             const planRepository = AppDataSource.getRepository(Plan);
 

@@ -263,11 +263,11 @@ class RiskRatingController {
                 const role = resolveUserRole(req.user);
                 if (role === UserRole.CentreAdmin) {
                     const centreIds = await getAccessibleCentreIds(req.user, scopeContext);
-                    if (centreIds === null || centreIds.length === 0) return res.status(404).json({ message: 'Risk rating not found', status: false });
+                    if (centreIds === null || centreIds.length === 0) return res.status(403).json({ message: 'Risk rating not found or you do not have access', status: false });
                     qb.innerJoin('trainer.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
                 } else {
                     const orgIds = await getAccessibleOrganisationIds(req.user, scopeContext);
-                    if (orgIds === null || orgIds.length === 0) return res.status(404).json({ message: 'Risk rating not found', status: false });
+                    if (orgIds === null || orgIds.length === 0) return res.status(403).json({ message: 'Risk rating not found or you do not have access', status: false });
                     qb.innerJoin('trainer.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
                 }
             }
@@ -275,8 +275,8 @@ class RiskRatingController {
             const riskRating = await qb.getOne();
 
             if (!riskRating) {
-                return res.status(404).json({
-                    message: 'Risk rating not found',
+                return res.status(403).json({
+                    message: 'Risk rating not found or you do not have access',
                     status: false,
                 });
             }
@@ -319,14 +319,31 @@ class RiskRatingController {
             const riskRatingRepository = AppDataSource.getRepository(RiskRating);
             const courseRepository = AppDataSource.getRepository(Course);
 
-            const riskRating = await riskRatingRepository.findOne({
-                where: { id: parseInt(id) },
-                relations: ['trainer']
-            });
+            const scopeQb = riskRatingRepository.createQueryBuilder('risk_rating')
+                .leftJoinAndSelect('risk_rating.trainer', 'trainer')
+                .where('risk_rating.id = :id', { id: parseInt(id) });
+            if (req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                const scopeContext = getScopeContext(req);
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user, scopeContext);
+                    if (centreIds === null || centreIds.length === 0) {
+                        return res.status(403).json({ message: 'Risk rating not found or you do not have access', status: false });
+                    }
+                    scopeQb.innerJoin('trainer.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                } else {
+                    const orgIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+                    if (orgIds === null || orgIds.length === 0) {
+                        return res.status(403).json({ message: 'Risk rating not found or you do not have access', status: false });
+                    }
+                    scopeQb.innerJoin('trainer.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
+                }
+            }
+            const riskRating = await scopeQb.getOne();
 
             if (!riskRating) {
-                return res.status(404).json({
-                    message: 'Risk rating not found',
+                return res.status(403).json({
+                    message: 'Risk rating not found or you do not have access',
                     status: false,
                 });
             }
@@ -398,14 +415,31 @@ class RiskRatingController {
 
             const riskRatingRepository = AppDataSource.getRepository(RiskRating);
 
-            const riskRating = await riskRatingRepository.findOne({
-                where: { id: parseInt(id) },
-                relations: ['trainer']
-            });
+            const qb = riskRatingRepository.createQueryBuilder('risk_rating')
+                .leftJoinAndSelect('risk_rating.trainer', 'trainer')
+                .where('risk_rating.id = :id', { id: parseInt(id) });
+            if (req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                const scopeContext = getScopeContext(req);
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user, scopeContext);
+                    if (centreIds === null || centreIds.length === 0) {
+                        return res.status(403).json({ message: 'Risk rating not found or you do not have access', status: false });
+                    }
+                    qb.innerJoin('trainer.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                } else {
+                    const orgIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+                    if (orgIds === null || orgIds.length === 0) {
+                        return res.status(403).json({ message: 'Risk rating not found or you do not have access', status: false });
+                    }
+                    qb.innerJoin('trainer.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
+                }
+            }
+            const riskRating = await qb.getOne();
 
             if (!riskRating) {
-                return res.status(404).json({
-                    message: 'Risk rating not found',
+                return res.status(403).json({
+                    message: 'Risk rating not found or you do not have access',
                     status: false,
                 });
             }

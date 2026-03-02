@@ -5,7 +5,8 @@ import { Support, SupportStatus } from "../entity/Support.entity";
 import { User } from "../entity/User.entity";
 import { SocketDomain } from "../util/constants";
 import { SendNotifications } from "../util/socket/notification";
-import { getAccessibleOrganisationIds, getScopeContext } from "../util/organisationFilter";
+import { getAccessibleOrganisationIds, getAccessibleCentreIds, getScopeContext, resolveUserRole } from "../util/organisationFilter";
+import { UserRole } from "../util/constants";
 
 class SupportController {
     public async createSupport(req: CustomRequest, res: Response) {
@@ -80,11 +81,33 @@ class SupportController {
             }
 
             const supportRepository = AppDataSource.getRepository(Support);
-            const support = await supportRepository.findOne({ where: { support_id: supportId } });
+            const qb = supportRepository.createQueryBuilder('support')
+                .innerJoinAndSelect('support.request_id', 'request')
+                .where('support.support_id = :supportId', { supportId });
+            if (req.user) {
+                const scopeContext = getScopeContext(req);
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user, scopeContext);
+                    if (centreIds === null || centreIds.length === 0) {
+                        return res.status(403).json({ message: 'Support request not found or you do not have access', status: false });
+                    }
+                    qb.innerJoin('request.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                } else {
+                    const orgIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+                    if (orgIds !== null && orgIds.length === 0) {
+                        return res.status(403).json({ message: 'Support request not found or you do not have access', status: false });
+                    }
+                    if (orgIds && orgIds.length > 0) {
+                        qb.innerJoin('request.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
+                    }
+                }
+            }
+            const support = await qb.getOne();
 
             if (!support) {
-                return res.status(404).json({
-                    message: 'Support request not found',
+                return res.status(403).json({
+                    message: 'Support request not found or you do not have access',
                     status: false,
                 });
             }
@@ -135,27 +158,34 @@ class SupportController {
                 qb.andWhere('request.user_id = :request_id', { request_id: request_id });
             }
 
-            // Add organization filtering through request_id (User → UserOrganisation)
             if (req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user, getScopeContext(req));
-                if (accessibleIds !== null) {
-                    if (accessibleIds.length === 0) {
+                const scopeContext = getScopeContext(req);
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user, scopeContext);
+                    if (centreIds === null || centreIds.length === 0) {
                         return res.status(200).json({
                             message: 'Support requests retrieved successfully',
                             status: true,
                             data: [],
-                            ...(meta === 'true' && {
-                                meta_data: {
-                                    page: req.pagination.page,
-                                    items: 0,
-                                    page_size: req.pagination.limit,
-                                    pages: 0,
-                                },
-                            }),
+                            ...(meta === 'true' && { meta_data: { page: req.pagination.page, items: 0, page_size: req.pagination.limit, pages: 0 } }),
                         });
                     }
-                    qb.leftJoin('request.userOrganisations', 'userOrganisation')
-                      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+                    qb.innerJoin('request.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                } else {
+                    const accessibleIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+                    if (accessibleIds !== null && accessibleIds.length === 0) {
+                        return res.status(200).json({
+                            message: 'Support requests retrieved successfully',
+                            status: true,
+                            data: [],
+                            ...(meta === 'true' && { meta_data: { page: req.pagination.page, items: 0, page_size: req.pagination.limit, pages: 0 } }),
+                        });
+                    }
+                    if (accessibleIds !== null && accessibleIds.length > 0) {
+                        qb.innerJoin('request.userOrganisations', 'userOrganisation')
+                            .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+                    }
                 }
             }
 

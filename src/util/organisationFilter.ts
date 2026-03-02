@@ -530,14 +530,17 @@ export async function applyScope(
 
 export type EmployerScopeOptions = {
     scopeContext?: ScopeContext;
-    /** Alias for the employer entity in the query (default 'employer'). employer_id column used. */
+    /** Alias for the employer entity in the query (default 'employer'). */
     entityAlias?: string;
 };
 
 /**
- * Apply scope to Employer list/get. Organisation-only filter; for CentreAdmin, only employers
- * linked to at least one learner in their centre(s) are visible (no cross-centre employer visibility).
- * Order: 1) Organisation, 2) CentreAdmin → employer_id IN (learners in their centre).
+ * Apply scope to Employer list/get. Strict organisation + centre isolation.
+ * Order: 1) Organisation filter, 2) Centre filter (CentreAdmin/Trainer see only their centre(s)).
+ * - MasterAdmin: global or org mode via scopeContext.
+ * - OrganisationAdmin: filter by organisation_id only (all centres in org).
+ * - CentreAdmin: filter by organisation_id AND centre_id (assigned centres only).
+ * - Trainer: filter by organisation_id AND centre_id (centres from their learners).
  */
 export async function applyEmployerScope(
     qb: SelectQueryBuilder<any>,
@@ -545,39 +548,12 @@ export async function applyEmployerScope(
     entityAlias: string = 'employer',
     options?: EmployerScopeOptions
 ): Promise<void> {
-    const scopeContext = options?.scopeContext;
-    const role = resolveUserRole(user);
-
-    if (role === UserRole.MasterAdmin && !scopeContext?.organisationId) {
-        return;
-    }
-
-    const orgIds = await getAccessibleOrganisationIds(user, scopeContext);
-    if (orgIds === null) {
-        if (role === UserRole.MasterAdmin) return;
-        qb.andWhere('1 = 0');
-        return;
-    }
-    if (orgIds.length === 0) {
-        qb.andWhere('1 = 0');
-        return;
-    }
-
-    const orgCol = `${entityAlias}.organisation_id`;
-    qb.andWhere(`${orgCol} IN (:...orgIds)`, { orgIds });
-
-    if (role === UserRole.CentreAdmin) {
-        const centreIds = await getAccessibleCentreIds(user, scopeContext);
-        if (centreIds === null || centreIds.length === 0) {
-            qb.andWhere('1 = 0');
-            return;
-        }
-        const idCol = `${entityAlias}.employer_id`;
-        qb.andWhere(
-            `${idCol} IN (SELECT DISTINCT learner.employer_id FROM learner WHERE learner.centre_id IN (:...centreIds) AND learner.organisation_id IN (:...orgIds) AND learner.employer_id IS NOT NULL AND learner.deleted_at IS NULL)`,
-            { centreIds, orgIds }
-        );
-    }
+    await applyScope(qb, user, entityAlias, {
+        organisationColumn: `${entityAlias}.organisation_id`,
+        centreColumn: `${entityAlias}.centre_id`,
+        organisationOnly: false,
+        scopeContext: options?.scopeContext,
+    });
 }
 
 /**

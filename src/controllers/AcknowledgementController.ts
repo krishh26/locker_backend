@@ -4,32 +4,21 @@ import { CustomRequest } from '../util/Interface/expressInterface';
 import { Acknowledgement } from '../entity/Acknowledgement.entity';
 import { deleteFromS3, uploadToS3 } from '../util/aws';
 import { Learner } from '../entity/Learner.entity';
-import { applyScope, getScopeContext, getAccessibleOrganisationIds, canAccessOrganisation, resolveUserRole } from '../util/organisationFilter';
-import { UserRole } from '../util/constants';
+import { getScopeContext, canAccessOrganisation } from '../util/organisationFilter';
 
 export class AcknowledgementController {
-    // POST /acknowledgement → Add new acknowledgement (organisation-scoped)
+    // POST /acknowledgement → Add new acknowledgement (organisation_id stored for filtering)
     public async create(req: CustomRequest, res: Response) {
         try {
             const { message, fileUrl, organisation_id: bodyOrgId } = req.body as any;
 
             const scopeContext = getScopeContext(req);
-            const role = resolveUserRole(req.user);
-            let organisationId: number | null = bodyOrgId != null ? Number(bodyOrgId) : null;
-
+            let organisationId: number | null = bodyOrgId != null ? Number(bodyOrgId) : (scopeContext?.organisationId ?? null);
             if (organisationId == null || isNaN(organisationId)) {
-                const accessibleIds = req.user ? await getAccessibleOrganisationIds(req.user, scopeContext) : null;
-                if (role === UserRole.MasterAdmin) {
-                    organisationId = scopeContext?.organisationId ?? null;
-                    if (organisationId == null) {
-                        return res.status(400).json({ status: false, message: 'organisation_id is required (or set X-Organisation-Id for MasterAdmin)' });
-                    }
-                } else if (accessibleIds != null && accessibleIds.length > 0) {
-                    organisationId = accessibleIds[0];
-                }
+                return res.status(400).json({ status: false, message: 'organisation_id is required (body or query/header X-Organisation-Id)' });
             }
 
-            if (organisationId != null && req.user && !(await canAccessOrganisation(req.user, organisationId, scopeContext))) {
+            if (req.user && !(await canAccessOrganisation(req.user, organisationId, scopeContext))) {
                 return res.status(403).json({ status: false, message: 'You do not have access to this organisation' });
             }
 
@@ -57,19 +46,19 @@ export class AcknowledgementController {
         }
     }
 
-    // GET /acknowledgement → Fetch all acknowledgements (organisation-scoped)
+    // GET /acknowledgement → Fetch all acknowledgements by organisation_id only (no role filter)
     public async list(req: CustomRequest, res: Response) {
         try {
-            const repo = AppDataSource.getRepository(Acknowledgement);
-            const qb = repo.createQueryBuilder('ack');
-            if (req.user) {
-                await applyScope(qb, req.user, 'ack', {
-                    organisationColumn: 'ack.organisation_id',
-                    organisationOnly: true,
-                    scopeContext: getScopeContext(req),
-                });
+            const organisationId = getScopeContext(req)?.organisationId ?? (req.query?.organisation_id != null ? Number(req.query.organisation_id) : NaN);
+            if (organisationId == null || isNaN(organisationId)) {
+                return res.status(400).json({ status: false, message: 'organisation_id is required (query or X-Organisation-Id header)' });
             }
-            const list = await qb.orderBy('ack.createdAt', 'DESC').getMany();
+
+            const repo = AppDataSource.getRepository(Acknowledgement);
+            const list = await repo.createQueryBuilder('ack')
+                .where('ack.organisation_id = :organisationId', { organisationId })
+                .orderBy('ack.createdAt', 'DESC')
+                .getMany();
             const data = list.map(item => ({
                 id: item.id,
                 message: item.message,
@@ -86,24 +75,64 @@ export class AcknowledgementController {
         }
     }
 
-    // PUT /acknowledgement/:id → Update an acknowledgement (must be in scope; 403 if not)
-    public async update(req: CustomRequest, res: Response) {
+    // GET /acknowledgement/:id → Get single acknowledgement by id (scoped by organisation_id)
+    public async getOne(req: CustomRequest, res: Response) {
         try {
-            const id = parseInt(req.params.id);
-            const { message, fileUrl } = req.body as any;
+            const id = parseInt(req.params.id, 10);
+            if (isNaN(id)) return res.status(400).json({ status: false, message: 'Invalid id' });
+
+            const organisationId = getScopeContext(req)?.organisationId ?? (req.query?.organisation_id != null ? Number(req.query.organisation_id) : NaN);
+            if (organisationId == null || isNaN(organisationId)) {
+                return res.status(400).json({ status: false, message: 'organisation_id is required (query or X-Organisation-Id header)' });
+            }
 
             const repo = AppDataSource.getRepository(Acknowledgement);
-            const qb = repo.createQueryBuilder('ack').where('ack.id = :id', { id });
-            if (req.user) {
-                await applyScope(qb, req.user, 'ack', {
-                    organisationColumn: 'ack.organisation_id',
-                    organisationOnly: true,
-                    scopeContext: getScopeContext(req),
-                });
+            const item = await repo.createQueryBuilder('ack')
+                .where('ack.id = :id', { id })
+                .andWhere('ack.organisation_id = :organisationId', { organisationId })
+                .getOne();
+
+            if (!item) {
+                return res.status(404).json({ status: false, message: 'Acknowledgement not found' });
             }
-            const existing = await qb.getOne();
+            return res.status(200).json({
+                status: true,
+                message: 'OK',
+                data: {
+                    id: item.id,
+                    message: item.message,
+                    fileName: item.fileName,
+                    fileUrl: item.fileUrl,
+                    filePath: item.filePath,
+                    dated: item.createdAt,
+                    createdAt: item.createdAt,
+                    updatedAt: item.updatedAt,
+                },
+            });
+        } catch (error: any) {
+            return res.status(500).json({ status: false, message: 'Internal Server Error', data: { error: error.message } });
+        }
+    }
+
+    // PUT /acknowledgement/:id → Update an acknowledgement (by id + organisation_id)
+    public async update(req: CustomRequest, res: Response) {
+        try {
+            const id = parseInt(req.params.id, 10);
+            if (isNaN(id)) return res.status(400).json({ status: false, message: 'Invalid id' });
+            const { message, fileUrl } = req.body as any;
+
+            const organisationId = getScopeContext(req)?.organisationId ?? (req.query?.organisation_id != null ? Number(req.query.organisation_id) : NaN);
+            if (organisationId == null || isNaN(organisationId)) {
+                return res.status(400).json({ status: false, message: 'organisation_id is required (query or X-Organisation-Id header)' });
+            }
+
+            const repo = AppDataSource.getRepository(Acknowledgement);
+            const existing = await repo.createQueryBuilder('ack')
+                .where('ack.id = :id', { id })
+                .andWhere('ack.organisation_id = :organisationId', { organisationId })
+                .getOne();
             if (!existing) {
-                return res.status(403).json({ status: false, message: 'Acknowledgement not found or you do not have access' });
+                return res.status(404).json({ status: false, message: 'Acknowledgement not found' });
             }
             
             let filePath = existing.filePath;
@@ -133,22 +162,24 @@ export class AcknowledgementController {
         }
     }
 
-    // DELETE /acknowledgement/:id → Delete a single acknowledgement (403 if out of scope)
+    // DELETE /acknowledgement/:id → Delete a single acknowledgement (by id + organisation_id)
     public async remove(req: CustomRequest, res: Response) {
         try {
-            const id = parseInt(req.params.id);
-            const repo = AppDataSource.getRepository(Acknowledgement);
-            const qb = repo.createQueryBuilder('ack').where('ack.id = :id', { id });
-            if (req.user) {
-                await applyScope(qb, req.user, 'ack', {
-                    organisationColumn: 'ack.organisation_id',
-                    organisationOnly: true,
-                    scopeContext: getScopeContext(req),
-                });
+            const id = parseInt(req.params.id, 10);
+            if (isNaN(id)) return res.status(400).json({ status: false, message: 'Invalid id' });
+
+            const organisationId = getScopeContext(req)?.organisationId ?? (req.query?.organisation_id != null ? Number(req.query.organisation_id) : NaN);
+            if (organisationId == null || isNaN(organisationId)) {
+                return res.status(400).json({ status: false, message: 'organisation_id is required (query or X-Organisation-Id header)' });
             }
-            const existing = await qb.getOne();
+
+            const repo = AppDataSource.getRepository(Acknowledgement);
+            const existing = await repo.createQueryBuilder('ack')
+                .where('ack.id = :id', { id })
+                .andWhere('ack.organisation_id = :organisationId', { organisationId })
+                .getOne();
             if (!existing) {
-                return res.status(403).json({ status: false, message: 'Acknowledgement not found or you do not have access' });
+                return res.status(404).json({ status: false, message: 'Acknowledgement not found' });
             }
 
             if(existing.filePath){

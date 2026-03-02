@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import { Repository } from 'typeorm';
 import { AppDataSource } from '../data-source';
 import { CustomRequest } from '../util/Interface/expressInterface';
 import { UserRole, NotificationType, SocketDomain } from '../util/constants';
@@ -25,6 +26,20 @@ import { generateSurveyAllocationEmailHTML } from '../util/mailSend';
 import { getAccessibleOrganisationIds, getScopeContext } from '../util/organisationFilter';
 
 type ErrorDetail = { field?: string; message: string };
+
+/** Load survey by id with org scope. Returns null if not found or out of scope. */
+async function getSurveyByIdScoped(repo: Repository<Survey>, surveyId: string, req: CustomRequest, extraWhere?: { status?: SurveyStatus }): Promise<Survey | null> {
+    const qb = repo.createQueryBuilder('survey').where('survey.id = :id', { id: surveyId });
+    if (req.user) {
+        const accessibleIds = await getAccessibleOrganisationIds(req.user, getScopeContext(req));
+        if (accessibleIds !== null) {
+            if (accessibleIds.length === 0) return null;
+            qb.andWhere('survey.organizationId IN (:...orgIds)', { orgIds: accessibleIds.map(String) });
+        }
+    }
+    if (extraWhere?.status) qb.andWhere('survey.status = :status', { status: extraWhere.status });
+    return qb.getOne();
+}
 
 class SurveyController {
 
@@ -140,11 +155,11 @@ class SurveyController {
         try {
             const { surveyId } = req.params;
             const repo = AppDataSource.getRepository(Survey);
-            const survey = await repo.findOne({ where: { id: surveyId } });
+            const survey = await getSurveyByIdScoped(repo, surveyId, req);
 
             if (!survey) {
-                return res.status(404).json({
-                    message: 'Survey not found',
+                return res.status(403).json({
+                    message: 'Survey not found or you do not have access',
                     status: false,
                 });
             }
@@ -242,10 +257,10 @@ class SurveyController {
             const { name, description, status, background, organizationId, expirationDate } = req.body;
             const repo = AppDataSource.getRepository(Survey);
 
-            const survey = await repo.findOne({ where: { id: surveyId } });
+            const survey = await getSurveyByIdScoped(repo, surveyId, req);
             if (!survey) {
-                    return res.status(404).json({
-                    message: 'Survey not found',
+                return res.status(403).json({
+                    message: 'Survey not found or you do not have access',
                     status: false,
                 });
             }
@@ -337,11 +352,11 @@ class SurveyController {
         try {
             const { surveyId } = req.params;
             const repo = AppDataSource.getRepository(Survey);
-            const survey = await repo.findOne({ where: { id: surveyId } });
+            const survey = await getSurveyByIdScoped(repo, surveyId, req);
 
             if (!survey) {
-                return res.status(404).json({
-                    message: 'Survey not found',
+                return res.status(403).json({
+                    message: 'Survey not found or you do not have access',
                     status: false,
                 });
             }
@@ -376,11 +391,10 @@ class SurveyController {
             const surveyRepo = AppDataSource.getRepository(Survey);
             const questionRepo = AppDataSource.getRepository(SurveyQuestion);
 
-            // Validate survey exists and user can manage it
-            const survey = await surveyRepo.findOne({ where: { id: surveyId } });
+            const survey = await getSurveyByIdScoped(surveyRepo, surveyId, req);
             if (!survey) {
-                return res.status(404).json({
-                    message: 'Survey not found',
+                return res.status(403).json({
+                    message: 'Survey not found or you do not have access',
                     status: false,
                 });
             }
@@ -526,10 +540,10 @@ class SurveyController {
             const surveyRepo = AppDataSource.getRepository(Survey);
             const questionRepo = AppDataSource.getRepository(SurveyQuestion);
 
-            const survey = await surveyRepo.findOne({ where: { id: surveyId } });
+            const survey = await getSurveyByIdScoped(surveyRepo, surveyId, req);
             if (!survey) {
-                return res.status(404).json({
-                    message: 'Survey not found',
+                return res.status(403).json({
+                    message: 'Survey not found or you do not have access',
                     status: false,
                 });
             }
@@ -567,10 +581,10 @@ class SurveyController {
             const surveyRepo = AppDataSource.getRepository(Survey);
             const questionRepo = AppDataSource.getRepository(SurveyQuestion);
 
-            const survey = await surveyRepo.findOne({ where: { id: surveyId } });
+            const survey = await getSurveyByIdScoped(surveyRepo, surveyId, req);
             if (!survey) {
-                return res.status(404).json({
-                    message: 'Survey not found',
+                return res.status(403).json({
+                    message: 'Survey not found or you do not have access',
                     status: false,
                 });
             }
@@ -633,10 +647,10 @@ class SurveyController {
             const surveyRepo = AppDataSource.getRepository(Survey);
             const questionRepo = AppDataSource.getRepository(SurveyQuestion);
 
-            const survey = await surveyRepo.findOne({ where: { id: surveyId } });
+            const survey = await getSurveyByIdScoped(surveyRepo, surveyId, req);
             if (!survey) {
-                return res.status(404).json({
-                    message: 'Survey not found',
+                return res.status(403).json({
+                    message: 'Survey not found or you do not have access',
                     status: false,
                 });
             }
@@ -693,10 +707,10 @@ class SurveyController {
             const surveyRepo = AppDataSource.getRepository(Survey);
             const questionRepo = AppDataSource.getRepository(SurveyQuestion);
 
-            const survey = await surveyRepo.findOne({ where: { id: surveyId } });
+            const survey = await getSurveyByIdScoped(surveyRepo, surveyId, req);
             if (!survey) {
-                return res.status(404).json({
-                    message: 'Survey not found',
+                return res.status(403).json({
+                    message: 'Survey not found or you do not have access',
                     status: false,
                 });
             }
@@ -743,10 +757,10 @@ class SurveyController {
             const surveyRepo = AppDataSource.getRepository(Survey);
             const questionRepo = AppDataSource.getRepository(SurveyQuestion);
 
-            const survey = await surveyRepo.findOne({ where: { id: surveyId } });
+            const survey = await getSurveyByIdScoped(surveyRepo, surveyId, req);
             if (!survey) {
-                return res.status(404).json({
-                    message: 'Survey not found',
+                return res.status(403).json({
+                    message: 'Survey not found or you do not have access',
                     status: false,
                 });
             }
@@ -807,10 +821,10 @@ class SurveyController {
             const surveyRepo = AppDataSource.getRepository(Survey);
             const responseRepo = AppDataSource.getRepository(SurveyResponse);
 
-            const survey = await surveyRepo.findOne({ where: { id: surveyId } });
+            const survey = await getSurveyByIdScoped(surveyRepo, surveyId, req);
             if (!survey) {
-                return res.status(404).json({
-                    message: 'Survey not found',
+                return res.status(403).json({
+                    message: 'Survey not found or you do not have access',
                     status: false,
                 });
             }
@@ -869,10 +883,10 @@ class SurveyController {
             const surveyRepo = AppDataSource.getRepository(Survey);
             const responseRepo = AppDataSource.getRepository(SurveyResponse);
 
-            const survey = await surveyRepo.findOne({ where: { id: surveyId } });
+            const survey = await getSurveyByIdScoped(surveyRepo, surveyId, req);
             if (!survey) {
-                return res.status(404).json({
-                    message: 'Survey not found',
+                return res.status(403).json({
+                    message: 'Survey not found or you do not have access',
                     status: false,
                 });
             }
@@ -913,10 +927,10 @@ class SurveyController {
             const questionRepo = AppDataSource.getRepository(SurveyQuestion);
             const responseRepo = AppDataSource.getRepository(SurveyResponse);
 
-            const survey = await surveyRepo.findOne({ where: { id: surveyId } });
+            const survey = await getSurveyByIdScoped(surveyRepo, surveyId, req);
             if (!survey) {
-                return res.status(404).json({
-                    message: 'Survey not found',
+                return res.status(403).json({
+                    message: 'Survey not found or you do not have access',
                     status: false,
                 });
             }
@@ -966,10 +980,10 @@ class SurveyController {
             const surveyRepo = AppDataSource.getRepository(Survey);
             const responseRepo = AppDataSource.getRepository(SurveyResponse);
 
-            const survey = await surveyRepo.findOne({ where: { id: surveyId } });
+            const survey = await getSurveyByIdScoped(surveyRepo, surveyId, req);
             if (!survey) {
-                return res.status(404).json({
-                    message: 'Survey not found',
+                return res.status(403).json({
+                    message: 'Survey not found or you do not have access',
                     status: false,
                 });
             }
@@ -1015,11 +1029,11 @@ class SurveyController {
             const surveyRepo = AppDataSource.getRepository(Survey);
             const questionRepo = AppDataSource.getRepository(SurveyQuestion);
 
-            const survey = await surveyRepo.findOne({ where: { id: surveyId, status: SurveyStatus.Published } });
+            const survey = await getSurveyByIdScoped(surveyRepo, surveyId, req, { status: SurveyStatus.Published });
             if (!survey) {
-                return res.status(404).json({
+                return res.status(403).json({
                     success: false,
-                    message: 'Survey not available',
+                    message: 'Survey not available or you do not have access',
                     status: false,
                 });
             }
@@ -1078,11 +1092,10 @@ class SurveyController {
             const allocationRepo = AppDataSource.getRepository(SurveyAllocation);
             const userRepo = AppDataSource.getRepository(User);
 
-            // Validate survey exists
-            const survey = await surveyRepo.findOne({ where: { id: survey_id } });
+            const survey = await getSurveyByIdScoped(surveyRepo, survey_id, req);
             if (!survey) {
-                return res.status(404).json({
-                    message: 'Survey not found',
+                return res.status(403).json({
+                    message: 'Survey not found or you do not have access',
                     status: false,
                 });
             }
@@ -1266,11 +1279,10 @@ class SurveyController {
             const surveyRepo = AppDataSource.getRepository(Survey);
             const allocationRepo = AppDataSource.getRepository(SurveyAllocation);
 
-            // Validate survey exists
-            const survey = await surveyRepo.findOne({ where: { id: surveyId } });
+            const survey = await getSurveyByIdScoped(surveyRepo, surveyId, req);
             if (!survey) {
-                return res.status(404).json({
-                    message: 'Survey not found',
+                return res.status(403).json({
+                    message: 'Survey not found or you do not have access',
                     status: false,
                 });
             }
