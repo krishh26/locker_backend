@@ -5,7 +5,13 @@ import { FundingBand } from '../entity/FundingBand.entity';
 import { Course } from '../entity/Course.entity';
 import { UserCourse } from '../entity/UserCourse.entity';
 import { Learner } from '../entity/Learner.entity';
-import { applyLearnerScope, getScopeContext } from '../util/organisationFilter';
+import {
+    applyLearnerScope,
+    getAccessibleOrganisationIds,
+    getScopeContext,
+    resolveUserRole,
+} from '../util/organisationFilter';
+import { UserRole } from '../util/constants';
 
 class FundingBandController {
     
@@ -66,83 +72,95 @@ class FundingBandController {
         }
     }
 
-    // GET /api/v1/funding-band → list all funding bands (scoped by learner enrolments)
-public async getFundingBands(req: CustomRequest, res: Response) {
-    try {
-        const { page = 1, limit = 10, course_id, is_active } = req.query;
+    // GET /api/v1/funding-band → list all funding bands (org/centre admin: by course org; learner/trainer: by enrolments)
+    public async getFundingBands(req: CustomRequest, res: Response) {
+        try {
+            const { page = 1, limit = 10, course_id, is_active } = req.query;
+            const scopeContext = getScopeContext(req);
+            const role = req.user ? resolveUserRole(req.user) : undefined;
+            const useCourseScope =
+                role === UserRole.OrganisationAdmin ||
+                role === UserRole.CentreAdmin ||
+                role === UserRole.MasterAdmin;
 
-        const fundingBandRepository = AppDataSource.getRepository(FundingBand);
+            const fundingBandRepository = AppDataSource.getRepository(FundingBand);
 
-        /* -------------------- IDS QUERY -------------------- */
-        const idsQb = fundingBandRepository
-            .createQueryBuilder('funding_band')
-            .distinct(true)
-            .innerJoin('funding_band.course', 'course')
-            .innerJoin(
-                UserCourse,
-                'uc',
-                "uc.course ->> 'course_id' = CAST(course.course_id AS text)"
-            )
-            .innerJoin(
-                Learner,
-                'learner',
-                'learner.learner_id = uc.learner_id'
-            )
-            .select('funding_band.id', 'id')
-            .addSelect('funding_band.created_at', 'created_at')
-            .orderBy('funding_band.created_at', 'DESC');
+            /* -------------------- IDS QUERY -------------------- */
+            const idsQb = fundingBandRepository
+                .createQueryBuilder('funding_band')
+                .distinct(true)
+                .innerJoin('funding_band.course', 'course')
+                .select('funding_band.id', 'id')
+                .addSelect('funding_band.created_at', 'created_at')
+                .orderBy('funding_band.created_at', 'DESC');
 
-        if (req.user) {
-            await applyLearnerScope(idsQb, req.user, 'learner', {
-                scopeContext: getScopeContext(req),
-            });
-        }
+            if (useCourseScope && req.user) {
+                const orgIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+                if (orgIds === null) {
+                    // MasterAdmin, no org context → no filter
+                } else if (orgIds.length === 0) {
+                    idsQb.andWhere('1 = 0');
+                } else {
+                    idsQb.andWhere('course.organisation_id IN (:...orgIds)', { orgIds });
+                }
+            } else if (req.user) {
+                idsQb
+                    .innerJoin(
+                        UserCourse,
+                        'uc',
+                        "uc.course ->> 'course_id' = CAST(course.course_id AS text)"
+                    )
+                    .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id');
+                await applyLearnerScope(idsQb, req.user, 'learner', { scopeContext });
+            }
 
-        if (course_id) {
-            idsQb.andWhere('funding_band.course_id = :course_id', { course_id });
-        }
+            if (course_id) {
+                idsQb.andWhere('funding_band.course_id = :course_id', { course_id });
+            }
+            if (is_active !== undefined) {
+                idsQb.andWhere('funding_band.is_active = :is_active', {
+                    is_active: is_active === 'true',
+                });
+            }
 
-        if (is_active !== undefined) {
-            idsQb.andWhere('funding_band.is_active = :is_active', {
-                is_active: is_active === 'true',
-            });
-        }
+            const pageNumber = parseInt(page as string);
+            const limitNumber = parseInt(limit as string);
+            const skip = (pageNumber - 1) * limitNumber;
 
-        const pageNumber = parseInt(page as string);
-        const limitNumber = parseInt(limit as string);
-        const skip = (pageNumber - 1) * limitNumber;
+            /* -------------------- COUNT QUERY -------------------- */
+            const countQb = fundingBandRepository
+                .createQueryBuilder('funding_band')
+                .innerJoin('funding_band.course', 'course')
+                .select('COUNT(DISTINCT funding_band.id)', 'count');
 
-        /* -------------------- COUNT QUERY -------------------- */
-        const countQb = fundingBandRepository
-            .createQueryBuilder('funding_band')
-            .innerJoin('funding_band.course', 'course')
-            .innerJoin(
-                UserCourse,
-                'uc',
-                "uc.course ->> 'course_id' = CAST(course.course_id AS text)"
-            )
-            .innerJoin(
-                Learner,
-                'learner',
-                'learner.learner_id = uc.learner_id'
-            )
-            .select('COUNT(DISTINCT funding_band.id)', 'count');
+            if (useCourseScope && req.user) {
+                const orgIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+                if (orgIds === null) {
+                    // no filter
+                } else if (orgIds.length === 0) {
+                    countQb.andWhere('1 = 0');
+                } else {
+                    countQb.andWhere('course.organisation_id IN (:...orgIds)', { orgIds });
+                }
+            } else if (req.user) {
+                countQb
+                    .innerJoin(
+                        UserCourse,
+                        'uc',
+                        "uc.course ->> 'course_id' = CAST(course.course_id AS text)"
+                    )
+                    .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id');
+                await applyLearnerScope(countQb, req.user, 'learner', { scopeContext });
+            }
 
-        if (req.user) {
-            await applyLearnerScope(countQb, req.user, 'learner', {
-                scopeContext: getScopeContext(req),
-            });
-        }
-
-        if (course_id) {
-            countQb.andWhere('funding_band.course_id = :course_id', { course_id });
-        }
-
-        if (is_active !== undefined) {
-            countQb.andWhere('funding_band.is_active = :is_active', {
-                is_active: is_active === 'true',
-            });
-        }
+            if (course_id) {
+                countQb.andWhere('funding_band.course_id = :course_id', { course_id });
+            }
+            if (is_active !== undefined) {
+                countQb.andWhere('funding_band.is_active = :is_active', {
+                    is_active: is_active === 'true',
+                });
+            }
 
         const totalResult = await countQb.getRawOne<{ count: string }>();
         const total = parseInt(totalResult?.count ?? '0', 10);
@@ -221,18 +239,33 @@ public async getFundingBands(req: CustomRequest, res: Response) {
                 });
             }
 
+            const scopeContext = getScopeContext(req);
+            const role = req.user ? resolveUserRole(req.user) : undefined;
+            const useCourseScope =
+                role === UserRole.OrganisationAdmin ||
+                role === UserRole.CentreAdmin ||
+                role === UserRole.MasterAdmin;
+
             const fundingBandRepository = AppDataSource.getRepository(FundingBand);
 
             const qb = fundingBandRepository
                 .createQueryBuilder('funding_band')
                 .innerJoin('funding_band.course', 'course')
-                .innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
-                .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id')
                 .addSelect(['course.course_id', 'course.course_name', 'course.course_code', 'course.level', 'course.total_credits'])
                 .where('funding_band.id = :id', { id: parseInt(id) });
 
-            if (req.user) {
-                await applyLearnerScope(qb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+            if (useCourseScope && req.user) {
+                const orgIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+                if (orgIds !== null && orgIds.length > 0) {
+                    qb.andWhere('course.organisation_id IN (:...orgIds)', { orgIds });
+                } else if (orgIds !== null) {
+                    qb.andWhere('1 = 0');
+                }
+            } else if (req.user) {
+                qb
+                    .innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
+                    .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id');
+                await applyLearnerScope(qb, req.user, 'learner', { scopeContext });
             }
 
             const fundingBand = await qb.getOne();
@@ -376,6 +409,13 @@ public async getFundingBands(req: CustomRequest, res: Response) {
                 });
             }
 
+            const scopeContext = getScopeContext(req);
+            const role = req.user ? resolveUserRole(req.user) : undefined;
+            const useCourseScope =
+                role === UserRole.OrganisationAdmin ||
+                role === UserRole.CentreAdmin ||
+                role === UserRole.MasterAdmin;
+
             const fundingBandRepository = AppDataSource.getRepository(FundingBand);
             const courseRepository = AppDataSource.getRepository(Course);
 
@@ -389,14 +429,24 @@ public async getFundingBands(req: CustomRequest, res: Response) {
 
             const idsQb = fundingBandRepository.createQueryBuilder('funding_band')
                 .innerJoin('funding_band.course', 'course')
-                .innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
-                .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id')
                 .select('DISTINCT funding_band.id', 'id')
                 .where('funding_band.course_id = :course_id', { course_id })
                 .orderBy('funding_band.effective_from', 'DESC');
 
-            if (req.user) {
-                await applyLearnerScope(idsQb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+            if (useCourseScope && req.user) {
+                const orgIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+                if (orgIds === null) {
+                    // no filter
+                } else if (orgIds.length === 0) {
+                    idsQb.andWhere('1 = 0');
+                } else {
+                    idsQb.andWhere('course.organisation_id IN (:...orgIds)', { orgIds });
+                }
+            } else if (req.user) {
+                idsQb
+                    .innerJoin(UserCourse, 'uc', "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
+                    .innerJoin(Learner, 'learner', 'learner.learner_id = uc.learner_id');
+                await applyLearnerScope(idsQb, req.user, 'learner', { scopeContext });
             }
 
             if (is_active !== undefined) {
