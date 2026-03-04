@@ -1252,6 +1252,9 @@ class UserController {
             const learnerRepository = AppDataSource.getRepository(Learner);
             const employerRepository = AppDataSource.getRepository(Employer);
 
+            const scopeContext = getScopeContext(req);
+            const accessibleOrgIds = req.user ? await getAccessibleOrganisationIds(req.user, scopeContext) : null;
+
             // Pagination setup
             const pageNumber = parseInt(page as string) || 1;
             const pageSize = parseInt(limit as string) || 10;
@@ -1275,6 +1278,11 @@ class UserController {
                 );
             }
 
+            // Restrict line managers to current user's organisation(s)
+            if (req.user) {
+                await addUserScopeFilter(queryBuilder, req.user, 'line_manager', getScopeContext(req));
+            }
+
             // Get total count for pagination
             const totalLineManagers = await queryBuilder.getCount();
 
@@ -1293,17 +1301,32 @@ class UserController {
 
             // Get linked users and learners for each line manager
             const caseloadData = await Promise.all(lineManagers.map(async (lineManager) => {
-                // Get users managed by this line manager (only employers and trainers)
-                const managedUsers = await userRepository.find({
-                    where: { 
-                        line_manager: { user_id: lineManager.user_id },
-                        deleted_at: null 
-                    },
-                    select: [
-                        'user_id', 'user_name', 'first_name', 'last_name', 
-                        'email', 'mobile', 'roles', 'status', 'created_at'
-                    ]
-                });
+                // Get users managed by this line manager (only employers and trainers), scoped by org when applicable
+                let managedUsers: User[];
+                if (accessibleOrgIds !== null && accessibleOrgIds.length > 0) {
+                    managedUsers = await userRepository
+                        .createQueryBuilder('u')
+                        .leftJoin('u.userOrganisations', 'uo')
+                        .where('u.line_manager_id = :lmId', { lmId: lineManager.user_id })
+                        .andWhere('u.deleted_at IS NULL')
+                        .andWhere('uo.organisation_id IN (:...orgIds)', { orgIds: accessibleOrgIds })
+                        .select([
+                            'u.user_id', 'u.user_name', 'u.first_name', 'u.last_name',
+                            'u.email', 'u.mobile', 'u.roles', 'u.status', 'u.created_at'
+                        ])
+                        .getMany();
+                } else {
+                    managedUsers = await userRepository.find({
+                        where: {
+                            line_manager: { user_id: lineManager.user_id },
+                            deleted_at: null
+                        },
+                        select: [
+                            'user_id', 'user_name', 'first_name', 'last_name',
+                            'email', 'mobile', 'roles', 'status', 'created_at'
+                        ]
+                    });
+                }
 
                 // Filter to only include employers and trainers
                 const employersAndTrainers = managedUsers.filter(user => 
@@ -1330,13 +1353,17 @@ class UserController {
                         const employerIds = employers.map(emp => emp.employer_id);
 
                         if (employerIds.length > 0) {
-                            // Get all learners under these employers
+                            // Get all learners under these employers (optionally scoped by org)
                             let learnerQueryBuilder = learnerRepository.createQueryBuilder('learner')
                                 .leftJoinAndSelect('learner.user_id', 'user')
                                 .leftJoinAndSelect('learner.employer_id', 'employer')
                                 .leftJoinAndSelect('learner.funding_band', 'funding_band')
                                 .where('learner.employer_id IN (:...employerIds)', { employerIds })
                                 .andWhere('learner.deleted_at IS NULL');
+
+                            if (accessibleOrgIds !== null && accessibleOrgIds.length > 0) {
+                                learnerQueryBuilder.andWhere('employer.organisation_id IN (:...orgIds)', { orgIds: accessibleOrgIds });
+                            }
 
                             managedLearners = await learnerQueryBuilder
                                 .select([

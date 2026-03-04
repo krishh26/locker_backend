@@ -348,7 +348,9 @@ class LearnerController {
                 usercourses = await qbUserCourse
                     .andWhere('user_course.trainer_id = :trainer_id', { trainer_id: parseInt(trainer_id) })
                     .getMany();
-                learnerIdsArray = usercourses.map(userCourse => userCourse.learner_id.learner_id);
+                learnerIdsArray = usercourses
+                    .map(userCourse => userCourse?.learner_id?.learner_id)
+                    .filter((id: any) => id != null);
             } else if (user_id && role) {
                 const obj: any = {
                     EQA: "EQA_id",
@@ -361,7 +363,9 @@ class LearnerController {
                 usercourses = await qbUserCourse.leftJoin(`user_course.${obj[role]}`, `user_id`)
                     .andWhere('user_id.user_id = :user_id', { user_id })
                     .getMany()
-                learnerIdsArray = usercourses.map(userCourse => userCourse.learner_id.learner_id);
+                learnerIdsArray = usercourses
+                    .map(userCourse => userCourse?.learner_id?.learner_id)
+                    .filter((id: any) => id != null);
             } else {
                 if (course_id) {
                     const qbUserCourseForLearnerIds = qbUserCourse.clone();

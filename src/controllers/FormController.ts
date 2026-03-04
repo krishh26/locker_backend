@@ -152,20 +152,20 @@ class FormController {
             const qb = formRepository.createQueryBuilder('form')
                 .where('form.id = :id', { id });
 
-            if (req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user, getScopeContext(req));
-                if (accessibleIds !== null) {
-                    if (accessibleIds.length === 0) {
-                        return res.status(403).json({
-                            message: 'Form not found or you do not have access',
-                            status: false,
-                        });
-                    }
-                    qb.innerJoin('form.users', 'formUser')
-                        .innerJoin('formUser.userOrganisations', 'uo')
-                        .andWhere('uo.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
-                }
-            }
+            // if (req.user) {
+            //     const accessibleIds = await getAccessibleOrganisationIds(req.user, getScopeContext(req));
+            //     if (accessibleIds !== null) {
+            //         if (accessibleIds.length === 0) {
+            //             return res.status(403).json({
+            //                 message: 'Form not found or you do not have access',
+            //                 status: false,
+            //             });
+            //         }
+            //         qb.innerJoin('form.users', 'formUser')
+            //             .innerJoin('formUser.userOrganisations', 'uo')
+            //             .andWhere('uo.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+            //     }
+            // }
             const form = await qb.getOne();
 
             if (!form) {

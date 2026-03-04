@@ -339,6 +339,7 @@ class AssignmentController {
 
             const assignmentRepo = AppDataSource.getRepository(Assignment);
             const mappingRepo = AppDataSource.getRepository(AssignmentMapping);
+            const signatureRepo = AppDataSource.getRepository(AssignmentSignature);
             const userCourseRepo = AppDataSource.getRepository(UserCourse);
 
             const requestingUserId = req.user.user_id;
@@ -429,12 +430,12 @@ class AssignmentController {
             }
 
             // Apply scope filtering through learner
-            if (req.user) {
-                assignmentQB.leftJoin(Learner, 'learner', 'learner.user_id = user.user_id')
-                            .leftJoin('learner.organisation', 'org')
-                            .leftJoin('learner.centre', 'centre');
-                await applyLearnerScope(assignmentQB, req.user, 'learner', { scopeContext: getScopeContext(req) });
-            }
+            // if (req.user) {
+            //     assignmentQB.leftJoin(Learner, 'learner', 'learner.user_id = user.user_id')
+            //                 .leftJoin('learner.organisation', 'org')
+            //                 .leftJoin('learner.centre', 'centre');
+            //     await applyLearnerScope(assignmentQB, req.user, 'learner', { scopeContext: getScopeContext(req) });
+            // }
 
             const [assignments, count] = await assignmentQB.getManyAndCount();
 
@@ -546,21 +547,9 @@ class AssignmentController {
             const { role, roles } = req.body as any;
 
             const signatureRepo = AppDataSource.getRepository(AssignmentSignature);
-            const assignmentRepo = AppDataSource.getRepository(Assignment);
+            const mappingRepo = AppDataSource.getRepository(AssignmentMapping);
+            const userCourseRepo = AppDataSource.getRepository(UserCourse);
 
-            // Validate assignment
-            const assignment = await assignmentRepo.findOne({
-                where: { assignment_id: assignmentId },
-            });
-
-            if (!assignment) {
-                return res.status(404).json({
-                    message: 'Assignment not found',
-                    status: false,
-                });
-            }
-
-            // Resolve roles
             const rolesToProcess: string[] =
                 Array.isArray(roles) && roles.length
                     ? roles
@@ -570,63 +559,91 @@ class AssignmentController {
 
             if (!rolesToProcess.length) {
                 return res.status(400).json({
-                    message: 'role or roles[] is required',
+                    message: "role or roles[] is required",
                     status: false,
                 });
             }
 
-            // Permission: only Trainer / Admin can request
-            //const requesterRoles = req.user.roles || [req.user.role];
-            //const isAdmin = requesterRoles.includes(UserRole.Admin);
+            /* 1️⃣ Get mappings */
+            const mappings = await mappingRepo.find({
+                where: { assignment: { assignment_id: assignmentId } as any },
+                relations: ["course", "assignment"],
+            });
 
-            // if (!isAdmin && !requesterRoles.includes(UserRole.Trainer)) {
-            //     return res.status(403).json({
-            //         message: 'Not authorised to request signatures',
-            //         status: false,
-            //     });
-            // }
-
-            // Fetch signature rows via mapping → assignment
-            const signatures = await signatureRepo
-                .createQueryBuilder('sig')
-                .leftJoin('sig.mapping', 'mapping')
-                .leftJoin('mapping.assignment', 'assignment')
-                .where('assignment.assignment_id = :assignmentId', { assignmentId })
-                .getMany();
-
-            if (!signatures.length) {
+            if (!mappings.length) {
                 return res.status(404).json({
-                    message: 'No signature rows found for assignment',
+                    message: "No mappings found for assignment",
                     status: false,
                 });
             }
 
             const results: AssignmentSignature[] = [];
 
-            // Update request flags
-            for (const sig of signatures) {
-                const shouldRequest = rolesToProcess.includes(sig.role);
+            for (const mapping of mappings) {
+                const courseId = mapping.course?.course_id;
 
-                sig.is_requested = shouldRequest;
-                sig.requested_at = shouldRequest ? new Date() : null;
-                sig.requested_by = shouldRequest
-                    ? ({ user_id: req.user.user_id } as any)
-                    : null;
+                /* 2️⃣ Get course users */
+                const userCourse = await userCourseRepo
+                    .createQueryBuilder("uc")
+                    .leftJoinAndSelect("uc.learner_id", "learner")
+                    .leftJoinAndSelect("learner.user_id", "learner_user")
+                    .leftJoinAndSelect("uc.trainer_id", "trainer")
+                    .leftJoinAndSelect("uc.employer_id", "employer")
+                    .leftJoinAndSelect("uc.IQA_id", "IQA")
+                    .where("uc.course->>'course_id' = :courseId", { courseId })
+                    .getOne();
 
-                // ❌ DO NOT touch sig.user here
+                for (const r of rolesToProcess) {
+                    let sig = await signatureRepo.findOne({
+                        where: {
+                            mapping: { mapping_id: mapping.mapping_id } as any,
+                            role: r,
+                        },
+                        relations: ["user"],
+                    });
 
-                const updated = await signatureRepo.save(sig);
-                results.push(updated);
+                    if (!sig) {
+                        sig = signatureRepo.create({
+                            mapping,
+                            role: r,
+                        });
+                    }
+
+                    /* 3️⃣ Assign user based on role */
+
+                    if (r === "Learner" && userCourse?.learner_id?.user_id) {
+                        sig.user = { user_id: userCourse.learner_id.user_id.user_id } as any;
+                    }
+
+                    if (r === "Trainer" && userCourse?.trainer_id?.user_id) {
+                        sig.user = { user_id: userCourse.trainer_id.user_id } as any;
+                    }
+
+                    if (r === "Employer" && userCourse?.employer_id?.user_id) {
+                        sig.user = { user_id: userCourse.employer_id.user_id } as any;
+                    }
+
+                    if (r === "IQA" && userCourse?.IQA_id?.user_id) {
+                        sig.user = { user_id: userCourse.IQA_id.user_id } as any;
+                    }
+
+                    sig.is_requested = true;
+                    sig.requested_at = new Date();
+                    sig.requested_by = { user_id: req.user.user_id } as any;
+
+                    const saved = await signatureRepo.save(sig);
+                    results.push(saved);
+                }
             }
 
             return res.status(200).json({
-                message: 'Signature request(s) processed',
+                message: "Signature request(s) processed",
                 status: true,
                 data: results,
             });
         } catch (error: any) {
             return res.status(500).json({
-                message: 'Internal Server Error',
+                message: "Internal Server Error",
                 status: false,
                 error: error.message,
             });
@@ -687,7 +704,7 @@ class AssignmentController {
                 }
 
                 const qb = userCourseRepo.createQueryBuilder('uc')
-                    .where('uc.course IN (:...courseIds)', { courseIds });
+                    .where('(uc.course->>\'course_id\')::int IN (:...courseIds)', { courseIds });
 
                 if (role === 'Trainer') {
                     qb.leftJoin('uc.trainer_id', 'r').andWhere('r.user_id = :userId', { userId });
@@ -843,33 +860,33 @@ class AssignmentController {
             }
 
             // Check access via learner scope
-            if (req.user) {
-                const learnerRepo = AppDataSource.getRepository(Learner);
-                const learner = await learnerRepo.findOne({ 
-                    where: { user_id: assignment.user.user_id } as any,
-                    relations: ['organisation', 'centre']
-                });
-                if (!learner) {
-                    return res.status(403).json({
-                        message: "You are not authorized to view this assignment",
-                        status: false,
-                    });
-                }
-                // Check organisation access
-                if (!(await canAccessOrganisation(req.user, learner.organisation_id, getScopeContext(req)))) {
-                    return res.status(403).json({
-                        message: "You are not authorized to view this assignment",
-                        status: false,
-                    });
-                }
-                // Check centre access
-                if (!(await canAccessCentre(req.user, learner.centre_id, getScopeContext(req)))) {
-                    return res.status(403).json({
-                        message: "You are not authorized to view this assignment",
-                        status: false,
-                    });
-                }
-            }
+            // if (req.user) {
+            //     const learnerRepo = AppDataSource.getRepository(Learner);
+            //     const learner = await learnerRepo.findOne({ 
+            //         where: { user_id: assignment.user.user_id } as any,
+            //         relations: ['organisation', 'centre']
+            //     });
+            //     if (!learner) {
+            //         return res.status(403).json({
+            //             message: "You are not authorized to view this assignment",
+            //             status: false,
+            //         });
+            //     }
+            //     // Check organisation access
+            //     if (!(await canAccessOrganisation(req.user, learner.organisation_id, getScopeContext(req)))) {
+            //         return res.status(403).json({
+            //             message: "You are not authorized to view this assignment",
+            //             status: false,
+            //         });
+            //     }
+            //     // Check centre access
+            //     if (!(await canAccessCentre(req.user, learner.centre_id, getScopeContext(req)))) {
+            //         return res.status(403).json({
+            //             message: "You are not authorized to view this assignment",
+            //             status: false,
+            //         });
+            //     }
+            // }
 
             // add mapping all details including course id
             const mappings = await mappingRepo.find({

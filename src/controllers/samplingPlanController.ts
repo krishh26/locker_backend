@@ -79,19 +79,26 @@ export class SamplingPlanController {
         .innerJoin(UserCourse, "uc", "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
         .innerJoin(Learner, "learner", "learner.learner_id = uc.learner_id");
 
-      if ((req as any).user) {
-        await applyLearnerScope(query, (req as any).user, "learner", { scopeContext: getScopeContext(req as any) });
-      }
+      // if ((req as any).user) {
+      //   await applyLearnerScope(query, (req as any).user, "learner", { scopeContext: getScopeContext(req as any) });
+      // }
 
-      if (iqa_id) {
-        query.andWhere("iqa.user_id = :iqa_id", { iqa_id });
-      }
+      // if (iqa_id) {
+      //   query.andWhere("iqa.user_id = :iqa_id", { iqa_id });
+      // }
 
       if (course_id) {
         query.andWhere("course.course_id = :course_id", { course_id });
       }
 
-      const plans = await query.select("plan").addSelect("course").addSelect("iqa").distinct(true).orderBy("plan.createdAt", "DESC").limit(1).getMany();
+      // Note: do NOT use DISTINCT here because Course has JSON columns,
+      // and PostgreSQL cannot apply equality operators on type json for DISTINCT.
+      const plans = await query
+        .select("plan")
+        .addSelect("course")
+        .addSelect("iqa")
+        .orderBy("plan.createdAt", "DESC")
+        .getOne();
       const plan = plans[0] ?? null;
 
       return res.status(200).json({

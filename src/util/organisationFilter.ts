@@ -99,6 +99,21 @@ export async function getAccessibleOrganisationIds(user: any, scopeContext?: Sco
         return [...new Set(ids)];
     }
 
+    // IQA / LIQA / EQA: accessible orgs = orgs of learners assigned to them via user_course
+    if (role === UserRole.IQA || role === UserRole.LIQA || role === UserRole.EQA) {
+        const ucRepo = AppDataSource.getRepository(UserCourse);
+        const column = role === UserRole.IQA ? 'IQA_id' : role === UserRole.LIQA ? 'LIQA_id' : 'EQA_id';
+        const rows = await ucRepo
+            .createQueryBuilder('uc')
+            .innerJoin('uc.learner_id', 'l')
+            .where(`uc.${column} = :userId`, { userId: user.user_id })
+            .select('DISTINCT l.organisation_id', 'organisation_id')
+            .getRawMany<{ organisation_id: number }>();
+        const ids = rows.map(r => r.organisation_id).filter((id): id is number => id != null);
+        const result = [...new Set(ids)];
+        return result;
+    }
+
     if (role === UserRole.AccountManager) {
         // Fetch fresh from database for AccountManager
         const accountManagerRepository = AppDataSource.getRepository(AccountManager);

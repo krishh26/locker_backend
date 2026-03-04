@@ -10,7 +10,8 @@ import { UserCourse } from '../entity/UserCourse.entity';
 import { SendNotification } from '../util/socket/notification';
 import { NotificationType, SocketDomain } from '../util/constants';
 import { uploadToS3 } from '../util/aws';
-import { applyLearnerScope, getScopeContext } from '../util/organisationFilter';
+import { applyLearnerScope, getScopeContext, resolveUserRole } from '../util/organisationFilter';
+import { UserRole } from '../util/constants';
 
 class LearnerPlanController {
 
@@ -329,10 +330,34 @@ class LearnerPlanController {
 
             let scopePlanIds: number[] | null = null;
             if (req.user) {
-                const scopeQb = learnerPlanRepository.createQueryBuilder('lp').innerJoin('lp.learners', 'l').select('DISTINCT lp.learner_plan_id', 'learner_plan_id');
-                await applyLearnerScope(scopeQb, req.user, 'l', { scopeContext: getScopeContext(req) });
-                const scopeRows = await scopeQb.getRawMany<{ learner_plan_id: number }>();
-                scopePlanIds = scopeRows.map(r => r.learner_plan_id);
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.Learner) {
+                    // Learner sees only plans where they are one of the learners (created for them by trainer or self)
+                    const learnerRepository = AppDataSource.getRepository(Learner);
+                    const learner = await learnerRepository.findOne({
+                        where: { user_id: req.user.user_id },
+                        select: ['learner_id']
+                    });
+                    if (!learner) {
+                        return res.status(200).json({
+                            message: "Learner plans fetched successfully",
+                            status: true,
+                            data: [],
+                            ...(req.query.meta === 'true' && { meta_data: { page: req.pagination?.page ?? 1, items: 0, page_size: req.pagination?.limit ?? 10, pages: 0 } })
+                        });
+                    }
+                    const scopeQb = learnerPlanRepository.createQueryBuilder('lp')
+                        .innerJoin('lp.learners', 'l')
+                        .where('l.learner_id = :learnerId', { learnerId: learner.learner_id })
+                        .select('DISTINCT lp.learner_plan_id', 'learner_plan_id');
+                    const scopeRows = await scopeQb.getRawMany<{ learner_plan_id: number }>();
+                    scopePlanIds = scopeRows.map(r => r.learner_plan_id);
+                } else {
+                    const scopeQb = learnerPlanRepository.createQueryBuilder('lp').innerJoin('lp.learners', 'l').select('DISTINCT lp.learner_plan_id', 'learner_plan_id');
+                    await applyLearnerScope(scopeQb, req.user, 'l', { scopeContext: getScopeContext(req) });
+                    const scopeRows = await scopeQb.getRawMany<{ learner_plan_id: number }>();
+                    scopePlanIds = scopeRows.map(r => r.learner_plan_id);
+                }
                 if (scopePlanIds.length === 0) {
                     return res.status(200).json({
                         message: "Learner plans fetched successfully",

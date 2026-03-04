@@ -197,7 +197,7 @@ class SessionController {
                 }
             }
 
-            // Filter via learner scope (organisation + centre)
+            //Filter via learner scope (organisation + centre)
             if (req.user) {
                 await applyLearnerScope(qb, req.user, 'learner', { scopeContext: getScopeContext(req) });
             }

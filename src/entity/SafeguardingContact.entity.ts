@@ -5,13 +5,16 @@ export class SafeguardingContact {
     @PrimaryGeneratedColumn()
     id: number;
 
+    @Column({ name: 'organisation_id', type: 'int', nullable: true })
+    organisation_id: number | null;
+
     @Column({ type: 'varchar', nullable: true })
     telNumber: string;
 
     @Column({ type: 'varchar', nullable: true })
     mobileNumber: string;
 
-    @Column({ type: 'varchar', unique: true, nullable: false })
+    @Column({ type: 'varchar', nullable: false })
     emailAddress: string;
 
     @Column({ type: 'text', nullable: true })
