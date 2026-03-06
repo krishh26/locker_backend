@@ -90,7 +90,6 @@ class OrganisationController {
                 .where("organisation.deleted_at IS NULL");
 
             // Filter by accessible organisations
-            console.log(accessibleIds)
             if (accessibleIds !== null) {
                 if (accessibleIds.length === 0) {
                     return res.status(200).json({

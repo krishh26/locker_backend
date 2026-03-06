@@ -7,7 +7,7 @@ import { sendPasswordByEmail } from "../util/mailSend";
 import { CustomRequest } from "../util/Interface/expressInterface";
 import { Employer } from "../entity/Employer.entity";
 import { UserRole } from "../util/constants";
-import { applyScope, applyLearnerScope, canAccessOrganisation, getScopeContext } from "../util/organisationFilter";
+import { applyEmployerScope, applyLearnerScope, canAccessOrganisation, canAccessCentre, getScopeContext, validateCentreOrganisation } from "../util/organisationFilter";
 
 
 class EmployerController {
@@ -39,7 +39,8 @@ class EmployerController {
                 assessment_renewal_date,
                 insurance_renewal_date,
                 file,
-                organisation_id
+                organisation_id,
+                centre_id
             } = req.body
             if (!employer_name ||
                 !msi_employer_id ||
@@ -60,9 +61,28 @@ class EmployerController {
                     status: false
                 })
             }
+            if (!centre_id) {
+                return res.status(400).json({
+                    message: "centre_id is required",
+                    status: false
+                })
+            }
             if (req.user && !(await canAccessOrganisation(req.user, organisation_id, getScopeContext(req)))) {
                 return res.status(403).json({
                     message: "You do not have access to create employers in this organisation",
+                    status: false
+                })
+            }
+            const centreBelongsToOrg = await validateCentreOrganisation(Number(centre_id), Number(organisation_id));
+            if (!centreBelongsToOrg) {
+                return res.status(403).json({
+                    message: "Centre does not belong to the specified organisation",
+                    status: false
+                })
+            }
+            if (req.user && !(await canAccessCentre(req.user, Number(centre_id), getScopeContext(req)))) {
+                return res.status(403).json({
+                    message: "You do not have access to this centre",
                     status: false
                 })
             }
@@ -84,7 +104,8 @@ class EmployerController {
             let employer = await employerRepository.save(employerRepository.create({
                 employer_name,
                 msi_employer_id,
-                organisation_id,
+                organisation_id: Number(organisation_id),
+                centre_id: Number(centre_id),
                 business_department,
                 business_location,
                 branch_code,
@@ -182,6 +203,7 @@ class EmployerController {
                     "employer.created_at",
                     "employer.updated_at",
                     "employer.organisation_id",
+                    "employer.centre_id",
                     "user.email",
                     "user.mobile"
                 ])
@@ -191,7 +213,7 @@ class EmployerController {
             }
 
             if (req.user) {
-                await applyScope(qb, req.user, "employer", { organisationOnly: true, scopeContext: getScopeContext(req) });
+                await applyEmployerScope(qb, req.user, "employer", { scopeContext: getScopeContext(req) });
             }
 
             const [employer, count] = await qb
@@ -282,7 +304,8 @@ class EmployerController {
                     assessment_date,
                     assessment_renewal_date,
                     insurance_renewal_date,
-                    organisation_id
+                    organisation_id,
+                    centre_id
                 } = employerData;
 
                 try {
@@ -295,8 +318,20 @@ class EmployerController {
                         errors.push({ index: i, email: email || 'unknown', error: "organisation_id is required" });
                         continue;
                     }
+                    if (!centre_id) {
+                        errors.push({ index: i, email: email || 'unknown', error: "centre_id is required" });
+                        continue;
+                    }
                     if (req.user && !(await canAccessOrganisation(req.user, organisation_id, getScopeContext(req)))) {
                         errors.push({ index: i, email: email || 'unknown', error: "No access to this organisation" });
+                        continue;
+                    }
+                    if (!(await validateCentreOrganisation(Number(centre_id), Number(organisation_id)))) {
+                        errors.push({ index: i, email: email || 'unknown', error: "Centre does not belong to the specified organisation" });
+                        continue;
+                    }
+                    if (req.user && !(await canAccessCentre(req.user, Number(centre_id), getScopeContext(req)))) {
+                        errors.push({ index: i, email: email || 'unknown', error: "No access to this centre" });
                         continue;
                     }
 
@@ -316,7 +351,8 @@ class EmployerController {
                         employerRepository.create({
                             employer_name,
                             msi_employer_id,
-                            organisation_id,
+                            organisation_id: Number(organisation_id),
+                            centre_id: Number(centre_id),
                             business_department,
                             business_location,
                             branch_code,
@@ -391,20 +427,43 @@ class EmployerController {
             const employerRepository = AppDataSource.getRepository(Employer);
             const userRepository = AppDataSource.getRepository(User);
 
-            const existingEmployer = await employerRepository.findOne({ where: { employer_id: employerId }, relations: ['user'] });
+            const qb = employerRepository.createQueryBuilder('employer')
+                .leftJoinAndSelect('employer.user', 'user')
+                .where('employer.employer_id = :employerId', { employerId });
+            if (req.user) {
+                await applyEmployerScope(qb, req.user, 'employer', { scopeContext: getScopeContext(req) });
+            }
+            const existingEmployer = await qb.getOne();
 
             if (!existingEmployer) {
-                return res.status(404).json({
-                    message: 'Employer not found',
+                return res.status(403).json({
+                    message: 'Employer not found or you do not have access',
                     status: false,
                 });
             }
 
-            if (req.user && existingEmployer.organisation_id != null && !(await canAccessOrganisation(req.user, existingEmployer.organisation_id, getScopeContext(req)))) {
+            const bodyOrgId = req.body.organisation_id != null ? Number(req.body.organisation_id) : undefined;
+            const bodyCentreId = req.body.centre_id != null ? Number(req.body.centre_id) : undefined;
+            if (bodyOrgId !== undefined && bodyOrgId !== existingEmployer.organisation_id) {
                 return res.status(403).json({
-                    message: 'You do not have access to this employer',
+                    message: 'Cannot assign employer to a different organisation',
                     status: false,
                 });
+            }
+            if (bodyCentreId !== undefined) {
+                const orgId = bodyOrgId ?? existingEmployer.organisation_id;
+                if (!(await validateCentreOrganisation(bodyCentreId, orgId))) {
+                    return res.status(403).json({
+                        message: 'Centre does not belong to the employer organisation',
+                        status: false,
+                    });
+                }
+                if (req.user && !(await canAccessCentre(req.user, bodyCentreId, getScopeContext(req)))) {
+                    return res.status(403).json({
+                        message: 'You do not have access to this centre',
+                        status: false,
+                    });
+                }
             }
 
             if (existingEmployer.user.email !== req.body.email) {
@@ -448,18 +507,17 @@ class EmployerController {
             const employerRepository = AppDataSource.getRepository(Employer);
             const userRepository = AppDataSource.getRepository(User);
 
-            const employer = await employerRepository.findOne({ where: { employer_id: employerId }, relations: ['user'] });
+            const qb = employerRepository.createQueryBuilder('employer')
+                .leftJoinAndSelect('employer.user', 'user')
+                .where('employer.employer_id = :employerId', { employerId });
+            if (req.user) {
+                await applyEmployerScope(qb, req.user, 'employer', { scopeContext: getScopeContext(req) });
+            }
+            const employer = await qb.getOne();
 
             if (!employer) {
-                return res.status(404).json({
-                    message: 'Employer not found',
-                    status: false,
-                });
-            }
-
-            if (req.user && employer.organisation_id != null && !(await canAccessOrganisation(req.user, employer.organisation_id, getScopeContext(req)))) {
                 return res.status(403).json({
-                    message: 'You do not have access to this employer',
+                    message: 'Employer not found or you do not have access',
                     status: false,
                 });
             }

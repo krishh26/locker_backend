@@ -91,12 +91,19 @@ export class SamplingPlanController {
         query.andWhere("course.course_id = :course_id", { course_id });
       }
 
-      const plans = await query.select("plan").addSelect("course").addSelect("iqa").distinct(true).orderBy("plan.createdAt", "DESC").limit(1).getMany();
-      const plan = plans[0] ?? null;
+      // Note: do NOT use DISTINCT here because Course has JSON columns,
+      // and PostgreSQL cannot apply equality operators on type json for DISTINCT.
+      const plans = await query
+        .select("plan")
+        .addSelect("course")
+        .addSelect("iqa")
+        .orderBy("plan.createdAt", "DESC")
+        .getMany();
+      //const plan = plans[0] ?? null;
 
       return res.status(200).json({
         message: "Sampling plans fetched successfully",
-        data: plan,
+        data: plans,
         status: true,
       });
     } catch (error) {

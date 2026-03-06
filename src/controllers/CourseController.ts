@@ -800,7 +800,6 @@ class CourseController {
                     });
                 }
             }
-
             userCourseRepository.merge(existingCourse, req.body);
             const updatedCourse = await userCourseRepository.save(existingCourse);
 

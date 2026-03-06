@@ -2,7 +2,14 @@ import { Response } from "express";
 import { AppDataSource } from "../data-source";
 import { SessionType } from "../entity/SessionType.entity";
 import { CustomRequest } from "../util/Interface/expressInterface";
-import { applyScope, getScopeContext, getAccessibleOrganisationIds, canAccessOrganisation, resolveUserRole } from "../util/organisationFilter";
+import {
+  applyScope,
+  getScopeContext,
+  getAccessibleOrganisationIds,
+  getAccessibleCentreIds,
+  canAccessOrganisation,
+  resolveUserRole,
+} from "../util/organisationFilter";
 import { UserRole } from "../util/constants";
 
 export class SessionTypeController {
@@ -10,7 +17,7 @@ export class SessionTypeController {
   // ➕ Create
   public async create(req: CustomRequest, res: Response) {
     try {
-      const { name, is_off_the_job, active, organisation_id: bodyOrgId } = req.body;
+      const { name, is_off_the_job, active, organisation_id: bodyOrgId, centre_id: bodyCentreId } = req.body;
 
       if (!name) {
         return res.status(400).json({ message: "Name is required", status: false });
@@ -19,6 +26,7 @@ export class SessionTypeController {
       const scopeContext = getScopeContext(req);
       const role = resolveUserRole(req.user);
       let organisationId: number | null = bodyOrgId != null ? Number(bodyOrgId) : null;
+      let centreId: number | null = bodyCentreId != null ? Number(bodyCentreId) : null;
 
       if (organisationId == null || isNaN(organisationId)) {
         const accessibleIds = req.user ? await getAccessibleOrganisationIds(req.user, scopeContext) : null;
@@ -43,11 +51,34 @@ export class SessionTypeController {
         return res.status(403).json({ message: "You do not have access to this organisation", status: false });
       }
 
-      const repo = AppDataSource.getRepository(SessionType);
-      const maxOrderQb = repo.createQueryBuilder("session_type").where("session_type.organisation_id = :orgId", { orgId: organisationId });
-      if (req.user) {
-        await applyScope(maxOrderQb, req.user, "session_type", { organisationOnly: true, scopeContext });
+      // Resolve centre_id:
+      // - Centre Admin (single centre): if not in body, use their only accessible centre.
+      // - Org Admin (multiple centres): must send centre_id in body to choose which centre; do not auto-pick.
+      const accessibleCentreIds = req.user ? await getAccessibleCentreIds(req.user, scopeContext) : null;
+      if (centreId == null || isNaN(centreId)) {
+        if (Array.isArray(accessibleCentreIds) && accessibleCentreIds.length === 1) {
+          centreId = accessibleCentreIds[0];
+        }
       }
+      if (centreId == null || isNaN(centreId)) {
+        if (Array.isArray(accessibleCentreIds) && accessibleCentreIds.length > 1) {
+          return res.status(400).json({
+            message: "centre_id is required when you have access to multiple centres (e.g. Organisation Admin). Please select a centre.",
+            status: false,
+          });
+        }
+        return res.status(400).json({ message: "centre_id is required", status: false });
+      }
+      // Ensure the chosen centre is in the user's accessible set
+      if (Array.isArray(accessibleCentreIds) && accessibleCentreIds.length > 0 && !accessibleCentreIds.includes(centreId)) {
+        return res.status(403).json({ message: "You do not have access to this centre", status: false });
+      }
+
+      const repo = AppDataSource.getRepository(SessionType);
+      const maxOrderQb = repo
+        .createQueryBuilder("session_type")
+        .where("session_type.organisation_id = :orgId", { orgId: organisationId })
+        .andWhere("session_type.centre_id = :centreId", { centreId });
       const maxOrder = await maxOrderQb.select("MAX(session_type.order)", "max").getRawOne();
 
       const newItem = repo.create({
@@ -56,6 +87,7 @@ export class SessionTypeController {
         active,
         order: (maxOrder?.max ?? 0) + 1,
         organisation_id: organisationId,
+        centre_id: centreId,
       });
 
       const saved = await repo.save(newItem);
@@ -75,7 +107,7 @@ export class SessionTypeController {
       const repo = AppDataSource.getRepository(SessionType);
       const qb = repo.createQueryBuilder("session_type").where("session_type.id = :id", { id: parseInt(id) });
       if (req.user) {
-        await applyScope(qb, req.user, "session_type", { organisationOnly: true, scopeContext: getScopeContext(req) });
+        await applyScope(qb, req.user, "session_type", { scopeContext: getScopeContext(req) });
       }
       const item = await qb.getOne();
 
@@ -103,7 +135,7 @@ export class SessionTypeController {
       const repo = AppDataSource.getRepository(SessionType);
       const qb = repo.createQueryBuilder("session_type").where("session_type.id = :id", { id: parseInt(id) });
       if (req.user) {
-        await applyScope(qb, req.user, "session_type", { organisationOnly: true, scopeContext: getScopeContext(req) });
+        await applyScope(qb, req.user, "session_type", { scopeContext: getScopeContext(req) });
       }
       const item = await qb.getOne();
 
@@ -125,7 +157,7 @@ export class SessionTypeController {
       const repo = AppDataSource.getRepository(SessionType);
       const qb = repo.createQueryBuilder("session_type").orderBy("session_type.order", "ASC");
       if (req.user) {
-        await applyScope(qb, req.user, "session_type", { organisationOnly: true, scopeContext: getScopeContext(req) });
+        await applyScope(qb, req.user, "session_type", { scopeContext: getScopeContext(req) });
       }
       const data = await qb.getMany();
 
@@ -144,7 +176,7 @@ export class SessionTypeController {
 
       const currentQb = repo.createQueryBuilder("session_type").where("session_type.id = :id", { id });
       if (req.user) {
-        await applyScope(currentQb, req.user, "session_type", { organisationOnly: true, scopeContext: getScopeContext(req) });
+        await applyScope(currentQb, req.user, "session_type", { scopeContext: getScopeContext(req) });
       }
       const current = await currentQb.getOne();
       if (!current) return res.status(404).json({ message: "Not found" });
@@ -154,7 +186,7 @@ export class SessionTypeController {
         .where("session_type.organisation_id = :orgId", { orgId: current.organisation_id })
         .andWhere("session_type.order = :ord", { ord: nextOrder });
       if (req.user) {
-        await applyScope(swapQb, req.user, "session_type", { organisationOnly: true, scopeContext: getScopeContext(req) });
+        await applyScope(swapQb, req.user, "session_type", { scopeContext: getScopeContext(req) });
       }
       const swapWith = await swapQb.getOne();
 

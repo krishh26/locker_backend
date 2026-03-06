@@ -5,6 +5,9 @@ export class Acknowledgement {
     @PrimaryGeneratedColumn()
     id: number;
 
+    @Column({ name: 'organisation_id', type: 'int', nullable: true })
+    organisation_id: number | null;
+
     @Column({ type: 'varchar', nullable: true })
     message: string;
 

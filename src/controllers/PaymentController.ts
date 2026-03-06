@@ -160,12 +160,15 @@ export default class PaymentController {
                 return res.status(400).json({ message: 'Invalid payment id', status: false });
             }
             const repo = AppDataSource.getRepository(Payment);
-            const payment = await repo.findOne({
-                where: { id },
-                relations: ['plan'],
-            });
+            const qb = repo.createQueryBuilder('payment')
+                .leftJoinAndSelect('payment.plan', 'plan')
+                .where('payment.id = :id', { id });
+            if (req.user) {
+                await applyScope(qb, req.user, 'payment', { organisationOnly: true, scopeContext: getScopeContext(req) });
+            }
+            const payment = await qb.getOne();
             if (!payment) {
-                return res.status(404).json({ message: 'Payment not found', status: false });
+                return res.status(403).json({ message: 'Payment not found or you do not have access', status: false });
             }
             const planName = (payment as Payment & { plan?: Plan }).plan?.name;
             return res.status(200).json({
@@ -281,9 +284,15 @@ export default class PaymentController {
             }
 
             const repo = AppDataSource.getRepository(Payment);
-            const payment = await repo.findOne({ where: { id }, relations: ['plan'] });
+            const qb = repo.createQueryBuilder('payment')
+                .leftJoinAndSelect('payment.plan', 'plan')
+                .where('payment.id = :id', { id });
+            if (req.user) {
+                await applyScope(qb, req.user, 'payment', { organisationOnly: true, scopeContext: getScopeContext(req) });
+            }
+            const payment = await qb.getOne();
             if (!payment) {
-                return res.status(404).json({ message: 'Payment not found', status: false });
+                return res.status(403).json({ message: 'Payment not found or you do not have access', status: false });
             }
 
             const planRepo = AppDataSource.getRepository(Plan);

@@ -70,10 +70,26 @@ class InnovationController {
             const id = parseInt(req.params.id);
             const { topic, description, comment, status } = req.body;
 
-            let innovation = await innovationRepository.findOne({ where: { id } });
+            const qb = innovationRepository.createQueryBuilder('innovation')
+                .leftJoin('innovation.innovation_propose_by_id', 'creator')
+                .where('innovation.id = :id', { id });
+            if (req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                const scopeContext = getScopeContext(req);
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user, scopeContext);
+                    if (centreIds === null || centreIds.length === 0) return res.status(403).json({ message: "Innovation not found or you do not have access", status: false });
+                    qb.innerJoin('creator.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                } else {
+                    const orgIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+                    if (orgIds === null || orgIds.length === 0) return res.status(403).json({ message: "Innovation not found or you do not have access", status: false });
+                    qb.innerJoin('creator.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
+                }
+            }
+            let innovation = await qb.getOne();
             if (!innovation) {
-                return res.status(404).json({
-                    message: "Innovation not found",
+                return res.status(403).json({
+                    message: "Innovation not found or you do not have access",
                     status: false
                 });
             }
@@ -103,14 +119,30 @@ class InnovationController {
             const id = parseInt(req.params.id);
             const innovationRepository = AppDataSource.getRepository(Innovation);
 
-            const deleteResult = await innovationRepository.delete(id);
-
-            if (deleteResult.affected === 0) {
-                return res.status(404).json({
-                    message: 'Innovation not found',
+            const qb = innovationRepository.createQueryBuilder('innovation')
+                .leftJoin('innovation.innovation_propose_by_id', 'creator')
+                .where('innovation.id = :id', { id });
+            if (req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                const scopeContext = getScopeContext(req);
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user, scopeContext);
+                    if (centreIds === null || centreIds.length === 0) return res.status(403).json({ message: 'Innovation not found or you do not have access', status: false });
+                    qb.innerJoin('creator.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                } else {
+                    const orgIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+                    if (orgIds === null || orgIds.length === 0) return res.status(403).json({ message: 'Innovation not found or you do not have access', status: false });
+                    qb.innerJoin('creator.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
+                }
+            }
+            const innovation = await qb.getOne();
+            if (!innovation) {
+                return res.status(403).json({
+                    message: 'Innovation not found or you do not have access',
                     status: false,
                 });
             }
+            await innovationRepository.remove(innovation);
 
             return res.status(200).json({
                 message: 'Innovation deleted successfully',
@@ -232,8 +264,8 @@ class InnovationController {
             const innovation = await qb.getOne();
 
             if (!innovation) {
-                return res.status(404).json({
-                    message: "Innovation not found",
+                return res.status(403).json({
+                    message: "Innovation not found or you do not have access",
                     status: false
                 });
             }
@@ -264,15 +296,31 @@ class InnovationController {
                     status: false
                 })
             }
-            let innovation = await innovationRepository.findOne({ where: { id: innovation_id }, relations: ['innovation_propose_by_id'] });
+            const commentQb = innovationRepository.createQueryBuilder('innovation')
+                .leftJoinAndSelect('innovation.innovation_propose_by_id', 'creator')
+                .where('innovation.id = :id', { id: innovation_id });
+            if (req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                const scopeContext = getScopeContext(req);
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user, scopeContext);
+                    if (centreIds === null || centreIds.length === 0) return res.status(403).json({ message: "Innovation not found or you do not have access", status: false });
+                    commentQb.innerJoin('creator.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                } else {
+                    const orgIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+                    if (orgIds === null || orgIds.length === 0) return res.status(403).json({ message: "Innovation not found or you do not have access", status: false });
+                    commentQb.innerJoin('creator.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
+                }
+            }
+            let innovation = await commentQb.getOne();
             if (!innovation) {
-                return res.status(404).json({
-                    message: "Innovation not found",
+                return res.status(403).json({
+                    message: "Innovation not found or you do not have access",
                     status: false
                 });
             }
 
-            innovation.comment = [...innovation.comment, { type, description, date }];
+            innovation.comment = [...(innovation.comment as any[]), { type, description, date }];
 
             innovation = await innovationRepository.save(innovation);
 

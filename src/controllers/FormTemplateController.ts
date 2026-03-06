@@ -80,8 +80,8 @@ class FormTemplateController {
             const form = await qb.getOne();
 
             if (!form) {
-                return res.status(404).json({
-                    message: 'Form Template not found',
+                return res.status(403).json({
+                    message: 'Form Template not found or you do not have access',
                     status: false,
                 });
             }
@@ -118,8 +118,8 @@ class FormTemplateController {
             const form = await qb.getOne();
 
             if (!form) {
-                return res.status(404).json({
-                    message: 'Form Template not found',
+                return res.status(403).json({
+                    message: 'Form Template not found or you do not have access',
                     status: false,
                 });
             }
@@ -174,8 +174,8 @@ class FormTemplateController {
             }
             const form = await qb.getOne();
             if (!form) {
-                return res.status(404).json({
-                    message: 'Form Template not found',
+                return res.status(403).json({
+                    message: 'Form Template not found or you do not have access',
                     status: false,
                 });
             }

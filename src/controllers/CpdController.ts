@@ -9,9 +9,21 @@ import { LearnerCPD } from "../entity/LearnerCpd.entity";
 import { Learner } from "../entity/Learner.entity";
 import XLSX from 'xlsx';
 import PDFDocument from 'pdfkit';
-import { getAccessibleUserIds, canAccessOrganisation } from "../util/organisationFilter";
+import { getAccessibleUserIds, getScopeContext, canAccessOrganisation } from "../util/organisationFilter";
 
 class CpdController {
+
+    /** Returns 403 response if CPD's user is not in scope; otherwise null. */
+    private async assertCpdInScope(cpd: any, req: CustomRequest, res: Response): Promise<Response | null> {
+        if (!req.user || !cpd) return null;
+        const uid = (cpd.user_id as any)?.user_id ?? (cpd as any).user_id;
+        if (uid == null) return null;
+        const accessibleUserIds = await getAccessibleUserIds(req.user, getScopeContext(req));
+        if (accessibleUserIds !== null && !accessibleUserIds.includes(Number(uid))) {
+            return res.status(403).json({ message: "You do not have access to this CPD", status: false });
+        }
+        return null;
+    }
 
     public async createCpd(req: CustomRequest, res: Response) {
         try {
@@ -99,7 +111,7 @@ class CpdController {
 
             // Enforce scope: only allow viewing CPD for users in scope (org/centre)
             if (req.user) {
-                const accessibleUserIds = await getAccessibleUserIds(req.user);
+                const accessibleUserIds = await getAccessibleUserIds(req.user, getScopeContext(req));
                 if (accessibleUserIds !== null && !accessibleUserIds.includes(Number(user_id))) {
                     return res.status(403).json({
                         message: "You do not have access to this user's CPD",
@@ -158,9 +170,8 @@ class CpdController {
             const cpd_id = req.params.id as any;
 
             const cpd = await cpdRepository.findOne({
-                where: {
-                    id: cpd_id
-                }
+                where: { id: cpd_id },
+                relations: ['user_id']
             });
 
             if (!cpd) {
@@ -168,6 +179,18 @@ class CpdController {
                     message: "CPD not found",
                     status: true,
                 });
+            }
+            if (req.user) {
+                const uid = (cpd.user_id as any)?.user_id ?? (cpd as any).user_id;
+                if (uid != null) {
+                    const accessibleUserIds = await getAccessibleUserIds(req.user, getScopeContext(req));
+                    if (accessibleUserIds !== null && !accessibleUserIds.includes(Number(uid))) {
+                        return res.status(403).json({
+                            message: "You do not have access to this CPD",
+                            status: false,
+                        });
+                    }
+                }
             }
 
             await cpdRepository.remove(cpd);
@@ -193,7 +216,7 @@ class CpdController {
 
             const { cpd_id, date, learning_objective, activity, comment, support_you, timeTake, completed, files } = req.body
 
-            const cpd = await cpdRepository.findOne({ where: { id: cpd_id } });
+            const cpd = await cpdRepository.findOne({ where: { id: cpd_id }, relations: ['user_id'] });
             if (!cpd) {
                 return res.status(404).json({
                     message: "CPD not found",
@@ -201,6 +224,8 @@ class CpdController {
                     data: cpd
                 })
             }
+            const forbidden = await this.assertCpdInScope(cpd, req, res);
+            if (forbidden) return forbidden;
 
             const newActivity = activityRepository.create({
                 date, learning_objective, activity, comment, support_you, timeTake, completed, files, cpd,
@@ -230,13 +255,15 @@ class CpdController {
             const id: number = parseInt(req.params.id);
             const { date, learning_objective, activity, comment, support_you, timeTake, completed, files } = req.body
 
-            let existingActivity = await activityRepository.findOne({ where: { id } });
+            let existingActivity = await activityRepository.findOne({ where: { id }, relations: ['cpd', 'cpd.user_id'] });
             if (!existingActivity) {
                 return res.status(404).json({
                     message: "Activity not found",
                     status: true
                 })
             }
+            const forbiddenActivity = await this.assertCpdInScope((existingActivity as any).cpd, req, res);
+            if (forbiddenActivity) return forbiddenActivity;
 
             existingActivity.date = date || existingActivity.date
             existingActivity.learning_objective = learning_objective || existingActivity.learning_objective
@@ -267,16 +294,18 @@ class CpdController {
     public async deleteActivity(req: CustomRequest, res: Response) {
         try {
             const id = parseInt(req.params.id);
-            const activityRepository = AppDataSource.getRepository(Activity)
-
-            const deleteResult = await activityRepository.delete(id);
-
-            if (deleteResult.affected === 0) {
+            const activityRepository = AppDataSource.getRepository(Activity);
+            const existing = await activityRepository.findOne({ where: { id }, relations: ['cpd', 'cpd.user_id'] });
+            if (!existing) {
                 return res.status(404).json({
                     message: 'Activity not found',
                     status: false,
                 });
             }
+            const forbiddenDel = await this.assertCpdInScope((existing as any).cpd, req, res);
+            if (forbiddenDel) return forbiddenDel;
+
+            const deleteResult = await activityRepository.delete(id);
 
             return res.status(200).json({
                 message: 'Activity deleted successfully',
@@ -298,7 +327,7 @@ class CpdController {
 
             const { cpd_id, learning_objective, completed, example_of_learning, support_you, feedback, files } = req.body
 
-            const cpd = await cpdRepository.findOne({ where: { id: cpd_id } });
+            const cpd = await cpdRepository.findOne({ where: { id: cpd_id }, relations: ['user_id'] });
             if (!cpd) {
                 return res.status(404).json({
                     message: "CPD not found",
@@ -306,6 +335,8 @@ class CpdController {
                     data: cpd
                 })
             }
+            const forbiddenEval = await this.assertCpdInScope(cpd, req, res);
+            if (forbiddenEval) return forbiddenEval;
 
             const newEvaluation = evaluationRepository.create({
                 learning_objective, completed, example_of_learning, support_you, feedback, files, cpd,
@@ -335,13 +366,15 @@ class CpdController {
             const id: number = parseInt(req.params.id);
             const { learning_objective, completed, example_of_learning, support_you, feedback, files } = req.body
 
-            let existingEvaluation = await evaluationRepository.findOne({ where: { id } });
+            let existingEvaluation = await evaluationRepository.findOne({ where: { id }, relations: ['cpd', 'cpd.user_id'] });
             if (!existingEvaluation) {
                 return res.status(404).json({
                     message: "Evaluation not found",
                     status: true
                 })
             }
+            const forbiddenUpe = await this.assertCpdInScope((existingEvaluation as any).cpd, req, res);
+            if (forbiddenUpe) return forbiddenUpe;
 
             existingEvaluation.learning_objective = learning_objective || existingEvaluation.learning_objective
             existingEvaluation.completed = completed || existingEvaluation.completed
@@ -370,16 +403,18 @@ class CpdController {
     public async deleteEvaluation(req: CustomRequest, res: Response) {
         try {
             const id = parseInt(req.params.id);
-            const evaluationRepository = AppDataSource.getRepository(Evaluation)
-
-            const deleteResult = await evaluationRepository.delete(id);
-
-            if (deleteResult.affected === 0) {
+            const evaluationRepository = AppDataSource.getRepository(Evaluation);
+            const existing = await evaluationRepository.findOne({ where: { id }, relations: ['cpd', 'cpd.user_id'] });
+            if (!existing) {
                 return res.status(404).json({
                     message: 'Evaluation not found',
                     status: false,
                 });
             }
+            const forbiddenDe = await this.assertCpdInScope((existing as any).cpd, req, res);
+            if (forbiddenDe) return forbiddenDe;
+
+            const deleteResult = await evaluationRepository.delete(id);
 
             return res.status(200).json({
                 message: 'Evaluation deleted successfully',
@@ -401,7 +436,7 @@ class CpdController {
 
             const { cpd_id, learning_objective, what_went_well, differently_next_time, feedback, files } = req.body
 
-            const cpd = await cpdRepository.findOne({ where: { id: cpd_id } });
+            const cpd = await cpdRepository.findOne({ where: { id: cpd_id }, relations: ['user_id'] });
             if (!cpd) {
                 return res.status(404).json({
                     message: "CPD not found",
@@ -409,6 +444,8 @@ class CpdController {
                     data: cpd
                 })
             }
+            const forbiddenRef = await this.assertCpdInScope(cpd, req, res);
+            if (forbiddenRef) return forbiddenRef;
 
             const newReflection = reflectionRepository.create({
                 learning_objective, what_went_well, differently_next_time, feedback, files, cpd,
@@ -438,13 +475,15 @@ class CpdController {
             const id: number = parseInt(req.params.id);
             const { learning_objective, what_went_well, differently_next_time, feedback, files } = req.body
 
-            let existingReflection = await reflectionRepository.findOne({ where: { id } });
+            let existingReflection = await reflectionRepository.findOne({ where: { id }, relations: ['cpd', 'cpd.user_id'] });
             if (!existingReflection) {
                 return res.status(404).json({
                     message: "Reflection not found",
                     status: true
                 })
             }
+            const forbiddenUpr = await this.assertCpdInScope((existingReflection as any).cpd, req, res);
+            if (forbiddenUpr) return forbiddenUpr;
 
             existingReflection.learning_objective = learning_objective || existingReflection.learning_objective
             existingReflection.what_went_well = what_went_well || existingReflection.what_went_well
@@ -472,7 +511,16 @@ class CpdController {
     public async deleteReflection(req: CustomRequest, res: Response) {
         try {
             const id = parseInt(req.params.id);
-            const reflectionRepository = AppDataSource.getRepository(Reflection)
+            const reflectionRepository = AppDataSource.getRepository(Reflection);
+            const existing = await reflectionRepository.findOne({ where: { id }, relations: ['cpd', 'cpd.user_id'] });
+            if (!existing) {
+                return res.status(404).json({
+                    message: 'Reflection not found',
+                    status: false,
+                });
+            }
+            const forbiddenDr = await this.assertCpdInScope((existing as any).cpd, req, res);
+            if (forbiddenDr) return forbiddenDr;
 
             const deleteResult = await reflectionRepository.delete(id);
 

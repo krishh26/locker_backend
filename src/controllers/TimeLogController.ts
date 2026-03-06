@@ -5,7 +5,6 @@ import { TimeLog } from '../entity/TimeLog.entity';
 import { Learner } from '../entity/Learner.entity';
 import { getOTJSummary } from '../util/services/otj.service';
 import { applyLearnerScope, getScopeContext } from '../util/organisationFilter';
-import { getAccessibleOrganisationIds } from '../util/organisationFilter';
 
 class TimeLogController {
     public async createTimeLog(req: CustomRequest, res: Response): Promise<Response> {
@@ -34,10 +33,19 @@ class TimeLogController {
             const timeLogRepository = AppDataSource.getRepository(TimeLog);
             const id = parseInt(req.params.id);
 
-            let timeLog = await timeLogRepository.findOne({ where: { id } });
+            const qb = timeLogRepository.createQueryBuilder('timelog')
+                .leftJoinAndSelect('timelog.course_id', 'course_id')
+                .leftJoinAndSelect('timelog.trainer_id', 'trainer_id')
+                .leftJoin('timelog.user_id', 'user_id')
+                .leftJoin(Learner, 'learner', 'learner.user_id = user_id.user_id')
+                .where('timelog.id = :id', { id });
+            if (req.user) {
+                await applyLearnerScope(qb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+            }
+            let timeLog = await qb.getOne();
             if (!timeLog) {
-                return res.status(404).json({
-                    message: "Time Log not found",
+                return res.status(403).json({
+                    message: "Time log not found or you do not have access",
                     status: false
                 });
             }
@@ -64,11 +72,25 @@ class TimeLogController {
             const id = parseInt(req.params.id);
             const timeLogRepository = AppDataSource.getRepository(TimeLog);
 
-            const deleteResult = await timeLogRepository.delete(id);
+            const qb = timeLogRepository.createQueryBuilder('timelog')
+                .leftJoin('timelog.user_id', 'user_id')
+                .leftJoin(Learner, 'learner', 'learner.user_id = user_id.user_id')
+                .where('timelog.id = :id', { id });
+            if (req.user) {
+                await applyLearnerScope(qb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+            }
+            const timeLog = await qb.getOne();
+            if (!timeLog) {
+                return res.status(403).json({
+                    message: 'Time log not found or you do not have access',
+                    status: false,
+                });
+            }
 
+            const deleteResult = await timeLogRepository.delete(id);
             if (deleteResult.affected === 0) {
-                return res.status(404).json({
-                    message: 'Time Log not found',
+                return res.status(500).json({
+                    message: 'Delete failed',
                     status: false,
                 });
             }
@@ -91,11 +113,20 @@ class TimeLogController {
             const timeLogRepository = AppDataSource.getRepository(TimeLog);
             const id = parseInt(req.params.id);
 
-            const timeLog = await timeLogRepository.findOne({ where: { id }, relations: ['course_id', "trainer_id"] })
+            const qb = timeLogRepository.createQueryBuilder('timelog')
+                .leftJoinAndSelect('timelog.course_id', 'course_id')
+                .leftJoinAndSelect('timelog.trainer_id', 'trainer_id')
+                .leftJoin('timelog.user_id', 'user_id')
+                .leftJoin(Learner, 'learner', 'learner.user_id = user_id.user_id')
+                .where('timelog.id = :id', { id });
+            if (req.user) {
+                await applyLearnerScope(qb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+            }
+            const timeLog = await qb.getOne();
 
             if (!timeLog) {
-                return res.status(404).json({
-                    message: "Time Log not found",
+                return res.status(403).json({
+                    message: "Time log not found or you do not have access",
                     status: false
                 });
             }
@@ -248,23 +279,9 @@ class TimeLogController {
                 qb.andWhere('timelog.type = :type', { type })
             }
 
-            // Add organization filtering through user_id (User → UserOrganisation)
             if (req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user, getScopeContext(req));
-                if (accessibleIds !== null && accessibleIds.length > 0) {
-                    qb.leftJoin('user_id.userOrganisations', 'userOrganisation')
-                      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
-                } else if (accessibleIds !== null && accessibleIds.length === 0) {
-                    return res.status(200).json({
-                        message: "Time logs fetched successfully",
-                        status: true,
-                        data: {
-                            thisWeek: '00:00',
-                            thisMonth: '00:00',
-                            total: '00:00'
-                        },
-                    });
-                }
+                qb.leftJoin(Learner, 'learner', 'learner.user_id = user_id.user_id');
+                await applyLearnerScope(qb, req.user, 'learner', { scopeContext: getScopeContext(req) });
             }
 
             const [timeLogs, count] = await qb
@@ -322,6 +339,15 @@ class TimeLogController {
             const learnerId = Number(req.params.learnerId);
             if (!learnerId || isNaN(learnerId)) {
                 return res.status(400).json({ status: false, message: 'Invalid learnerId' });
+            }
+
+            if (req.user) {
+                const learnerRepo = AppDataSource.getRepository(Learner);
+                const qb = learnerRepo.createQueryBuilder('learner').where('learner.learner_id = :learnerId', { learnerId });
+                await applyLearnerScope(qb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+                if ((await qb.getCount()) === 0) {
+                    return res.status(403).json({ status: false, message: 'You do not have access to this learner' });
+                }
             }
 
             const courseId = req.query.courseId ? Number(req.query.courseId) : undefined;

@@ -3,7 +3,7 @@ import { AppDataSource } from '../data-source';
 import { CustomRequest } from '../util/Interface/expressInterface';
 import { IQAQuestion, IQAQuestionType } from '../entity/IQAQuestion.entity';
 import { User } from '../entity/User.entity';
-import { getAccessibleOrganisationIds, getAccessibleCentreIds, resolveUserRole, getScopeContext } from '../util/organisationFilter';
+import { getAccessibleOrganisationIds, getAccessibleCentreIds, getAccessibleUserIds, resolveUserRole, getScopeContext } from '../util/organisationFilter';
 import { UserRole } from '../util/constants';
 
 export class IQAQuestionController {
@@ -60,11 +60,27 @@ export class IQAQuestionController {
             const { question, questionType, isActive } = req.body as any;
 
             const repo = AppDataSource.getRepository(IQAQuestion);
-            const existing = await repo.findOne({ where: { id } });
+            const qb = repo.createQueryBuilder('q')
+                .leftJoin(User, 'u', 'u.user_id = CAST(q.createdBy AS INT)')
+                .where('q.id = :id', { id });
+            if (req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                const scopeContext = getScopeContext(req);
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user, scopeContext);
+                    if (centreIds === null || centreIds.length === 0) return res.status(403).json({ message: 'IQA Question not found or you do not have access', status: false });
+                    qb.innerJoin('u.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                } else {
+                    const orgIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+                    if (orgIds === null || orgIds.length === 0) return res.status(403).json({ message: 'IQA Question not found or you do not have access', status: false });
+                    qb.innerJoin('u.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
+                }
+            }
+            const existing = await qb.getOne();
 
             if (!existing) {
-                return res.status(404).json({
-                    message: 'IQA Question not found',
+                return res.status(403).json({
+                    message: 'IQA Question not found or you do not have access',
                     status: false
                 });
             }
@@ -213,8 +229,8 @@ export class IQAQuestionController {
             const question = await qb.getOne();
 
             if (!question) {
-                return res.status(404).json({
-                    message: 'IQA Question not found',
+                return res.status(403).json({
+                    message: 'IQA Question not found or you do not have access',
                     status: false
                 });
             }
@@ -240,10 +256,26 @@ export class IQAQuestionController {
             const id = parseInt(req.params.id);
             const repo = AppDataSource.getRepository(IQAQuestion);
 
-            const question = await repo.findOne({ where: { id } });
+            const qb = repo.createQueryBuilder('q')
+                .leftJoin(User, 'u', 'u.user_id = CAST(q.createdBy AS INT)')
+                .where('q.id = :id', { id });
+            if (req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                const scopeContext = getScopeContext(req);
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user, scopeContext);
+                    if (centreIds === null || centreIds.length === 0) return res.status(403).json({ message: 'IQA Question not found or you do not have access', status: false });
+                    qb.innerJoin('u.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                } else {
+                    const orgIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+                    if (orgIds === null || orgIds.length === 0) return res.status(403).json({ message: 'IQA Question not found or you do not have access', status: false });
+                    qb.innerJoin('u.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
+                }
+            }
+            const question = await qb.getOne();
             if (!question) {
-                return res.status(404).json({
-                    message: 'IQA Question not found',
+                return res.status(403).json({
+                    message: 'IQA Question not found or you do not have access',
                     status: false
                 });
             }
@@ -277,11 +309,33 @@ export class IQAQuestionController {
             const id = parseInt(req.params.id);
             const repo = AppDataSource.getRepository(IQAQuestion);
 
+            const qb = repo.createQueryBuilder('q')
+                .leftJoin(User, 'u', 'u.user_id = CAST(q.createdBy AS INT)')
+                .where('q.id = :id', { id });
+            if (req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                const scopeContext = getScopeContext(req);
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user, scopeContext);
+                    if (centreIds === null || centreIds.length === 0) return res.status(403).json({ message: 'IQA Question not found or you do not have access', status: false });
+                    qb.innerJoin('u.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                } else {
+                    const orgIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+                    if (orgIds === null || orgIds.length === 0) return res.status(403).json({ message: 'IQA Question not found or you do not have access', status: false });
+                    qb.innerJoin('u.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
+                }
+            }
+            const question = await qb.getOne();
+            if (!question) {
+                return res.status(403).json({
+                    message: 'IQA Question not found or you do not have access',
+                    status: false
+                });
+            }
             const result = await repo.delete(id);
-
             if (result.affected === 0) {
-                return res.status(404).json({
-                    message: 'IQA Question not found',
+                return res.status(403).json({
+                    message: 'IQA Question not found or you do not have access',
                     status: false
                 });
             }
@@ -319,6 +373,20 @@ export class IQAQuestionController {
                 .leftJoin(User, 'u', 'u.user_id = CAST(q.createdBy AS INT)')
                 .addSelect(['u.first_name', 'u.last_name'])
                 .where('q.questionType = :type', { type });
+
+            if (req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                const scopeContext = getScopeContext(req);
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user, scopeContext);
+                    if (centreIds === null || centreIds.length === 0) return res.status(200).json({ message: `IQA Questions of type '${type}' retrieved successfully`, status: true, data: [] });
+                    qb.innerJoin('u.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                } else {
+                    const orgIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+                    if (orgIds === null || orgIds.length === 0) return res.status(200).json({ message: `IQA Questions of type '${type}' retrieved successfully`, status: true, data: [] });
+                    qb.innerJoin('u.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
+                }
+            }
 
             // Filter by active status if provided
             if (isActive !== undefined) {
@@ -367,15 +435,26 @@ export class IQAQuestionController {
 
             const repo = AppDataSource.getRepository(IQAQuestion);
             const userId = String(req.user.user_id);
+            const scopeContext = getScopeContext(req);
+            const accessibleUserIds = await getAccessibleUserIds(req.user, scopeContext);
+            const scopeUserIdsStr = accessibleUserIds === null ? null : accessibleUserIds.map(String);
 
             // Start a transaction
             await AppDataSource.transaction(async (transactionalEntityManager) => {
-                // First, deactivate all existing questions of this type
-                await transactionalEntityManager.update(
-                    IQAQuestion,
-                    { questionType, isActive: true },
-                    { isActive: false, updatedBy: userId }
-                );
+                // Deactivate only in-scope existing questions of this type
+                if (scopeUserIdsStr !== null && scopeUserIdsStr.length === 0) {
+                    // No access - skip deactivate
+                } else {
+                    const qb = transactionalEntityManager.createQueryBuilder()
+                        .update(IQAQuestion)
+                        .set({ isActive: false, updatedBy: userId })
+                        .where('questionType = :questionType', { questionType })
+                        .andWhere('isActive = :isActive', { isActive: true });
+                    if (scopeUserIdsStr !== null) {
+                        qb.andWhere('createdBy IN (:...uids)', { uids: scopeUserIdsStr });
+                    }
+                    await qb.execute();
+                }
 
                 // Then create/update questions
                 for (let i = 0; i < questions.length; i++) {
@@ -386,12 +465,13 @@ export class IQAQuestionController {
                     }
 
                     if (questionData.id) {
-                        // Update existing question
                         const existingQuestion = await transactionalEntityManager.findOne(IQAQuestion, {
                             where: { id: questionData.id }
                         });
-
                         if (existingQuestion) {
+                            if (scopeUserIdsStr !== null && !scopeUserIdsStr.includes(existingQuestion.createdBy)) {
+                                continue; // Out of scope, skip
+                            }
                             transactionalEntityManager.merge(IQAQuestion, existingQuestion, {
                                 question: questionData.question.trim(),
                                 isActive: true,
@@ -400,7 +480,6 @@ export class IQAQuestionController {
                             await transactionalEntityManager.save(existingQuestion);
                         }
                     } else {
-                        // Create new question
                         const newQuestion = transactionalEntityManager.create(IQAQuestion, {
                             question: questionData.question.trim(),
                             questionType,
@@ -413,11 +492,32 @@ export class IQAQuestionController {
                 }
             });
 
-            // Return updated questions for the type
-            const updatedQuestions = await repo.find({
-                where: { questionType, isActive: true },
-                order: { createdAt: 'ASC' }
-            });
+            // Return updated questions for the type (scoped)
+            const returnQb = repo.createQueryBuilder('q')
+                .leftJoin(User, 'u', 'u.user_id = CAST(q.createdBy AS INT)')
+                .where('q.questionType = :questionType', { questionType })
+                .andWhere('q.isActive = :isActive', { isActive: true })
+                .orderBy('q.createdAt', 'ASC');
+            if (req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                const scopeContext2 = getScopeContext(req);
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user, scopeContext2);
+                    if (centreIds !== null && centreIds.length > 0) {
+                        returnQb.innerJoin('u.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                    } else if (centreIds !== null) {
+                        return res.status(200).json({ message: `Bulk save completed for ${questionType} questions`, status: true, data: [] });
+                    }
+                } else {
+                    const orgIds = await getAccessibleOrganisationIds(req.user, scopeContext2);
+                    if (orgIds !== null && orgIds.length > 0) {
+                        returnQb.innerJoin('u.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
+                    } else if (orgIds !== null) {
+                        return res.status(200).json({ message: `Bulk save completed for ${questionType} questions`, status: true, data: [] });
+                    }
+                }
+            }
+            const updatedQuestions = await returnQb.getMany();
 
             return res.status(200).json({
                 message: `Bulk save completed for ${questionType} questions`,
@@ -447,12 +547,25 @@ export class IQAQuestionController {
             }
 
             const repo = AppDataSource.getRepository(IQAQuestion);
-
-            // Get all active questions of this type, ordered by creation date
-            const questions = await repo.find({
-                where: { questionType: type as IQAQuestionType, isActive: true },
-                order: { createdAt: 'ASC' }
-            });
+            const qb = repo.createQueryBuilder('q')
+                .leftJoin(User, 'u', 'u.user_id = CAST(q.createdBy AS INT)')
+                .where('q.questionType = :type', { type: type as IQAQuestionType })
+                .andWhere('q.isActive = :isActive', { isActive: true })
+                .orderBy('q.createdAt', 'ASC');
+            if (req.user && resolveUserRole(req.user) !== UserRole.MasterAdmin) {
+                const scopeContext = getScopeContext(req);
+                const role = resolveUserRole(req.user);
+                if (role === UserRole.CentreAdmin) {
+                    const centreIds = await getAccessibleCentreIds(req.user, scopeContext);
+                    if (centreIds === null || centreIds.length === 0) return res.status(200).json({ message: `Questions for bulk edit - ${type}`, status: true, data: { questionType: type, questions: [], totalQuestions: 0, maxQuestions: 30 } });
+                    qb.innerJoin('u.userCentres', 'uc').andWhere('uc.centre_id IN (:...centreIds)', { centreIds });
+                } else {
+                    const orgIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+                    if (orgIds === null || orgIds.length === 0) return res.status(200).json({ message: `Questions for bulk edit - ${type}`, status: true, data: { questionType: type, questions: [], totalQuestions: 0, maxQuestions: 30 } });
+                    qb.innerJoin('u.userOrganisations', 'uo').andWhere('uo.organisation_id IN (:...orgIds)', { orgIds });
+                }
+            }
+            const questions = await qb.getMany();
 
             // Format questions with sequential numbering
             const formattedQuestions = questions.map((question, index) => ({

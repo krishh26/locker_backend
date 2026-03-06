@@ -20,6 +20,9 @@ export class SessionType {
   @Column({ name: "organisation_id", type: "int", nullable: true })
   organisation_id: number | null;
 
+  @Column({ name: "centre_id", type: "int", nullable: true })
+  centre_id: number | null;
+
   @CreateDateColumn({ type: "timestamp" })
   created_at: Date;
 

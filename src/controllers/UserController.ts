@@ -15,7 +15,7 @@ import { Raw, In } from 'typeorm';
 import { AssignmentSignature } from "../entity/AssignmentSignature.entity";
 import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
 import { UserEmployer } from '../entity/UserEmployers.entity';
-import { addUserScopeFilter, getAccessibleOrganisationIds, getAccessibleCentreIds, resolveUserRole, getScopeContext } from "../util/organisationFilter";
+import { addUserScopeFilter, getAccessibleOrganisationIds, getAccessibleCentreIds, resolveUserRole, getScopeContext, validateCentreOrganisation, canAccessOrganisation, canAccessCentre } from "../util/organisationFilter";
 
 class UserController {
 
@@ -89,6 +89,44 @@ class UserController {
                 await userEmployerRepo.save(mappings);
             }
 
+            // Trainer must have exactly one organisation and one centre (centre selection mandatory)
+            const isTrainer = Array.isArray(roles) && roles.includes(UserRole.Trainer);
+            if (isTrainer) {
+                if (!Array.isArray(req.body.organisation_ids) || req.body.organisation_ids.length !== 1) {
+                    return res.status(400).json({
+                        message: "Trainer must have exactly one organisation assigned.",
+                        status: false
+                    });
+                }
+                if (!Array.isArray(req.body.centre_ids) || req.body.centre_ids.length !== 1) {
+                    return res.status(400).json({
+                        message: "Trainer must have exactly one centre assigned. Centre selection is mandatory.",
+                        status: false
+                    });
+                }
+                const orgId = req.body.organisation_ids[0];
+                const centreId = req.body.centre_ids[0];
+                if (req.user && !(await canAccessOrganisation(req.user, orgId, getScopeContext(req)))) {
+                    return res.status(403).json({
+                        message: "You do not have access to assign this organisation.",
+                        status: false
+                    });
+                }
+                if (req.user && !(await canAccessCentre(req.user, centreId, getScopeContext(req)))) {
+                    return res.status(403).json({
+                        message: "You do not have access to assign this centre.",
+                        status: false
+                    });
+                }
+                const centreBelongsToOrg = await validateCentreOrganisation(centreId, orgId);
+                if (!centreBelongsToOrg) {
+                    return res.status(400).json({
+                        message: "Centre does not belong to the specified organisation.",
+                        status: false
+                    });
+                }
+            }
+
             // Handle organisation_ids assignment (one organisation per user)
             if (Array.isArray(req.body.organisation_ids) && req.body.organisation_ids.length) {
                 if (req.body.organisation_ids.length > 1) {
@@ -122,6 +160,18 @@ class UserController {
                 );
 
                 await userOrganisationRepo.save(organisationMappings);
+            }
+
+            // Handle centre_ids for Trainer (exactly one centre)
+            if (Array.isArray(req.body.centre_ids) && req.body.centre_ids.length === 1) {
+                const { UserCentre } = await import("../entity/UserCentre.entity");
+                const userCentreRepo = AppDataSource.getRepository(UserCentre);
+                const centreId = req.body.centre_ids[0];
+                const userCentre = userCentreRepo.create({
+                    user_id: users.user_id,
+                    centre_id: centreId
+                });
+                await userCentreRepo.save(userCentre);
             }
 
             res.status(200).json({
@@ -178,6 +228,39 @@ class UserController {
                 name: uo.organisation.name
             })) || [];
 
+            // Load centres for each assigned organisation so FE can see organisation → centres tree
+            const orgIds = assignedOrganisations.map(o => o.id);
+            let centresByOrg: Record<number, { id: number; name: string; status: string }[]> = {};
+
+            if (orgIds.length) {
+                const { Centre } = await import("../entity/Centre.entity");
+                const centreRepo = AppDataSource.getRepository(Centre);
+                const centres = await centreRepo.find({
+                    where: { organisation_id: In(orgIds) },
+                    select: ["id", "name", "status", "organisation_id"],
+                });
+
+                const activeCentres = centres.filter(
+                    (c) => (c as any).status === "active"
+                );
+
+                centresByOrg = activeCentres.reduce((acc, centre) => {
+                    const orgId = (centre as any).organisation_id as number;
+                    if (!acc[orgId]) acc[orgId] = [];
+                    acc[orgId].push({
+                        id: centre.id,
+                        name: centre.name,
+                        status: centre.status as string,
+                    });
+                    return acc;
+                }, {} as Record<number, { id: number; name: string; status: string }[]>);
+            }
+
+            const enrichedAssignedOrganisations = assignedOrganisations.map(org => ({
+                ...org,
+                centres: centresByOrg[org.id] ?? [],
+            }));
+
             const assignedCentres = user.userCentres?.map(uc => ({
                 id: uc.centre.id,
                 name: uc.centre.name
@@ -190,7 +273,7 @@ class UserController {
                 data: {
                     ...user,
                     assigned_employers: assignedEmployers,
-                    assigned_organisations: assignedOrganisations,
+                    assigned_organisations: enrichedAssignedOrganisations,
                     assigned_centers: assignedCentres
                 }
             })
@@ -311,6 +394,44 @@ class UserController {
 
                     await userOrganisationRepo.save(organisationMappings);
                 }
+            }
+
+            // Trainer must have exactly one centre (centre selection mandatory)
+            const isTrainer = Array.isArray(roles) && roles.includes(UserRole.Trainer);
+            if (isTrainer) {
+                if (!Array.isArray(req.body.centre_ids) || req.body.centre_ids.length !== 1) {
+                    return res.status(400).json({
+                        message: "Trainer must have exactly one centre assigned. Centre selection is mandatory.",
+                        status: false
+                    });
+                }
+                const centreId = req.body.centre_ids[0];
+                let orgId: number | undefined = Array.isArray(req.body.organisation_ids) && req.body.organisation_ids.length === 1 ? req.body.organisation_ids[0] : undefined;
+                if (orgId == null) {
+                    const { UserOrganisation } = await import("../entity/UserOrganisation.entity");
+                    const uoRepo = AppDataSource.getRepository(UserOrganisation);
+                    const uo = await uoRepo.findOne({ where: { user_id: userId }, select: ['organisation_id'] });
+                    orgId = uo?.organisation_id;
+                }
+                if (orgId != null) {
+                    if (req.user && !(await canAccessCentre(req.user, centreId, getScopeContext(req)))) {
+                        return res.status(403).json({
+                            message: "You do not have access to assign this centre.",
+                            status: false
+                        });
+                    }
+                    const centreBelongsToOrg = await validateCentreOrganisation(centreId, orgId);
+                    if (!centreBelongsToOrg) {
+                        return res.status(400).json({
+                            message: "Centre does not belong to the specified organisation.",
+                            status: false
+                        });
+                    }
+                }
+                const { UserCentre } = await import("../entity/UserCentre.entity");
+                const userCentreRepo = AppDataSource.getRepository(UserCentre);
+                await userCentreRepo.delete({ user_id: userId });
+                await userCentreRepo.save(userCentreRepo.create({ user_id: userId, centre_id: centreId }));
             }
 
             const updatedUser = await userRepository.save(user)
@@ -595,7 +716,7 @@ class UserController {
                 .leftJoinAndSelect('user.userEmployers', 'userEmployers')
                 .leftJoinAndSelect('userEmployers.employer', 'employer');
 
-            // Apply scope: organisation for OrgAdmin/AccountManager, centre for CentreAdmin (from UserCentre)
+            // Apply scope: organisation for OrgAdmin/AccountManager, centre for CentreAdmin and organisationadmin (from UserOrganisation)
             if (req.user) {
                 await addUserScopeFilter(qb, req.user, 'user', getScopeContext(req));
             }
@@ -1131,6 +1252,9 @@ class UserController {
             const learnerRepository = AppDataSource.getRepository(Learner);
             const employerRepository = AppDataSource.getRepository(Employer);
 
+            const scopeContext = getScopeContext(req);
+            const accessibleOrgIds = req.user ? await getAccessibleOrganisationIds(req.user, scopeContext) : null;
+
             // Pagination setup
             const pageNumber = parseInt(page as string) || 1;
             const pageSize = parseInt(limit as string) || 10;
@@ -1154,6 +1278,11 @@ class UserController {
                 );
             }
 
+            // Restrict line managers to current user's organisation(s)
+            if (req.user) {
+                await addUserScopeFilter(queryBuilder, req.user, 'line_manager', getScopeContext(req));
+            }
+
             // Get total count for pagination
             const totalLineManagers = await queryBuilder.getCount();
 
@@ -1172,17 +1301,32 @@ class UserController {
 
             // Get linked users and learners for each line manager
             const caseloadData = await Promise.all(lineManagers.map(async (lineManager) => {
-                // Get users managed by this line manager (only employers and trainers)
-                const managedUsers = await userRepository.find({
-                    where: { 
-                        line_manager: { user_id: lineManager.user_id },
-                        deleted_at: null 
-                    },
-                    select: [
-                        'user_id', 'user_name', 'first_name', 'last_name', 
-                        'email', 'mobile', 'roles', 'status', 'created_at'
-                    ]
-                });
+                // Get users managed by this line manager (only employers and trainers), scoped by org when applicable
+                let managedUsers: User[];
+                if (accessibleOrgIds !== null && accessibleOrgIds.length > 0) {
+                    managedUsers = await userRepository
+                        .createQueryBuilder('u')
+                        .leftJoin('u.userOrganisations', 'uo')
+                        .where('u.line_manager_id = :lmId', { lmId: lineManager.user_id })
+                        .andWhere('u.deleted_at IS NULL')
+                        .andWhere('uo.organisation_id IN (:...orgIds)', { orgIds: accessibleOrgIds })
+                        .select([
+                            'u.user_id', 'u.user_name', 'u.first_name', 'u.last_name',
+                            'u.email', 'u.mobile', 'u.roles', 'u.status', 'u.created_at'
+                        ])
+                        .getMany();
+                } else {
+                    managedUsers = await userRepository.find({
+                        where: {
+                            line_manager: { user_id: lineManager.user_id },
+                            deleted_at: null
+                        },
+                        select: [
+                            'user_id', 'user_name', 'first_name', 'last_name',
+                            'email', 'mobile', 'roles', 'status', 'created_at'
+                        ]
+                    });
+                }
 
                 // Filter to only include employers and trainers
                 const employersAndTrainers = managedUsers.filter(user => 
@@ -1209,13 +1353,17 @@ class UserController {
                         const employerIds = employers.map(emp => emp.employer_id);
 
                         if (employerIds.length > 0) {
-                            // Get all learners under these employers
+                            // Get all learners under these employers (optionally scoped by org)
                             let learnerQueryBuilder = learnerRepository.createQueryBuilder('learner')
                                 .leftJoinAndSelect('learner.user_id', 'user')
                                 .leftJoinAndSelect('learner.employer_id', 'employer')
                                 .leftJoinAndSelect('learner.funding_band', 'funding_band')
                                 .where('learner.employer_id IN (:...employerIds)', { employerIds })
                                 .andWhere('learner.deleted_at IS NULL');
+
+                            if (accessibleOrgIds !== null && accessibleOrgIds.length > 0) {
+                                learnerQueryBuilder.andWhere('employer.organisation_id IN (:...orgIds)', { orgIds: accessibleOrgIds });
+                            }
 
                             managedLearners = await learnerQueryBuilder
                                 .select([

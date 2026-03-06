@@ -77,7 +77,6 @@ export function getRequiredOrganisationId(user: any, scopeContext: ScopeContext)
  */
 export async function getAccessibleOrganisationIds(user: any, scopeContext?: ScopeContext): Promise<number[] | null> {
     const role = resolveUserRole(user);
-    console.log(role)
     if (role === UserRole.MasterAdmin) {
         if (scopeContext?.organisationId != null) {
             const orgRepo = AppDataSource.getRepository(Organisation);
@@ -98,6 +97,21 @@ export async function getAccessibleOrganisationIds(user: any, scopeContext?: Sco
             .getRawMany<{ organisation_id: number }>();
         const ids = rows.map(r => r.organisation_id).filter((id): id is number => id != null);
         return [...new Set(ids)];
+    }
+
+    // IQA / LIQA / EQA: accessible orgs = orgs of learners assigned to them via user_course
+    if (role === UserRole.IQA || role === UserRole.LIQA || role === UserRole.EQA) {
+        const ucRepo = AppDataSource.getRepository(UserCourse);
+        const column = role === UserRole.IQA ? 'IQA_id' : role === UserRole.LIQA ? 'LIQA_id' : 'EQA_id';
+        const rows = await ucRepo
+            .createQueryBuilder('uc')
+            .innerJoin('uc.learner_id', 'l')
+            .where(`uc.${column} = :userId`, { userId: user.user_id })
+            .select('DISTINCT l.organisation_id', 'organisation_id')
+            .getRawMany<{ organisation_id: number }>();
+        const ids = rows.map(r => r.organisation_id).filter((id): id is number => id != null);
+        const result = [...new Set(ids)];
+        return result;
     }
 
     if (role === UserRole.AccountManager) {
@@ -347,13 +361,9 @@ export async function addCentreFilter(
  * MasterAdmin with scopeContext: only true if organisationId matches context.
  */
 export async function canAccessOrganisation(user: any, organisationId: number, scopeContext?: ScopeContext): Promise<boolean> {
-    console.log(organisationId)
     const ids = await getAccessibleOrganisationIds(user, scopeContext);
-    console.log("???",ids)
     if (ids === null) return true;
-    console.log(ids.includes(organisationId))
-    let tempid = Number(organisationId)
-    return ids.includes(tempid);
+    return ids.includes(Number(organisationId));
 }
 
 /**
@@ -531,6 +541,34 @@ export async function applyScope(
     if (role === UserRole.Trainer && options?.trainerIdColumn) {
         qb.andWhere(`${options.trainerIdColumn} = :trainerUserId`, { trainerUserId: user.user_id });
     }
+}
+
+export type EmployerScopeOptions = {
+    scopeContext?: ScopeContext;
+    /** Alias for the employer entity in the query (default 'employer'). */
+    entityAlias?: string;
+};
+
+/**
+ * Apply scope to Employer list/get. Strict organisation + centre isolation.
+ * Order: 1) Organisation filter, 2) Centre filter (CentreAdmin/Trainer see only their centre(s)).
+ * - MasterAdmin: global or org mode via scopeContext.
+ * - OrganisationAdmin: filter by organisation_id only (all centres in org).
+ * - CentreAdmin: filter by organisation_id AND centre_id (assigned centres only).
+ * - Trainer: filter by organisation_id AND centre_id (centres from their learners).
+ */
+export async function applyEmployerScope(
+    qb: SelectQueryBuilder<any>,
+    user: any,
+    entityAlias: string = 'employer',
+    options?: EmployerScopeOptions
+): Promise<void> {
+    await applyScope(qb, user, entityAlias, {
+        organisationColumn: `${entityAlias}.organisation_id`,
+        centreColumn: `${entityAlias}.centre_id`,
+        organisationOnly: false,
+        scopeContext: options?.scopeContext,
+    });
 }
 
 /**

@@ -8,7 +8,8 @@ import { UserForm } from "../entity/UserForm.entity";
 import { LearnerPlan } from "../entity/LearnerPlan.entity";
 import { SendEmailTemplet } from "../util/nodemailer";
 import { uploadToS3, uploadMultipleFilesToS3 } from "../util/aws";
-import { getAccessibleOrganisationIds, getAccessibleCentreAdminUserIds, getScopeContext } from "../util/organisationFilter";
+import { getAccessibleOrganisationIds, getAccessibleUserIds, getAccessibleCentreAdminUserIds, getScopeContext, applyLearnerScope } from "../util/organisationFilter";
+import { Learner } from "../entity/Learner.entity";
 
 class FormController {
 
@@ -48,8 +49,15 @@ class FormController {
                     status: false,
                 });
             }
-            
-            const form = formRepository.create(data)
+
+            const form = formRepository.create(data);
+
+            // Link form to creator so getForms (org filter via form.users → userOrganisations) includes this form
+            if (req.user?.user_id) {
+                const userRepository = AppDataSource.getRepository(User);
+                const creator = await userRepository.findOne({ where: { user_id: req.user.user_id } });
+                if (creator) form.users = [creator];
+            }
 
             const savedForm = await formRepository.save(form);
             res.status(200).json({
@@ -84,12 +92,27 @@ class FormController {
             } = req.body;
 
             const formRepository = AppDataSource.getRepository(Form);
-
-            const form = await formRepository.findOne({ where: { id } });
+            const qb = formRepository.createQueryBuilder('form')
+                .where('form.id = :id', { id });
+            if (req.user) {
+                const accessibleIds = await getAccessibleOrganisationIds(req.user, getScopeContext(req));
+                if (accessibleIds !== null) {
+                    if (accessibleIds.length === 0) {
+                        return res.status(403).json({
+                            message: 'Form not found or you do not have access',
+                            status: false,
+                        });
+                    }
+                    qb.innerJoin('form.users', 'formUser')
+                        .innerJoin('formUser.userOrganisations', 'uo')
+                        .andWhere('uo.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+                }
+            }
+            const form = await qb.getOne();
 
             if (!form) {
-                return res.status(404).json({
-                    message: 'Form not found',
+                return res.status(403).json({
+                    message: 'Form not found or you do not have access',
                     status: false,
                 });
             }
@@ -126,15 +149,28 @@ class FormController {
             const id = parseInt(req.params.id);
 
             const formRepository = AppDataSource.getRepository(Form);
+            const qb = formRepository.createQueryBuilder('form')
+                .where('form.id = :id', { id });
 
-            const form = await formRepository.createQueryBuilder('form')
-                .where('form.id = :id', { id })
-                .getOne();
-
+            // if (req.user) {
+            //     const accessibleIds = await getAccessibleOrganisationIds(req.user, getScopeContext(req));
+            //     if (accessibleIds !== null) {
+            //         if (accessibleIds.length === 0) {
+            //             return res.status(403).json({
+            //                 message: 'Form not found or you do not have access',
+            //                 status: false,
+            //             });
+            //         }
+            //         qb.innerJoin('form.users', 'formUser')
+            //             .innerJoin('formUser.userOrganisations', 'uo')
+            //             .andWhere('uo.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+            //     }
+            // }
+            const form = await qb.getOne();
 
             if (!form) {
-                return res.status(404).json({
-                    message: 'Form not found',
+                return res.status(403).json({
+                    message: 'Form not found or you do not have access',
                     status: false,
                 });
             }
@@ -163,53 +199,6 @@ class FormController {
             }
             if (req.query.user_id) {
                 qb.innerJoin('form.users', 'user', 'user.user_id = :user_id', { user_id: req.query.user_id })
-            }
-
-            // Add organization filtering through form.users (User → UserOrganisation)
-            if (req.user) {
-                const accessibleIds = await getAccessibleOrganisationIds(req.user, getScopeContext(req));
-                if (accessibleIds !== null) {
-                    if (accessibleIds.length === 0) {
-                        return res.status(200).json({
-                            message: 'Form retrieved successfully',
-                            status: true,
-                            data: [],
-                            ...(req.query.meta === "true" && {
-                                meta_data: {
-                                    page: req.pagination.page,
-                                    items: 0,
-                                    page_size: req.pagination.limit,
-                                    pages: 0
-                                }
-                            })
-                        });
-                    }
-                    // Join with users and filter by organization
-                    if (!req.query.user_id) {
-                        qb.innerJoin('form.users', 'formUser');
-                    }
-                    qb.leftJoin('formUser.userOrganisations', 'userOrganisation')
-                      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
-                }
-                const centreAdminUserIds = await getAccessibleCentreAdminUserIds(req.user);
-                if (centreAdminUserIds !== null) {
-                    if (centreAdminUserIds.length === 0) {
-                        return res.status(200).json({
-                            message: 'Form retrieved successfully',
-                            status: true,
-                            data: [],
-                            ...(req.query.meta === "true" && {
-                                meta_data: { page: req.pagination.page, items: 0, page_size: req.pagination.limit, pages: 0 }
-                            })
-                        });
-                    }
-                    if (req.query.user_id) {
-                        qb.andWhere('user.user_id IN (:...centreAdminUserIds)', { centreAdminUserIds });
-                    } else {
-                        qb.innerJoin('form.users', 'formUserCentre')
-                          .andWhere('formUserCentre.user_id IN (:...centreAdminUserIds)', { centreAdminUserIds });
-                    }
-                }
             }
 
             const [forms, count] = await qb
@@ -245,14 +234,30 @@ class FormController {
             const id = parseInt(req.params.id);
             const formRepository = AppDataSource.getRepository(Form);
 
-            const deleteResult = await formRepository.delete(id);
-
-            if (deleteResult.affected === 0) {
-                return res.status(404).json({
-                    message: 'Form not found',
+            const qb = formRepository.createQueryBuilder('form')
+                .where('form.id = :id', { id });
+            if (req.user) {
+                const accessibleIds = await getAccessibleOrganisationIds(req.user, getScopeContext(req));
+                if (accessibleIds !== null) {
+                    if (accessibleIds.length === 0) {
+                        return res.status(403).json({
+                            message: 'Form not found or you do not have access',
+                            status: false,
+                        });
+                    }
+                    qb.innerJoin('form.users', 'formUser')
+                        .innerJoin('formUser.userOrganisations', 'uo')
+                        .andWhere('uo.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+                }
+            }
+            const form = await qb.getOne();
+            if (!form) {
+                return res.status(403).json({
+                    message: 'Form not found or you do not have access',
                     status: false,
                 });
             }
+            await formRepository.remove(form);
 
             return res.status(200).json({
                 message: 'Form deleted successfully',
@@ -274,6 +279,29 @@ class FormController {
         const { user_ids, assign } = req.body;
 
         try {
+            if (req.user) {
+                const accessibleIds = await getAccessibleOrganisationIds(req.user, getScopeContext(req));
+                if (accessibleIds !== null) {
+                    if (accessibleIds.length === 0) {
+                        return res.status(403).json({
+                            message: 'Form not found or you do not have access',
+                            status: false
+                        });
+                    }
+                    const scoped = await formRepository.createQueryBuilder('form')
+                        .where('form.id = :form_id', { form_id })
+                        .innerJoin('form.users', 'formUser')
+                        .innerJoin('formUser.userOrganisations', 'uo')
+                        .andWhere('uo.organisation_id IN (:...orgIds)', { orgIds: accessibleIds })
+                        .getOne();
+                    if (!scoped) {
+                        return res.status(403).json({
+                            message: 'Form not found or you do not have access',
+                            status: false
+                        });
+                    }
+                }
+            }
             const form = await formRepository
                 .createQueryBuilder('form')
                 .leftJoinAndSelect('form.users', 'user')
@@ -293,15 +321,29 @@ class FormController {
                 .getOne();
 
             if (!form) {
-                return res.status(404).json({
-                    message: 'Form not found',
+                return res.status(403).json({
+                    message: 'Form not found or you do not have access',
                     status: false
                 });
             }
-            let usersToAdd
-            if (user_ids) {
-                usersToAdd = await userRepository.findByIds(user_ids);
+            const scopeContext = getScopeContext(req);
+            let usersToAdd: User[] = [];
 
+            if (user_ids) {
+                // Only allow adding users that are in the logged-in admin's scope (assigned to org or centre)
+                const accessibleUserIds = req.user ? await getAccessibleUserIds(req.user, scopeContext) : null;
+                const allowedIds = Array.isArray(accessibleUserIds)
+                    ? (Array.isArray(user_ids) ? user_ids : [user_ids]).map((id: any) => Number(id)).filter((id: number) => accessibleUserIds.includes(id))
+                    : (Array.isArray(user_ids) ? user_ids : [user_ids]).map((id: any) => Number(id));
+
+                if (allowedIds.length === 0) {
+                    return res.status(403).json({
+                        message: 'You can only add users or learners assigned to your organisation or centre',
+                        status: false,
+                    });
+                }
+
+                usersToAdd = await userRepository.findByIds(allowedIds);
                 if (!usersToAdd.length) {
                     return res.status(404).json({
                         message: 'Users not found',
@@ -310,11 +352,10 @@ class FormController {
                 }
 
                 const usersToAddFiltered = usersToAdd.filter(user => !form.users.some(existingUser => existingUser.user_id === user.user_id));
-
                 form.users = [...(form?.users || []), ...usersToAddFiltered];
             } else if (assign) {
 
-                const roleMap = {
+                const roleMap: Record<string, UserRole | null> = {
                     "All": null,
                     "All Learner": UserRole.Learner,
                     "All Trainer": UserRole.Trainer,
@@ -323,27 +364,61 @@ class FormController {
                     "All LIQA": UserRole.LIQA,
                     "All EQA": UserRole.EQA
                 };
-
-                if (assign in roleMap) {
-                    if (assign === "All") {
-                        usersToAdd = await userRepository
-                            .createQueryBuilder("user")
-                            .select(["user.user_id", "user.roles"])
-                            .where("NOT :role = ANY(user.roles)", { role: UserRole.Admin })
-                            .getMany();
+                if (req.user && assign in roleMap) {
+                    const accessibleUserIds = await getAccessibleUserIds(req.user, scopeContext);
+                    const role = roleMap[assign];
+                    console.log(accessibleUserIds)
+                    if (Array.isArray(accessibleUserIds)) {
+                        if (accessibleUserIds.length === 0) {
+                            usersToAdd = [];
+                        } else {
+                            const qb = userRepository
+                                .createQueryBuilder("user")
+                                .where("user.user_id IN (:...userIds)", { userIds: accessibleUserIds })
+                                .select(["user.user_id", "user.roles"]);
+                                console.log(role)
+                            if (role === null) {
+                                qb.andWhere("NOT :adminRole = ANY(user.roles)", { adminRole: UserRole.Admin });
+                            } else {
+                                console.log("role", role)
+                                qb.andWhere(":role = ANY(user.roles)", { role });
+                            }
+                            usersToAdd = await qb.getMany();
+                            console.log(usersToAdd)
+                        }
                     } else {
-                        usersToAdd = await userRepository
-                            .createQueryBuilder("user")
-                            .select(["user.user_id", "user.roles"])
-                            .where(":role = ANY(user.roles)", { role: roleMap[assign] })
-                            .getMany();
+                        const accessibleIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+                        if (accessibleIds !== null && accessibleIds.length === 0) {
+                            usersToAdd = [];
+                        } else if (accessibleIds !== null) {
+                            if (role === null) {
+                                usersToAdd = await userRepository
+                                    .createQueryBuilder("user")
+                                    .innerJoin('user.userOrganisations', 'uo')
+                                    .andWhere('uo.organisation_id IN (:...orgIds)', { orgIds: accessibleIds })
+                                    .select(["user.user_id", "user.roles"])
+                                    .where("NOT :adminRole = ANY(user.roles)", { adminRole: UserRole.Admin })
+                                    .getMany();
+                            } else {
+                                usersToAdd = await userRepository
+                                    .createQueryBuilder("user")
+                                    .innerJoin('user.userOrganisations', 'uo')
+                                    .andWhere('uo.organisation_id IN (:...orgIds)', { orgIds: accessibleIds })
+                                    .select(["user.user_id", "user.roles"])
+                                    .where(":role = ANY(user.roles)", { role })
+                                    .getMany();
+                            }
+                        }
                     }
                 }
             }
-            const usersToAddFiltered = usersToAdd.filter(user => !form.users.some(existingUser => existingUser.user_id === user.user_id));
+            console.log(user_ids)
+            if (!user_ids) {
+                const usersToAddFiltered = usersToAdd.filter(user => !form.users.some(existingUser => existingUser.user_id === user.user_id));
+                form.users = [...(form?.users || []), ...usersToAddFiltered];
+            }
 
-            form.users = [...(form?.users || []), ...usersToAddFiltered];
-            await formRepository.save(form);
+            //await formRepository.save(form);
 
             return res.status(200).json({
                 message: 'Users added to form successfully',
@@ -443,6 +518,27 @@ class FormController {
                                 });
                             }
                         }
+                    }
+                }
+            }
+
+            // If learner_plan_id provided, ensure learner plan is in scope
+            if (learner_plan_id && req.user) {
+                const learnerPlanRepo = AppDataSource.getRepository(LearnerPlan);
+                const plan = await learnerPlanRepo.findOne({
+                    where: { learner_plan_id: Number(learner_plan_id) },
+                    relations: ['learners'],
+                });
+                if (plan?.learners?.length) {
+                    const learnerIds = plan.learners.map((l: any) => l.learner_id);
+                    const learnerRepo = AppDataSource.getRepository(Learner);
+                    const learnerQb = learnerRepo.createQueryBuilder('learner').where('learner.learner_id IN (:...ids)', { ids: learnerIds });
+                    await applyLearnerScope(learnerQb, req.user, 'learner', { scopeContext: getScopeContext(req) });
+                    if ((await learnerQb.getCount()) === 0) {
+                        return res.status(403).json({
+                            message: 'You do not have access to this learner plan',
+                            status: false,
+                        });
                     }
                 }
             }
