@@ -800,34 +800,6 @@ class CourseController {
                     });
                 }
             }
-
-            if ( req.body.IQA_id && req.body.course_id) {
-                const samplingPlanRepository = AppDataSource.getRepository(SamplingPlan);
-                const existingPlan = await samplingPlanRepository
-                    .createQueryBuilder("plan")
-                    .where("plan.course = :course_id", { course_id: req.body.course_id })
-                    .andWhere("plan.iqa = :iqa_id", { iqa_id: req.body.IQA_id })
-                    .getOne();
-
-                if (!existingPlan) {
-                    const totalLearners = await userCourseRepository
-                        .createQueryBuilder("uc")
-                        .where("uc.course ->> 'course_id' = :course_id", { course_id: req.body.course_id })
-                        .getCount();
-
-                    const newPlan = samplingPlanRepository.create({
-                        course: { course_id: req.body.course_id },
-                        planName: req.body.course_name,
-                        iqa: { user_id: Number(req.body.IQA_id) },
-                        totalLearners,
-                        totalSampled: 0,
-                        status: "Pending",
-                    });
-
-                    await samplingPlanRepository.save(newPlan);
-                }
-            }
-            
             userCourseRepository.merge(existingCourse, req.body);
             const updatedCourse = await userCourseRepository.save(existingCourse);
 

@@ -5,19 +5,19 @@ import { SamplingPlanDetail } from "../entity/SamplingPlanDetail.entity";
 import { Learner } from "../entity/Learner.entity";
 import { applyLearnerScope, getScopeContext } from "../util/organisationFilter";
 
+export async function assertPlanDetailLearnerInScope(planDetail: SamplingPlanDetail, req: any, res: Response): Promise<boolean> {
+  if (!req.user || !planDetail.learner?.learner_id) return true;
+  const learnerRepo = AppDataSource.getRepository(Learner);
+  const qb = learnerRepo.createQueryBuilder("learner").where("learner.learner_id = :id", { id: planDetail.learner.learner_id });
+  await applyLearnerScope(qb, req.user, "learner", { scopeContext: getScopeContext(req) });
+  if ((await qb.getCount()) === 0) {
+    res.status(403).json({ message: "You do not have access to this sampling plan detail", status: false });
+    return false;
+  }
+  return true;
+}
 export class SamplingPlanActionController {
 
-  private async assertPlanDetailLearnerInScope(planDetail: SamplingPlanDetail, req: any, res: Response): Promise<boolean> {
-    if (!req.user || !planDetail.learner?.learner_id) return true;
-    const learnerRepo = AppDataSource.getRepository(Learner);
-    const qb = learnerRepo.createQueryBuilder("learner").where("learner.learner_id = :id", { id: planDetail.learner.learner_id });
-    await applyLearnerScope(qb, req.user, "learner", { scopeContext: getScopeContext(req) });
-    if ((await qb.getCount()) === 0) {
-      res.status(403).json({ message: "You do not have access to this sampling plan detail", status: false });
-      return false;
-    }
-    return true;
-  }
 
   // ✅ Create Action
   public async createSamplingPlanAction(req: Request, res: Response) {
@@ -31,7 +31,7 @@ export class SamplingPlanActionController {
       const detailRepo = AppDataSource.getRepository(SamplingPlanDetail);
       const planDetail = await detailRepo.findOne({ where: { id: plan_detail_id }, relations: ["learner"] });
       if (!planDetail) return res.status(404).json({ message: "Sampling plan detail not found", status: false });
-      if (!(await this.assertPlanDetailLearnerInScope(planDetail, req, res))) return;
+      if (!(await assertPlanDetailLearnerInScope(planDetail, req, res))) return;
 
       const repo = AppDataSource.getRepository(SamplingPlanAction);
       const newAction = repo.create({

@@ -69,7 +69,7 @@ export class SamplingPlanQuestionController {
         await applyLearnerScope(qb, (req as any).user, "learner", { scopeContext: getScopeContext(req as any) });
       }
 
-      const questions = await qb.select("spq").addSelect("plan_detail").addSelect("question").addSelect("answered_by").distinct(true).orderBy("spq.created_at", "ASC").getMany();
+      const questions = await qb.select("spq").addSelect("plan_detail").addSelect("question").addSelect("answered_by").orderBy("spq.created_at", "ASC").getMany();
 
       return res.status(200).json({ message: "Questions fetched successfully", status: true, data: questions });
     } catch (error) {

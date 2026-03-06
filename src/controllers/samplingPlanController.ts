@@ -79,13 +79,13 @@ export class SamplingPlanController {
         .innerJoin(UserCourse, "uc", "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
         .innerJoin(Learner, "learner", "learner.learner_id = uc.learner_id");
 
-      // if ((req as any).user) {
-      //   await applyLearnerScope(query, (req as any).user, "learner", { scopeContext: getScopeContext(req as any) });
-      // }
+      if ((req as any).user) {
+        await applyLearnerScope(query, (req as any).user, "learner", { scopeContext: getScopeContext(req as any) });
+      }
 
-      // if (iqa_id) {
-      //   query.andWhere("iqa.user_id = :iqa_id", { iqa_id });
-      // }
+      if (iqa_id) {
+        query.andWhere("iqa.user_id = :iqa_id", { iqa_id });
+      }
 
       if (course_id) {
         query.andWhere("course.course_id = :course_id", { course_id });
@@ -98,12 +98,12 @@ export class SamplingPlanController {
         .addSelect("course")
         .addSelect("iqa")
         .orderBy("plan.createdAt", "DESC")
-        .getOne();
-      const plan = plans[0] ?? null;
+        .getMany();
+      //const plan = plans[0] ?? null;
 
       return res.status(200).json({
         message: "Sampling plans fetched successfully",
-        data: plan,
+        data: plans,
         status: true,
       });
     } catch (error) {
