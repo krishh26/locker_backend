@@ -17,6 +17,10 @@ import { SessionLearnerAction } from "../entity/SessionLearnerAction.entity";
 import { Course } from "../entity/Course.entity";
 import { getUnitCompletionStatus, unitCompletionStatus } from '../util/unitCompletion';
 import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
+import { DefaultReviewSetting } from "../entity/DefaultReviewSetting.entity";
+import { SamplingPlanAction } from "../entity/SamplingPlanAction.entity";
+import { SamplingPlanDetail } from "../entity/SamplingPlanDetail.entity";
+import { SamplingPlan } from "../entity/samplingPlan.entity";
 import { In } from "typeorm";
 import { getAccessibleOrganisationIds, getAccessibleCentreAdminUserIds, applyLearnerScope, validateLearnerOrganisationCentre, canAccessOrganisation, canAccessCentre, getScopeContext } from "../util/organisationFilter";
 class LearnerController {
@@ -1768,11 +1772,26 @@ class LearnerController {
                         .where("user_id.status = 'Active'");
                     if (req.user) await applyLearnerScope(qb, req.user, "learner", { scopeContext });
                     const active_learners = await qb.getMany();
+                    const learnerIds = active_learners.map((l: any) => l.learner_id);
+                    const overdueByLearner = new Set<number>();
+                    if (learnerIds.length > 0) {
+                        const overdueCourses = await userCourseRepository
+                            .createQueryBuilder("uc")
+                            .select("uc.learner_id")
+                            .where("uc.learner_id IN (:...learnerIds)", { learnerIds })
+                            .andWhere("uc.end_date < :now", { now: new Date() })
+                            .getRawMany();
+                        overdueCourses.forEach((r: any) => overdueByLearner.add(r.uc_learner_id));
+                    }
+                    const dataWithOverdue = active_learners.map((l: any) => ({
+                        ...l,
+                        course_date_overdue: overdueByLearner.has(l.learner_id) ? "Yes" : "No",
+                    }));
 
                     return res.status(200).json({
                         message: "Active learners fetched successfully",
                         status: true,
-                        data: active_learners,
+                        data: dataWithOverdue,
                     });
                 }
 
@@ -2018,6 +2037,244 @@ class LearnerController {
                         data: learners_course_due_in_next_30_days,
                     });
                 }
+
+                else if (type === "default_review_overdue") {
+                    if (hasNoAccess) {
+                        return res.status(200).json({
+                            message: "Default review overdue fetched successfully",
+                            status: true,
+                            data: [],
+                        });
+                    }
+                    const qb = userCourseRepository
+                        .createQueryBuilder("user_course")
+                        .leftJoinAndSelect("user_course.learner_id", "learner_id")
+                        .leftJoinAndSelect("learner_id.user_id", "user_id")
+                        .leftJoin("user_course.trainer_id", "trainer")
+                        .leftJoin(DefaultReviewSetting, "dr", "dr.organisation_id = learner_id.organisation_id")
+                        .where("user_course.end_date + (COALESCE(dr.\"noReviewWeeks\", 0) * INTERVAL '7 days') < :now", { now: new Date() })
+                        .distinctOn(["learner_id.learner_id"]);
+                    applyOrgFilterOnUserAlias(qb, "user_id");
+                    applyCentreUserFilter(qb, "trainer.user_id");
+                    const default_review_overdue = await qb.getMany();
+                    return res.status(200).json({
+                        message: "Default review overdue fetched successfully",
+                        status: true,
+                        data: default_review_overdue,
+                    });
+                }
+
+                else if (type === "iqa_actions_overdue") {
+                    if (hasNoAccess) {
+                        return res.status(200).json({
+                            message: "IQA actions overdue fetched successfully",
+                            status: true,
+                            data: [],
+                        });
+                    }
+                    const samplingPlanActionRepository = AppDataSource.getRepository(SamplingPlanAction);
+                    const qb = samplingPlanActionRepository
+                        .createQueryBuilder("action")
+                        .leftJoinAndSelect("action.plan_detail", "plan_detail")
+                        .leftJoinAndSelect("plan_detail.samplingPlan", "sp")
+                        .leftJoinAndSelect("plan_detail.learner", "learner")
+                        .leftJoinAndSelect("learner.user_id", "user_id")
+                        .leftJoin("sp.course", "course")
+                        .leftJoin("sp.iqa", "sp_iqa")
+                        .where("action.target_date < :now", { now: new Date() });
+                    if (accessibleOrgIds !== null && accessibleOrgIds.length > 0) {
+                        qb.andWhere("course.organisation_id IN (:...orgIds)", { orgIds: accessibleOrgIds });
+                    }
+                    if (centreAdminUserIds !== null && centreAdminUserIds.length > 0) {
+                        qb.andWhere("sp_iqa.user_id IN (:...centreAdminUserIds)", { centreAdminUserIds });
+                    }
+                    const iqa_actions_overdue = await qb.getMany();
+                    return res.status(200).json({
+                        message: "IQA actions overdue fetched successfully",
+                        status: true,
+                        data: iqa_actions_overdue,
+                    });
+                }
+
+                else if (type === "all_iqa_actions") {
+                    if (hasNoAccess) {
+                        return res.status(200).json({
+                            message: "All IQA actions fetched successfully",
+                            status: true,
+                            data: [],
+                        });
+                    }
+                    const samplingPlanActionRepository = AppDataSource.getRepository(SamplingPlanAction);
+                    const qb = samplingPlanActionRepository
+                        .createQueryBuilder("action")
+                        .leftJoinAndSelect("action.plan_detail", "plan_detail")
+                        .leftJoinAndSelect("plan_detail.samplingPlan", "sp")
+                        .leftJoinAndSelect("plan_detail.learner", "learner")
+                        .leftJoinAndSelect("learner.user_id", "user_id")
+                        .leftJoin("sp.course", "course")
+                        .leftJoin("sp.iqa", "sp_iqa");
+                    if (accessibleOrgIds !== null && accessibleOrgIds.length > 0) {
+                        qb.andWhere("course.organisation_id IN (:...orgIds)", { orgIds: accessibleOrgIds });
+                    }
+                    if (centreAdminUserIds !== null && centreAdminUserIds.length > 0) {
+                        qb.andWhere("sp_iqa.user_id IN (:...centreAdminUserIds)", { centreAdminUserIds });
+                    }
+                    const all_iqa_actions = await qb.getMany();
+                    return res.status(200).json({
+                        message: "All IQA actions fetched successfully",
+                        status: true,
+                        data: all_iqa_actions,
+                    });
+                }
+
+                else if (type === "iqa_actions_due_in_30_days") {
+                    if (hasNoAccess) {
+                        return res.status(200).json({
+                            message: "IQA actions due in 30 days fetched successfully",
+                            status: true,
+                            data: [],
+                        });
+                    }
+                    const samplingPlanActionRepository = AppDataSource.getRepository(SamplingPlanAction);
+                    const qb = samplingPlanActionRepository
+                        .createQueryBuilder("action")
+                        .leftJoinAndSelect("action.plan_detail", "plan_detail")
+                        .leftJoinAndSelect("plan_detail.samplingPlan", "sp")
+                        .leftJoinAndSelect("plan_detail.learner", "learner")
+                        .leftJoinAndSelect("learner.user_id", "user_id")
+                        .leftJoin("sp.course", "course")
+                        .leftJoin("sp.iqa", "sp_iqa")
+                        .where("action.target_date BETWEEN :now AND :nowPlus30", {
+                            now: new Date(),
+                            nowPlus30: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+                        });
+                    if (accessibleOrgIds !== null && accessibleOrgIds.length > 0) {
+                        qb.andWhere("course.organisation_id IN (:...orgIds)", { orgIds: accessibleOrgIds });
+                    }
+                    if (centreAdminUserIds !== null && centreAdminUserIds.length > 0) {
+                        qb.andWhere("sp_iqa.user_id IN (:...centreAdminUserIds)", { centreAdminUserIds });
+                    }
+                    const iqa_actions_due_in_30_days = await qb.getMany();
+                    return res.status(200).json({
+                        message: "IQA actions due in 30 days fetched successfully",
+                        status: true,
+                        data: iqa_actions_due_in_30_days,
+                    });
+                }
+
+                else if (type === "session_due_today") {
+                    if (hasNoAccess) {
+                        return res.status(200).json({
+                            message: "Session due today fetched successfully",
+                            status: true,
+                            data: [],
+                        });
+                    }
+                    const sessionRepository = AppDataSource.getRepository(Session);
+                    const qb = sessionRepository
+                        .createQueryBuilder("session")
+                        .leftJoinAndSelect("session.trainer_id", "trainer")
+                        .leftJoinAndSelect("session.learners", "learners")
+                        .leftJoinAndSelect("learners.user_id", "learner_user")
+                        .where("DATE(session.startDate) = CURRENT_DATE");
+                    applyOrgFilterOnUserAlias(qb, "learner_user");
+                    applyCentreUserFilter(qb, "trainer.user_id");
+                    const session_due_today = await qb.getMany();
+                    return res.status(200).json({
+                        message: "Session due today fetched successfully",
+                        status: true,
+                        data: session_due_today,
+                    });
+                }
+
+                else if (type === "session_due_in_7_days") {
+                    if (hasNoAccess) {
+                        return res.status(200).json({
+                            message: "Session due in 7 days fetched successfully",
+                            status: true,
+                            data: [],
+                        });
+                    }
+                    const sessionRepository = AppDataSource.getRepository(Session);
+                    const qb = sessionRepository
+                        .createQueryBuilder("session")
+                        .leftJoinAndSelect("session.trainer_id", "trainer")
+                        .leftJoinAndSelect("session.learners", "learners")
+                        .leftJoinAndSelect("learners.user_id", "learner_user")
+                        .where("session.startDate BETWEEN NOW() AND NOW() + INTERVAL '7 days'");
+                    applyOrgFilterOnUserAlias(qb, "learner_user");
+                    applyCentreUserFilter(qb, "trainer.user_id");
+                    const session_due_in_7_days = await qb.getMany();
+                    return res.status(200).json({
+                        message: "Session due in 7 days fetched successfully",
+                        status: true,
+                        data: session_due_in_7_days,
+                    });
+                }
+
+                else if (type === "sample_due_in_month") {
+                    if (hasNoAccess) {
+                        return res.status(200).json({
+                            message: "Sample due in this month fetched successfully",
+                            status: true,
+                            data: [],
+                        });
+                    }
+                    const samplingPlanDetailRepository = AppDataSource.getRepository(SamplingPlanDetail);
+                    const qb = samplingPlanDetailRepository
+                        .createQueryBuilder("detail")
+                        .leftJoinAndSelect("detail.samplingPlan", "sp")
+                        .leftJoinAndSelect("detail.learner", "learner")
+                        .leftJoinAndSelect("learner.user_id", "user_id")
+                        .leftJoin("sp.course", "course")
+                        .leftJoin("sp.iqa", "sp_iqa")
+                        .where("detail.plannedDate IS NOT NULL")
+                        .andWhere("EXTRACT(MONTH FROM detail.plannedDate) = EXTRACT(MONTH FROM CURRENT_DATE)")
+                        .andWhere("EXTRACT(YEAR FROM detail.plannedDate) = EXTRACT(YEAR FROM CURRENT_DATE)");
+                    if (accessibleOrgIds !== null && accessibleOrgIds.length > 0) {
+                        qb.andWhere("course.organisation_id IN (:...orgIds)", { orgIds: accessibleOrgIds });
+                    }
+                    if (centreAdminUserIds !== null && centreAdminUserIds.length > 0) {
+                        qb.andWhere("sp_iqa.user_id IN (:...centreAdminUserIds)", { centreAdminUserIds });
+                    }
+                    const sample_due_in_month = await qb.getMany();
+                    return res.status(200).json({
+                        message: "Sample due in this month fetched successfully",
+                        status: true,
+                        data: sample_due_in_month,
+                    });
+                }
+
+                else if (type === "sampling_plan_overdue") {
+                    if (hasNoAccess) {
+                        return res.status(200).json({
+                            message: "Sampling plan overdues fetched successfully",
+                            status: true,
+                            data: [],
+                        });
+                    }
+                    const samplingPlanDetailRepository = AppDataSource.getRepository(SamplingPlanDetail);
+                    const qb = samplingPlanDetailRepository
+                        .createQueryBuilder("detail")
+                        .leftJoinAndSelect("detail.samplingPlan", "sp")
+                        .leftJoinAndSelect("detail.learner", "learner")
+                        .leftJoinAndSelect("learner.user_id", "user_id")
+                        .leftJoin("sp.course", "course")
+                        .leftJoin("sp.iqa", "sp_iqa")
+                        .where("detail.plannedDate < :now", { now: new Date() });
+                    if (accessibleOrgIds !== null && accessibleOrgIds.length > 0) {
+                        qb.andWhere("course.organisation_id IN (:...orgIds)", { orgIds: accessibleOrgIds });
+                    }
+                    if (centreAdminUserIds !== null && centreAdminUserIds.length > 0) {
+                        qb.andWhere("sp_iqa.user_id IN (:...centreAdminUserIds)", { centreAdminUserIds });
+                    }
+                    const sampling_plan_overdue = await qb.getMany();
+                    return res.status(200).json({
+                        message: "Sampling plan overdues fetched successfully",
+                        status: true,
+                        data: sampling_plan_overdue,
+                    });
+                }
             }
 
 
@@ -2037,12 +2294,31 @@ class LearnerController {
                         sessionLearnerActionDueInNext7Days_count: 0,
                         sessionLearnerActionOverdue_count: 0,
                         learnersCourseDueInNext30Days_count: 0,
-                        totalCourses: await courseRepository.createQueryBuilder("course").getCount(),
+                        defaultReviewOverdue_count: 0,
+                        iqaActionsOverdue_count: 0,
+                        allIqaActions_count: 0,
+                        iqaActionsDueIn30Days_count: 0,
+                        sessionDueToday_count: 0,
+                        sessionDueIn7Days_count: 0,
+                        sampleDueInMonth_count: 0,
+                        samplingPlanOverdue_count: 0,
+                        totalCourses: 0,
                     }
                 });
             }
 
-            const totalCourses = await courseRepository.createQueryBuilder("course").getCount();
+            // totalCourses: MasterAdmin (no context) = all; Org/Centre Admin = their org(s); no access = 0
+            let totalCourses: number;
+            if (accessibleOrgIds === null) {
+                totalCourses = await courseRepository.createQueryBuilder("course").getCount();
+            } else if (accessibleOrgIds.length === 0) {
+                totalCourses = 0;
+            } else {
+                totalCourses = await courseRepository
+                    .createQueryBuilder("course")
+                    .where("course.organisation_id IN (:...orgIds)", { orgIds: accessibleOrgIds })
+                    .getCount();
+            }
 
             const activeLearnersQb = learnerRepository
                 .createQueryBuilder("learner")
@@ -2158,6 +2434,119 @@ class LearnerController {
                 .select("COUNT(DISTINCT session_learner_action.action_id)", "count")
                 .getRawOne();
 
+            const defaultReviewOverdueQb = userCourseRepository
+                .createQueryBuilder("user_course")
+                .leftJoin("user_course.learner_id", "learner_id")
+                .leftJoin("learner_id.user_id", "user_id")
+                .leftJoin("user_course.trainer_id", "trainer")
+                .leftJoin(DefaultReviewSetting, "dr", "dr.organisation_id = learner_id.organisation_id")
+                .where("user_course.end_date + (COALESCE(dr.\"noReviewWeeks\", 0) * INTERVAL '7 days') < :now", { now: new Date() });
+            applyOrgFilterOnUserAlias(defaultReviewOverdueQb, "user_id");
+            applyCentreUserFilter(defaultReviewOverdueQb, "trainer.user_id");
+            const defaultReviewOverdueCountRaw = await defaultReviewOverdueQb
+                .select("COUNT(DISTINCT user_course.user_course_id)", "count")
+                .getRawOne();
+
+            const samplingPlanActionRepository = AppDataSource.getRepository(SamplingPlanAction);
+            const iqaActionsOverdueQb = samplingPlanActionRepository
+                .createQueryBuilder("action")
+                .leftJoin("action.plan_detail", "plan_detail")
+                .leftJoin("plan_detail.samplingPlan", "sp")
+                .leftJoin("sp.course", "course")
+                .leftJoin("sp.iqa", "sp_iqa")
+                .where("action.target_date < :now", { now: new Date() });
+            if (accessibleOrgIds !== null && accessibleOrgIds.length > 0) {
+                iqaActionsOverdueQb.andWhere("course.organisation_id IN (:...orgIds)", { orgIds: accessibleOrgIds });
+            }
+            if (centreAdminUserIds !== null && centreAdminUserIds.length > 0) {
+                iqaActionsOverdueQb.andWhere("sp_iqa.user_id IN (:...centreAdminUserIds)", { centreAdminUserIds });
+            }
+            const iqaActionsOverdueCountRaw = await iqaActionsOverdueQb.select("COUNT(DISTINCT action.id)", "count").getRawOne();
+
+            const allIqaActionsQb = samplingPlanActionRepository
+                .createQueryBuilder("action")
+                .leftJoin("action.plan_detail", "plan_detail")
+                .leftJoin("plan_detail.samplingPlan", "sp")
+                .leftJoin("sp.course", "course")
+                .leftJoin("sp.iqa", "sp_iqa");
+            if (accessibleOrgIds !== null && accessibleOrgIds.length > 0) {
+                allIqaActionsQb.andWhere("course.organisation_id IN (:...orgIds)", { orgIds: accessibleOrgIds });
+            }
+            if (centreAdminUserIds !== null && centreAdminUserIds.length > 0) {
+                allIqaActionsQb.andWhere("sp_iqa.user_id IN (:...centreAdminUserIds)", { centreAdminUserIds });
+            }
+            const allIqaActionsCountRaw = await allIqaActionsQb.select("COUNT(DISTINCT action.id)", "count").getRawOne();
+
+            const iqaActionsDueIn30DaysQb = samplingPlanActionRepository
+                .createQueryBuilder("action")
+                .leftJoin("action.plan_detail", "plan_detail")
+                .leftJoin("plan_detail.samplingPlan", "sp")
+                .leftJoin("sp.course", "course")
+                .leftJoin("sp.iqa", "sp_iqa")
+                .where("action.target_date BETWEEN :now AND :nowPlus30", {
+                    now: new Date(),
+                    nowPlus30: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+                });
+            if (accessibleOrgIds !== null && accessibleOrgIds.length > 0) {
+                iqaActionsDueIn30DaysQb.andWhere("course.organisation_id IN (:...orgIds)", { orgIds: accessibleOrgIds });
+            }
+            if (centreAdminUserIds !== null && centreAdminUserIds.length > 0) {
+                iqaActionsDueIn30DaysQb.andWhere("sp_iqa.user_id IN (:...centreAdminUserIds)", { centreAdminUserIds });
+            }
+            const iqaActionsDueIn30DaysCountRaw = await iqaActionsDueIn30DaysQb.select("COUNT(DISTINCT action.id)", "count").getRawOne();
+
+            const sessionRepository = AppDataSource.getRepository(Session);
+            const sessionDueTodayQb = sessionRepository
+                .createQueryBuilder("session")
+                .leftJoin("session.trainer_id", "trainer")
+                .leftJoin("session.learners", "learners")
+                .leftJoin("learners.user_id", "learner_user")
+                .where("DATE(session.startDate) = CURRENT_DATE");
+            applyOrgFilterOnUserAlias(sessionDueTodayQb, "learner_user");
+            applyCentreUserFilter(sessionDueTodayQb, "trainer.user_id");
+            const sessionDueTodayCountRaw = await sessionDueTodayQb.select("COUNT(DISTINCT session.session_id)", "count").getRawOne();
+
+            const sessionDueIn7DaysQb = sessionRepository
+                .createQueryBuilder("session")
+                .leftJoin("session.trainer_id", "trainer")
+                .leftJoin("session.learners", "learners")
+                .leftJoin("learners.user_id", "learner_user")
+                .where("session.startDate BETWEEN NOW() AND NOW() + INTERVAL '7 days'");
+            applyOrgFilterOnUserAlias(sessionDueIn7DaysQb, "learner_user");
+            applyCentreUserFilter(sessionDueIn7DaysQb, "trainer.user_id");
+            const sessionDueIn7DaysCountRaw = await sessionDueIn7DaysQb.select("COUNT(DISTINCT session.session_id)", "count").getRawOne();
+
+            const samplingPlanDetailRepository = AppDataSource.getRepository(SamplingPlanDetail);
+            const sampleDueInMonthQb = samplingPlanDetailRepository
+                .createQueryBuilder("detail")
+                .leftJoin("detail.samplingPlan", "sp")
+                .leftJoin("sp.course", "course")
+                .leftJoin("sp.iqa", "sp_iqa")
+                .where("detail.plannedDate IS NOT NULL")
+                .andWhere("EXTRACT(MONTH FROM detail.plannedDate) = EXTRACT(MONTH FROM CURRENT_DATE)")
+                .andWhere("EXTRACT(YEAR FROM detail.plannedDate) = EXTRACT(YEAR FROM CURRENT_DATE)");
+            if (accessibleOrgIds !== null && accessibleOrgIds.length > 0) {
+                sampleDueInMonthQb.andWhere("course.organisation_id IN (:...orgIds)", { orgIds: accessibleOrgIds });
+            }
+            if (centreAdminUserIds !== null && centreAdminUserIds.length > 0) {
+                sampleDueInMonthQb.andWhere("sp_iqa.user_id IN (:...centreAdminUserIds)", { centreAdminUserIds });
+            }
+            const sampleDueInMonthCountRaw = await sampleDueInMonthQb.select("COUNT(DISTINCT detail.id)", "count").getRawOne();
+
+            const samplingPlanOverdueQb = samplingPlanDetailRepository
+                .createQueryBuilder("detail")
+                .leftJoin("detail.samplingPlan", "sp")
+                .leftJoin("sp.course", "course")
+                .leftJoin("sp.iqa", "sp_iqa")
+                .where("detail.plannedDate < :now", { now: new Date() });
+            if (accessibleOrgIds !== null && accessibleOrgIds.length > 0) {
+                samplingPlanOverdueQb.andWhere("course.organisation_id IN (:...orgIds)", { orgIds: accessibleOrgIds });
+            }
+            if (centreAdminUserIds !== null && centreAdminUserIds.length > 0) {
+                samplingPlanOverdueQb.andWhere("sp_iqa.user_id IN (:...centreAdminUserIds)", { centreAdminUserIds });
+            }
+            const samplingPlanOverdueCountRaw = await samplingPlanOverdueQb.select("COUNT(DISTINCT detail.id)", "count").getRawOne();
+
             const data = {
                 active_learners_count: Number(activeLearnersCountRaw?.count || 0),
                 learners_suspended_count: Number(suspendedCountRaw?.count || 0),
@@ -2169,6 +2558,14 @@ class LearnerController {
                 sessionLearnerActionDueInNext7Days_count: Number(sessionLearnerActionDueInNext7DaysCountRaw?.count || 0),
                 sessionLearnerActionOverdue_count: Number(sessionLearnerActionOverdueCountRaw?.count || 0),
                 learnersCourseDueInNext30Days_count: Number(learnersCourseDueInNext30DaysCountRaw?.count || 0),
+                defaultReviewOverdue_count: Number(defaultReviewOverdueCountRaw?.count || 0),
+                iqaActionsOverdue_count: Number(iqaActionsOverdueCountRaw?.count || 0),
+                allIqaActions_count: Number(allIqaActionsCountRaw?.count || 0),
+                iqaActionsDueIn30Days_count: Number(iqaActionsDueIn30DaysCountRaw?.count || 0),
+                sessionDueToday_count: Number(sessionDueTodayCountRaw?.count || 0),
+                sessionDueIn7Days_count: Number(sessionDueIn7DaysCountRaw?.count || 0),
+                sampleDueInMonth_count: Number(sampleDueInMonthCountRaw?.count || 0),
+                samplingPlanOverdue_count: Number(samplingPlanOverdueCountRaw?.count || 0),
                 totalCourses: totalCourses
             }
 
