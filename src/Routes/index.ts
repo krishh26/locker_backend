@@ -15,6 +15,7 @@ import FileController from '../controllers/FileController';
 import { multipleFileUpload, singleFileUpload } from '../util/multer';
 import { authorizeRoles } from '../middleware/verifyToken';
 import supportRoutes from './SupportRouter';
+import ticketRoutes from './TicketRouter';
 import sessionRoutes from './SessionRouter';
 import learnerPlanRoutes from './LearnerPlanRouter';
 import InnovationRoutes from './InnovationRouter';
@@ -69,6 +70,7 @@ Routes.use("/assignment", AssignmentRoutes)
 Routes.use("/employer", EmployerRoutes)
 Routes.use("/cpd", cpdRoutes)
 Routes.use("/support", supportRoutes)
+Routes.use("/ticket", ticketRoutes)
 Routes.use("/session", sessionRoutes)
 Routes.use("/learner-plan", learnerPlanRoutes)
 Routes.use("/innovation", InnovationRoutes)

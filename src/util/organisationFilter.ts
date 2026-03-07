@@ -22,6 +22,7 @@ import { Employer } from '../entity/Employer.entity';
 import { UserCentre } from '../entity/UserCentre.entity';
 import { UserCourse } from '../entity/UserCourse.entity';
 import { Organisation } from '../entity/Organisation.entity';
+import { User } from '../entity/User.entity';
 import { In } from 'typeorm';
 
 /**
@@ -294,6 +295,78 @@ export async function getAccessibleUserIds(user: any, scopeContext?: ScopeContex
         .where('uo.organisation_id IN (:...orgIds)', { orgIds })
         .getRawMany();
     return rows.map((r: { user_id: number }) => r.user_id);
+}
+
+/**
+ * Get user IDs to notify when a new ticket is created in the given org/centre.
+ * Returns non-Learner users who have access to the ticket (org members + centre members if centreId set, plus MasterAdmins).
+ * Used for "new ticket" notifications so admins in scope can be notified.
+ */
+export async function getUserIdsToNotifyForNewTicket(organisationId: number, centreId: number | null): Promise<number[]> {
+    const userOrgRepo = AppDataSource.getRepository(UserOrganisation);
+    const userCentreRepo = AppDataSource.getRepository(UserCentre);
+    const userRepo = AppDataSource.getRepository(User);
+
+    const orgUserRows = await userOrgRepo
+        .createQueryBuilder('uo')
+        .select('DISTINCT uo.user_id', 'user_id')
+        .where('uo.organisation_id = :orgId', { orgId: organisationId })
+        .getRawMany<{ user_id: number }>();
+    let userIds = [...new Set(orgUserRows.map((r) => r.user_id))];
+
+    if (centreId != null) {
+        const centreUserRows = await userCentreRepo
+            .createQueryBuilder('uc')
+            .select('DISTINCT uc.user_id', 'user_id')
+            .where('uc.centre_id = :centreId', { centreId })
+            .getRawMany<{ user_id: number }>();
+        const centreUserIds = centreUserRows.map((r) => r.user_id);
+        userIds = [...new Set([...userIds, ...centreUserIds])];
+    }
+
+    if (userIds.length === 0) {
+        const masterAdmins = await userRepo
+            .createQueryBuilder('user')
+            .where(':role = ANY(user.roles)', { role: UserRole.MasterAdmin })
+            .select('user.user_id')
+            .getMany();
+        return masterAdmins.map((u) => u.user_id).filter((id): id is number => id != null);
+    }
+
+    const users = await userRepo.find({
+        where: { user_id: In(userIds) },
+        select: ['user_id', 'roles'],
+    });
+    const nonLearnerIds = (users as any[])
+        .filter((u) => {
+            const roles = u.roles ?? [];
+            return !(Array.isArray(roles) && roles.includes(UserRole.Learner));
+        })
+        .map((u) => u.user_id)
+        .filter((id): id is number => id != null);
+
+    const masterAdmins = await userRepo
+        .createQueryBuilder('user')
+        .where(':role = ANY(user.roles)', { role: UserRole.MasterAdmin })
+        .select('user.user_id')
+        .getMany();
+    const masterAdminIds = masterAdmins.map((u) => u.user_id).filter((id): id is number => id != null);
+
+    return [...new Set([...nonLearnerIds, ...masterAdminIds])];
+}
+
+/**
+ * Get user IDs of Centre Admins for a given centre (users with UserCentre row for that centre_id).
+ * Used e.g. to notify Centre Admins when a ticket's status changes in their centre.
+ */
+export async function getCentreAdminUserIds(centreId: number): Promise<number[]> {
+    const userCentreRepo = AppDataSource.getRepository(UserCentre);
+    const rows = await userCentreRepo
+        .createQueryBuilder('uc')
+        .select('DISTINCT uc.user_id', 'user_id')
+        .where('uc.centre_id = :centreId', { centreId })
+        .getRawMany<{ user_id: number }>();
+    return rows.map((r) => r.user_id);
 }
 
 /**
