@@ -119,6 +119,7 @@ export const SocketDomain = {
 
 export const rolePriority = [
     UserRole.MasterAdmin,
+    UserRole.PhoenixTeam,
     UserRole.AccountManager,
     UserRole.OrganisationAdmin,
     UserRole.CentreAdmin,
