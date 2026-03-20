@@ -78,6 +78,11 @@ export function getRequiredOrganisationId(user: any, scopeContext: ScopeContext)
  */
 export async function getAccessibleOrganisationIds(user: any, scopeContext?: ScopeContext): Promise<number[] | null> {
     const role = resolveUserRole(user);
+
+    if (role === UserRole.PhoenixTeam) {
+        return null;
+    }
+
     if (role === UserRole.MasterAdmin) {
         if (scopeContext?.organisationId != null) {
             const orgRepo = AppDataSource.getRepository(Organisation);
@@ -272,7 +277,20 @@ export async function getAccessibleUserIds(user: any, scopeContext?: ScopeContex
                 .select('DISTINCT uo.user_id', 'user_id')
                 .where('uo.organisation_id = :orgId', { orgId: scopeContext.organisationId })
                 .getRawMany();
-            return rows.map((r: { user_id: number }) => r.user_id);
+
+            const orgUserIds = rows.map((r: { user_id: number }) => r.user_id);
+
+            // PhoenixTeam is global-full-admin: include PhoenixTeam users even if they don't have
+            // UserOrganisation rows for the currently selected org context.
+            const userRepo = AppDataSource.getRepository(User);
+            const phoenixRows = await userRepo
+                .createQueryBuilder('user')
+                .where(':phoenixRole = ANY(user.roles)', { phoenixRole: UserRole.PhoenixTeam })
+                .select('user.user_id')
+                .getMany();
+            const phoenixUserIds = phoenixRows.map((u: any) => u.user_id).filter((id: any) => id != null);
+
+            return [...new Set([...orgUserIds, ...phoenixUserIds])];
         }
         return null;
     }
