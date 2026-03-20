@@ -28,8 +28,7 @@ const ALLOWED_STATUS_TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
     [TicketStatus.Closed]: [TicketStatus.Open],
 };
 
-const ADMIN_ROLES = [UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin, UserRole.Admin];
-
+const ADMIN_ROLES = [UserRole.MasterAdmin, UserRole.PhoenixTeam, UserRole.OrganisationAdmin, UserRole.CentreAdmin, UserRole.Admin];
 function isAdmin(role: string | undefined): boolean {
     return role ? ADMIN_ROLES.includes(role as UserRole) : false;
 }
@@ -785,7 +784,7 @@ export class TicketController {
             }
 
             const userIds = await getAccessibleUserIds(req.user, getScopeContext(req));
-            if (userIds === null || userIds.length === 0) {
+            if (userIds !== null && userIds.length === 0) {
                 return res.status(200).json({
                     message: "Assignable users retrieved",
                     status: true,
@@ -796,18 +795,27 @@ export class TicketController {
             const userRepo = AppDataSource.getRepository(User);
             let qb = userRepo
                 .createQueryBuilder("user")
-                .where("user.user_id IN (:...userIds)", { userIds })
                 .select(["user.user_id", "user.user_name", "user.email", "user.first_name", "user.last_name", "user.roles"]);
+
+            if (userIds !== null) {
+                qb = qb.where("user.user_id IN (:...userIds)", { userIds });
+            }
 
             if (orgIdFilter != null) {
                 qb = qb
-                    .innerJoin("user.userOrganisations", "uo")
-                    .andWhere("uo.organisation_id = :orgId", { orgId: orgIdFilter });
+                    .leftJoin("user.userOrganisations", "uo")
+                    .andWhere("(uo.organisation_id = :orgId OR :phoenixRole = ANY(user.roles))", {
+                        orgId: orgIdFilter,
+                        phoenixRole: UserRole.PhoenixTeam,
+                    });
             }
             if (centreIdFilter != null) {
                 qb = qb
-                    .innerJoin("user.userCentres", "uc")
-                    .andWhere("uc.centre_id = :centreId", { centreId: centreIdFilter });
+                    .leftJoin("user.userCentres", "uc")
+                    .andWhere("(uc.centre_id = :centreId OR :phoenixRole = ANY(user.roles))", {
+                        centreId: centreIdFilter,
+                        phoenixRole: UserRole.PhoenixTeam,
+                    });
             }
 
             const users = await qb.getMany();

@@ -1,5 +1,6 @@
 export enum UserRole {
     MasterAdmin = 'MasterAdmin',
+    PhoenixTeam = 'PhoenixTeam',
     AccountManager = 'AccountManager',
     OrganisationAdmin = 'OrganisationAdmin',
     CentreAdmin = 'CentreAdmin',
