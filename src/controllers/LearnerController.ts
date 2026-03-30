@@ -20,6 +20,7 @@ import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
 import { DefaultReviewSetting } from "../entity/DefaultReviewSetting.entity";
 import { SamplingPlanAction } from "../entity/SamplingPlanAction.entity";
 import { SamplingPlanDetail } from "../entity/SamplingPlanDetail.entity";
+import { Centre } from "../entity/Centre.entity";
 import { SamplingPlan } from "../entity/samplingPlan.entity";
 import { In } from "typeorm";
 import { getAccessibleOrganisationIds, getAccessibleCentreAdminUserIds, applyLearnerScope, validateLearnerOrganisationCentre, canAccessOrganisation, canAccessCentre, getScopeContext } from "../util/organisationFilter";
@@ -1524,22 +1525,43 @@ class LearnerController {
 
             // Helper to resolve user by name (for trainer, IQA, etc.)
             const resolveUserByName = async (name: string) => {
-                if (!name) return null;
-                const [first_name, ...lastArr] = name.trim().split(" ");
-                const last_name = lastArr.join(" ");
-                return await userRepository.findOne({ where: { first_name, last_name } });
+                const trimmed = typeof name === "string" ? name.trim() : "";
+                if (!trimmed) return null;
+                const [first_name, ...lastArr] = trimmed.split(" ");
+                const last_name = lastArr.join(" ").trim();
+                if (!first_name || !last_name) return null;
+
+                // Case-insensitive + whitespace-tolerant match for reliable CSV matching
+                return await userRepository
+                    .createQueryBuilder("u")
+                    .where("LOWER(TRIM(u.first_name)) = LOWER(TRIM(:first))", { first: first_name })
+                    .andWhere("LOWER(TRIM(u.last_name)) = LOWER(TRIM(:last))", { last: last_name })
+                    .getOne();
             };
 
             // Helper to resolve employer by name
             const resolveEmployerByName = async (employer_name: string) => {
-                if (!employer_name) return null;
-                return await employerRepository.findOne({ where: { employer_name } });
+                const trimmed = typeof employer_name === "string" ? employer_name.trim() : "";
+                if (!trimmed) return null;
+
+                // Employer.user is required for UserCourse.employer_id relation
+                return await employerRepository
+                    .createQueryBuilder("e")
+                    .leftJoinAndSelect("e.user", "user")
+                    .where("LOWER(TRIM(e.employer_name)) = LOWER(TRIM(:name))", { name: trimmed })
+                    .getOne();
             };
 
             // Helper to resolve course by name
             const resolveCourseByName = async (course_name: string) => {
-                if (!course_name) return null;
-                return await courseRepository.findOne({ where: { course_name } });
+                const trimmed = typeof course_name === "string" ? course_name.trim() : "";
+                if (!trimmed) return null;
+
+                // Case-insensitive + whitespace-tolerant match for reliable CSV matching
+                return await courseRepository
+                    .createQueryBuilder("c")
+                    .where("LOWER(TRIM(c.course_name)) = LOWER(TRIM(:name))", { name: trimmed })
+                    .getOne();
             };
 
             const results = [];
@@ -1549,22 +1571,54 @@ class LearnerController {
                 const learnerData = learners[i];
                 const {
                     user_name, first_name, last_name, email, password, confirmPassword, mobile,
-                    national_ins_no, funding_body, employer_name, courses
+                    national_ins_no, funding_body, job_title, centre_name, employer_name, courses
                 } = learnerData;
 
                 try {
                     // Validate required fields
-                    if (!user_name || !first_name || !last_name || !email || !password || !confirmPassword || !courses || !Array.isArray(courses) || courses.length === 0) {
+                    if (
+                        !user_name ||
+                        !first_name ||
+                        !last_name ||
+                        !email ||
+                        !password ||
+                        !confirmPassword ||
+                        !mobile ||
+                        !employer_name ||
+                        !centre_name ||
+                        !funding_body ||
+                        !job_title ||
+                        !courses ||
+                        !Array.isArray(courses) ||
+                        courses.length === 0
+                    ) {
                         errors.push({
                             index: i,
                             email: email || 'unknown',
-                            error: "All fields required (user_name, first_name, last_name, email, password, confirmPassword, courses)"
+                            error:
+                                "All fields required (user_name, first_name, last_name, email, password, confirmPassword, mobile, employer_name, centre_name, funding_body, job_title, courses)"
+                        });
+                        continue;
+                    }
+
+                    // Resolve centre by name (case-insensitive)
+                    const centreTrimmed = typeof centre_name === "string" ? centre_name.trim() : "";
+                    const centre = await AppDataSource.getRepository(Centre)
+                        .createQueryBuilder("c")
+                        .where("LOWER(TRIM(c.name)) = LOWER(TRIM(:name))", { name: centreTrimmed })
+                        .getOne();
+                    if (!centre) {
+                        errors.push({
+                            index: i,
+                            email: email || "unknown",
+                            error: `Centre "${centre_name}" not found`
                         });
                         continue;
                     }
 
                     // Check if email already exists
-                    let user = await userRepository.findOne({ where: { email } });
+                    const normalizedEmail = typeof email === "string" ? email.trim() : email;
+                    let user = await userRepository.findOne({ where: { email: normalizedEmail } });
                     if (user) {
                         errors.push({
                             index: i,
@@ -1598,21 +1652,87 @@ class LearnerController {
                         }
                     }
 
+                    // Validate organisation/centre/employer relationships and permissions
+                    if (req.user) {
+                        const scopeContext = getScopeContext(req);
+
+                        const hasOrgAccess = await canAccessOrganisation(
+                            req.user,
+                            centre.organisation_id,
+                            scopeContext,
+                        );
+                        if (!hasOrgAccess) {
+                            errors.push({
+                                index: i,
+                                email,
+                                error: "You do not have access to create learners in this organisation"
+                            });
+                            continue;
+                        }
+
+                        const hasCentreAccess = await canAccessCentre(
+                            req.user,
+                            centre.id,
+                            scopeContext,
+                        );
+                        if (!hasCentreAccess) {
+                            errors.push({
+                                index: i,
+                                email,
+                                error: "You do not have access to create learners in this centre"
+                            });
+                            continue;
+                        }
+                    }
+
+                    const relationValidation = await validateLearnerOrganisationCentre(
+                        centre.organisation_id,
+                        centre.id,
+                        employer ? employer.employer_id : NaN
+                    );
+                    if (!relationValidation.valid) {
+                        errors.push({
+                            index: i,
+                            email,
+                            error: relationValidation.error ?? "Invalid centre/employer relationship"
+                        });
+                        continue;
+                    }
+
                     // Create user
                     const hashedPassword = await bcryptpassword(password);
                     user = await userRepository.save(userRepository.create({
-                        user_name, first_name, last_name, email, password: hashedPassword, mobile
+                        user_name,
+                        first_name,
+                        last_name,
+                        email: normalizedEmail,
+                        password: hashedPassword,
+                        mobile
                     }));
 
                     // Create learner (fix: pass user object, not just ID)
                     const learner = await learnerRepository.save(
                         learnerRepository.create({
                             user_id: user, // <-- pass the user object, not user.user_id
-                            user_name, first_name, last_name, email, mobile,
-                            national_ins_no, funding_body,
+                            user_name, first_name, last_name, email: normalizedEmail, mobile,
+                            national_ins_no,
+                            funding_body,
+                            job_title,
+                            organisation_id: centre.organisation_id,
+                            centre_id: centre.id,
                             employer_id: employer ? employer : null // <-- pass employer object or null
                         })
                     );
+
+                    // Parity with single-create flow: send generated password by email
+                    const sendResult = await sendPasswordByEmail(normalizedEmail, password);
+                    if (!sendResult) {
+                        errors.push({
+                            index: i,
+                            email: normalizedEmail,
+                            error: "Learner created but failed to send email"
+                        });
+                    }
 
                     // Assign courses
                     for (let c = 0; c < courses.length; c++) {
@@ -1636,7 +1756,11 @@ class LearnerController {
 
                         // Resolve employer for this course (fallback to top-level employer)
                         let courseEmployer = employer;
-                        if (courseEmployerName && courseEmployerName !== employer_name) {
+                        const topEmployerNameLower =
+                            typeof employer_name === "string" ? employer_name.trim().toLowerCase() : "";
+                        const courseEmployerNameLower =
+                            typeof courseEmployerName === "string" ? courseEmployerName.trim().toLowerCase() : "";
+                        if (courseEmployerNameLower && courseEmployerNameLower !== topEmployerNameLower) {
                             courseEmployer = await resolveEmployerByName(courseEmployerName);
                             if (!courseEmployer) {
                                 errors.push({
@@ -1664,7 +1788,9 @@ class LearnerController {
                                 IQA_id: iqa ? iqa : null,
                                 LIQA_id: liqa ? liqa : null,
                                 EQA_id: eqa ? eqa : null,
-                                employer_id: courseEmployer ? courseEmployer.employer_id : null,
+                                // UserCourse.employer_id points to `users.user_id` (User entity),
+                                // so we must pass the related User object from Employer.user
+                                employer_id: courseEmployer ? courseEmployer.user : null,
                                 start_date,
                                 end_date
                             })
