@@ -20,6 +20,7 @@ import {
     resolveUserRole,
 } from "../util/organisationFilter";
 import { SendNotification, SendNotifications } from "../util/socket/notification";
+import { uploadToS3 } from "../util/aws";
 
 const ALLOWED_STATUS_TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
     [TicketStatus.Open]: [TicketStatus.InProgress],
@@ -155,9 +156,29 @@ export class TicketController {
             });
 
             const saved = await ticketRepo.save(ticket);
+
+            const multerFiles = (req as any).files as { buffer: Buffer; originalname: string; mimetype?: string }[] | undefined;
+            if (multerFiles?.length) {
+                const attachmentRepo = AppDataSource.getRepository(TicketAttachment);
+                const existingCount = await attachmentRepo.count({ where: { ticket_id: saved.ticket_id } });
+                const allowed = Math.max(0, 5 - existingCount);
+                for (let i = 0; i < Math.min(multerFiles.length, allowed); i++) {
+                    const { url } = await uploadToS3(multerFiles[i], "tickets");
+                    await attachmentRepo.save(
+                        attachmentRepo.create({
+                            ticket_id: saved.ticket_id,
+                            file_url: url,
+                            uploaded_by: { user_id: userId } as any,
+                        })
+                    );
+                }
+                saved.last_activity_at = new Date();
+                await ticketRepo.save(saved);
+            }
+
             const withRelations = await ticketRepo.findOne({
                 where: { ticket_id: saved.ticket_id },
-                relations: ["raised_by", "organisation", "centre", "assigned_to"],
+                relations: ["raised_by", "organisation", "centre", "assigned_to", "attachments", "attachments.uploaded_by"],
             });
 
             try {

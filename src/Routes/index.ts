@@ -17,6 +17,7 @@ import { authorizeRoles } from '../middleware/verifyToken';
 import supportRoutes from './SupportRouter';
 import ticketRoutes from './TicketRouter';
 import sessionRoutes from './SessionRouter';
+import sessionSettingsRoutes from './SessionSettingsRouter';
 import learnerPlanRoutes from './LearnerPlanRouter';
 import InnovationRoutes from './InnovationRouter';
 import FormRoutes from './FormRouter';
@@ -54,6 +55,7 @@ import AuditLogRoutes from './AuditLogRouter';
 import Payment from './PaymentRouter';
 import PaymentRoutes from './PaymentRouter';
 import ParterRoutes from './partner.routes';
+import ReportRoutes from './ReportRouter';
 
 const fileController = new FileController;
 const Routes = express.Router();
@@ -71,6 +73,7 @@ Routes.use("/employer", EmployerRoutes)
 Routes.use("/cpd", cpdRoutes)
 Routes.use("/support", supportRoutes)
 Routes.use("/ticket", ticketRoutes)
+Routes.use("/session/settings", sessionSettingsRoutes)
 Routes.use("/session", sessionRoutes)
 Routes.use("/learner-plan", learnerPlanRoutes)
 Routes.use("/innovation", InnovationRoutes)
@@ -108,6 +111,7 @@ Routes.use('/feature-control', FeatureControlRoutes)
 Routes.use('/audit-logs', AuditLogRoutes)
 Routes.use('/payments', PaymentRoutes)
 Routes.use('/partner', ParterRoutes)
+Routes.use('/reports', ReportRoutes)
 
 // API routes
 Routes.get("/file", fileController.getFile)

@@ -800,6 +800,10 @@ class CourseController {
                     });
                 }
             }
+            delete (req.body as any).bil_return_reminder_sent_at;
+            if (req.body.bil_return_date !== undefined) {
+                existingCourse.bil_return_reminder_sent_at = null;
+            }
             userCourseRepository.merge(existingCourse, req.body);
             const updatedCourse = await userCourseRepository.save(existingCourse);
 

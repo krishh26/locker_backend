@@ -19,6 +19,8 @@ app.use(morgan('tiny'))
 // database connection 
 AppDataSource.initialize().then(async () => {
     console.log("Data Source has been initialized! 🎈")
+    const { startScheduledJobs } = await import("./src/jobs/scheduledJobs");
+    startScheduledJobs();
 }).catch((err) => {
     console.error("Error during Data Source initialization 🏃‍♂️:", err)
 })

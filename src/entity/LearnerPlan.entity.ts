@@ -2,6 +2,7 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateCol
 import { User } from './User.entity';
 import { Learner } from './Learner.entity';
 import { Course } from './Course.entity';
+import { SessionReminderSetting } from './SessionReminderSetting.entity';
 
 export enum LearnerPlanType {
     General = 'General',
@@ -169,6 +170,10 @@ export class LearnerPlan {
 
     @Column({ type: 'boolean', default: false })
     status: boolean;
+
+    // Set when the pre-session reminder email has been sent (cleared when start date or reminder interval changes).
+    @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP', nullable: true })
+    reminder_email_sent_at: Date | null;
 
     @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
     created_at: Date;
