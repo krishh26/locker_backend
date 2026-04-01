@@ -124,3 +124,45 @@ export const SendEmailTemplet = async (email: string | undefined, subject: strin
         console.log(error)
     }
 }
+
+function createSmtpTransporter() {
+    return nodemailer.createTransport(
+        smtpTransport({
+            host: "smtp.gmail.com",
+            port: 587,
+            service: "gmail",
+            requireTLS: true,
+            auth: {
+                type: "OAuth2",
+                user: process.env.SMPT_MAIL,
+                pass: process.env.SMPT_PASSWORD,
+                clientId: process.env.MAILCLIENT_ID,
+                clientSecret: process.env.MAILCLIENT_SECRET,
+                refreshToken: process.env.MAILREFRESH_TOKEN
+            },
+        })
+    );
+}
+
+/** Promise-based send for scheduled jobs (session / BIL reminders). */
+export async function sendSimpleEmailAsync(to: string, subject: string, html: string): Promise<void> {
+    if (!to || !process.env.SMPT_MAIL) {
+        console.warn("sendSimpleEmailAsync: missing recipient or SMPT_MAIL");
+        return;
+    }
+    const transporter = createSmtpTransporter();
+    await new Promise<void>((resolve, reject) => {
+        transporter.sendMail(
+            {
+                from: process.env.SMPT_MAIL,
+                to,
+                subject,
+                html,
+            },
+            (error) => {
+                if (error) reject(error);
+                else resolve();
+            }
+        );
+    });
+}

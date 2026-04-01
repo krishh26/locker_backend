@@ -56,6 +56,14 @@ export class UserCourse {
     })
     course_status: CourseStatus;
 
+    // Expected return date after a Break in Learning (BIL) / suspension.
+    @Column({ type: 'date', nullable: true })
+    bil_return_date: Date | null;
+
+    // Set when the one-day-before BIL return reminder email was sent (cleared when bil_return_date changes).
+    @Column({ type: 'timestamp', nullable: true })
+    bil_return_reminder_sent_at: Date | null;
+
     @Column({ type: 'boolean', nullable: true })
     is_main_course: boolean;
 

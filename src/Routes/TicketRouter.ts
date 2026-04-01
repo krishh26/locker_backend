@@ -1,4 +1,5 @@
 import * as express from "express";
+import multer from "multer";
 import TicketController from "../controllers/TicketController";
 import { authorizeRoles } from "../middleware/verifyToken";
 import { paginationMiddleware } from "../middleware/pagination";
@@ -6,7 +7,20 @@ import { paginationMiddleware } from "../middleware/pagination";
 const ticketRoutes = express.Router();
 const Controller = new TicketController();
 
-ticketRoutes.post("/create", authorizeRoles(), Controller.createTicket.bind(Controller));
+const ticketCreateMulter = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 25 * 1024 * 1024, files: 5 },
+});
+
+function ticketCreateMultipart(req: express.Request, res: express.Response, next: express.NextFunction) {
+    const ct = req.headers["content-type"] || "";
+    if (ct.includes("multipart/form-data")) {
+        return ticketCreateMulter.any()(req, res, next);
+    }
+    next();
+}
+
+ticketRoutes.post("/create", authorizeRoles(), ticketCreateMultipart, Controller.createTicket.bind(Controller));
 ticketRoutes.get("/list", authorizeRoles(), paginationMiddleware, Controller.getTicketList.bind(Controller));
 ticketRoutes.get("/assignable-users", authorizeRoles(), Controller.getAssignableUsers.bind(Controller));
 ticketRoutes.get("/:id", authorizeRoles(), Controller.getTicketById.bind(Controller));

@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { CustomRequest } from '../util/Interface/expressInterface';
 import { AppDataSource } from '../data-source';
 import { LearnerPlan, RepeatFrequency, FileType, SessionFileType, LearnerPlanFeedback } from '../entity/LearnerPlan.entity';
+import { SessionReminderSetting } from '../entity/SessionReminderSetting.entity';
 import { SessionLearnerAction } from '../entity/SessionLearnerAction.entity';
 import { LearnerPlanDocument } from '../entity/LearnerPlanDocument.entity';
 import { Course } from '../entity/Course.entity';
@@ -12,8 +13,105 @@ import { NotificationType, SocketDomain } from '../util/constants';
 import { uploadToS3 } from '../util/aws';
 import { applyLearnerScope, getScopeContext, resolveUserRole } from '../util/organisationFilter';
 import { UserRole } from '../util/constants';
+import { sendSimpleEmailAsync } from '../util/nodemailer';
 
 class LearnerPlanController {
+    private formatPlanDateTime(plan: any): { dateText: string; startTimeText: string; endTimeText: string } {
+        const start = new Date(plan.startDate);
+        const durationMinutes = Number(plan.Duration);
+        const end = Number.isFinite(durationMinutes) ? new Date(start.getTime() + durationMinutes * 60 * 1000) : null;
+        return {
+            dateText: start.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }),
+            startTimeText: start.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' }),
+            endTimeText: end
+                ? end.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' })
+                : 'TBC',
+        };
+    }
+
+    private async sendLearnerPlanBookingEmail(plan: any, isUpdate: boolean): Promise<void> {
+        const learners = plan?.learners || [];
+        if (!learners.length) return;
+
+        const trainerName = `${plan?.assessor_id?.first_name ?? ''} ${plan?.assessor_id?.last_name ?? ''}`.trim()
+            || plan?.assessor_id?.user_name
+            || 'Trainer';
+        const { dateText, startTimeText, endTimeText } = this.formatPlanDateTime(plan);
+        const sessionType = plan?.type || 'Training Session';
+
+        await Promise.allSettled(
+            learners.map(async (learner: any) => {
+                const to = learner?.email || learner?.user_id?.email;
+                if (!to) return;
+                const learnerName = `${learner?.first_name ?? ''} ${learner?.last_name ?? ''}`.trim() || 'Learner';
+
+                const subject = isUpdate
+                    ? 'Updated: Your training session is ready in Locker 🔒'
+                    : 'Confirmed: Your training session is ready in Locker 🔒';
+
+                const html = isUpdate
+                    ? `
+<p>Hi ${learnerName},</p>
+<p>Please note that your upcoming training session has been updated. Your Locker dashboard has been refreshed with the following new details:</p>
+<p><strong>Session Overview</strong><br/>
+Trainer: ${trainerName}<br/>
+New Date: ${dateText}<br/>
+New Time: ${startTimeText} - ${endTimeText}<br/>
+Session Type: ${sessionType}</p>
+<p><strong>What do I need to do?</strong> Please check your calendar to ensure you’re still available. You can view the updated details directly in your Locker.</p>
+<p>Best regards,<br/>The Locker Team</p>
+                    `.trim()
+                    : `
+<p>Hi ${learnerName},</p>
+<p>Great news! A new training session has been scheduled and added to your Locker dashboard. Here are the details for your upcoming session:</p>
+<p><strong>Session Overview</strong><br/>
+Trainer: ${trainerName}<br/>
+Date: ${dateText}<br/>
+Time: ${startTimeText} - ${endTimeText}<br/>
+Session Type: ${sessionType}</p>
+<p><strong>Next Steps:</strong> Please log in to your Locker account to view any pre-session materials.<br/>
+If you have any questions or need to reschedule, please contact your trainer directly.</p>
+<p>See you there!</p>
+<p>Best regards,<br/>The Locker Team</p>
+                    `.trim();
+
+                await sendSimpleEmailAsync(to, subject, html);
+            })
+        );
+    }
+
+    private async sendTrainerBookingEmail(plan: any): Promise<void> {
+        const learners = plan?.learners || [];
+        const trainerEmail = plan?.assessor_id?.email;
+        if (!trainerEmail || !learners.length) return;
+
+        const trainerName = `${plan?.assessor_id?.first_name ?? ''} ${plan?.assessor_id?.last_name ?? ''}`.trim()
+            || plan?.assessor_id?.user_name
+            || 'Trainer';
+        const { dateText, startTimeText, endTimeText } = this.formatPlanDateTime(plan);
+        const sessionType = plan?.type || 'Training Session';
+
+        await Promise.allSettled(
+            learners.map(async (learner: any) => {
+                const learnerName = `${learner?.first_name ?? ''} ${learner?.last_name ?? ''}`.trim()
+                    || learner?.user_name
+                    || 'Learner';
+                const subject = `New Session Booked: ${learnerName} in Locker 🔒`;
+                const html = `
+<p>Hi ${trainerName},</p>
+<p>A new training session has been successfully scheduled and added to your Locker calendar. Here are the details for your upcoming appointment:</p>
+<p><strong>Session Details</strong><br/>
+Learner: ${learnerName}<br/>
+Date: ${dateText}<br/>
+Time: ${startTimeText} - ${endTimeText}<br/>
+Session Type: ${sessionType}</p>
+<p>Happy training!</p>
+<p>Best regards,<br/>The Locker Team</p>
+                `.trim();
+                await sendSimpleEmailAsync(trainerEmail, subject, html);
+            })
+        );
+    }
 
     public async createLearnerPlan(req: CustomRequest, res: Response) {
         try {
@@ -73,6 +171,16 @@ class LearnerPlanController {
                     status: false
                 });
             }
+
+            const orgIds = [...new Set(existingLearners.map((l) => l.organisation_id).filter((x): x is number => x != null))];
+            if (orgIds.length !== 1) {
+                return res.status(400).json({
+                    message: "All learners must belong to the same organisation",
+                    status: false,
+                });
+            }
+            const organisationId = orgIds[0];
+
             if (req.user && allLearnerIds.length > 0) {
                 const learnerQb = learnerRepository.createQueryBuilder('learner').where('learner.learner_id IN (:...ids)', { ids: allLearnerIds });
                 await applyLearnerScope(learnerQb, req.user, 'learner', { scopeContext: getScopeContext(req) });
@@ -132,7 +240,8 @@ class LearnerPlanController {
                 include_weekends: repeatSession ? include_weekends || false : false,
                 repeat_end_date: repeatSession && repeat_end_date ? new Date(repeat_end_date) : null,
                 upload_session_files: repeatSession ? upload_session_files || false : false,
-                file_attachments: repeatSession ? file_attachments || [] : []
+                file_attachments: repeatSession ? file_attachments || [] : [],
+                reminder_email_sent_at: null,
             });
 
             const savedLearnerPlan = await learnerPlanRepository.save(learnerPlan) as unknown as LearnerPlan;
@@ -167,6 +276,8 @@ class LearnerPlanController {
                     console.error(`❌ Failed to send notification to learner ${learnerId}:`, error);
                 }
             });
+            await this.sendLearnerPlanBookingEmail(learnerPlanWithRelations, false);
+            await this.sendTrainerBookingEmail(learnerPlanWithRelations);
 
             return res.status(200).json({
                 message: "Learner plan created successfully",
@@ -266,12 +377,21 @@ class LearnerPlanController {
             learnerPlan.numberOfParticipants = numberOfParticipants || learnerPlan.numberOfParticipants;
             learnerPlan.status = status !== undefined ? status : learnerPlan.status;
 
+
+            learnerPlan.reminder_email_sent_at = null;
+
             learnerPlan = await learnerPlanRepository.save(learnerPlan);
+
+            const updated = await learnerPlanRepository.findOne({
+                where: { learner_plan_id: id },
+                relations: ['learners', 'learners.user_id', 'assessor_id'],
+            });
+            await this.sendLearnerPlanBookingEmail(updated ?? learnerPlan, true);
 
             return res.status(200).json({
                 message: "Learner plan updated successfully",
                 status: true,
-                data: learnerPlan
+                data: updated ?? learnerPlan
             });
 
         } catch (error) {
