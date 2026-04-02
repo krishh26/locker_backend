@@ -242,6 +242,7 @@ Session Type: ${sessionType}</p>
                 upload_session_files: repeatSession ? upload_session_files || false : false,
                 file_attachments: repeatSession ? file_attachments || [] : [],
                 reminder_email_sent_at: null,
+                reminder_sent_at: null,
             });
 
             const savedLearnerPlan = await learnerPlanRepository.save(learnerPlan) as unknown as LearnerPlan;
@@ -365,6 +366,8 @@ Session Type: ${sessionType}</p>
                 }
             }
 
+            const previousStartMs = new Date(learnerPlan.startDate).getTime();
+
             learnerPlan.title = title || learnerPlan.title;
             learnerPlan.description = description || learnerPlan.description;
             learnerPlan.location = location || learnerPlan.location;
@@ -377,8 +380,10 @@ Session Type: ${sessionType}</p>
             learnerPlan.numberOfParticipants = numberOfParticipants || learnerPlan.numberOfParticipants;
             learnerPlan.status = status !== undefined ? status : learnerPlan.status;
 
-
-            learnerPlan.reminder_email_sent_at = null;
+            if (startDate !== undefined && new Date(learnerPlan.startDate).getTime() !== previousStartMs) {
+                learnerPlan.reminder_email_sent_at = null;
+                learnerPlan.reminder_sent_at = null;
+            }
 
             learnerPlan = await learnerPlanRepository.save(learnerPlan);
 

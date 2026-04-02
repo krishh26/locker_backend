@@ -2,7 +2,7 @@ import cron from "node-cron";
 import { AppDataSource } from "../data-source";
 import { sendSimpleEmailAsync } from "../util/nodemailer";
 import { LearnerPlan, LearnerPlanAttendedStatus } from "../entity/LearnerPlan.entity";
-import { SessionReminderSetting } from "../entity/SessionReminderSetting.entity";
+import { SessionReminderRecipient, SessionReminderSetting } from "../entity/SessionReminderSetting.entity";
 import { UserCourse } from "../entity/UserCourse.entity";
 import { CourseStatus } from "../util/constants";
 
@@ -64,9 +64,22 @@ function getUserCourseDisplayName(course: object | null | undefined): string {
     return typeof name === "string" && name.trim() ? name.trim() : "—";
 }
 
+function parseReminderSentMap(raw: unknown): Record<string, string> {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+    return { ...(raw as Record<string, string>) };
+}
+
+function learnerReminderKey(settingId: number, learnerId: number): string {
+    return `L:${settingId}:${learnerId}`;
+}
+
+function trainerReminderKey(settingId: number): string {
+    return `T:${settingId}`;
+}
+
 /**
  * Scheduled reminders for learner plans (not Session table).
- * Uses SessionReminderSetting (per organisation) via LearnerPlan.reminder_setting_id.
+ * Org settings: multiple rows per org (1/5/7 days × Learner or Trainer). Tracks sends in learner_plan.reminder_sent_at.
  */
 export async function runSessionReminders(): Promise<void> {
     console.log("Running learner plan reminders");
@@ -76,7 +89,7 @@ export async function runSessionReminders(): Promise<void> {
 
     const todayIst = istDay(new Date());
     console.log("today(IST)", todayIst.toISOString().slice(0, 10));
-    // Cron runs without user/token, so fetch full graph through joins.
+
     const plans = await learnerPlanRepo
         .createQueryBuilder("lp")
         .leftJoinAndSelect("lp.learners", "learner")
@@ -84,87 +97,90 @@ export async function runSessionReminders(): Promise<void> {
         .leftJoinAndSelect("learner.centre", "centre")
         .leftJoinAndSelect("learner.organisation", "organisation")
         .leftJoinAndSelect("lp.assessor_id", "assessor")
-        .andWhere("lp.reminder_email_sent_at IS NULL")
-        .andWhere("lp.startDate IS NOT NULL") // start date should be greater than today
+        .andWhere("lp.startDate IS NOT NULL")
         .andWhere("lp.startDate > :today", { today: todayIst })
         .getMany();
+
     console.log(`Learner plans considered for reminders: ${plans.length}`);
-    
-    const organisationIds = [...new Set(
-        plans.flatMap((p) => (p.learners || []).map((l) => l.organisation_id).filter((x): x is number => x != null))
+
+    const organisationIds = [
+        ...new Set(plans.flatMap((p) => (p.learners || []).map((l) => l.organisation_id).filter((x): x is number => x != null)),
     )];
-    console.log("organisationIds", organisationIds);
+
     const orgSettings = organisationIds.length
-        ? await reminderSettingRepo // is it join with learner plan instead of session table ? yes or no ?
-            .createQueryBuilder("s")
-            .where("s.is_active = true")
-            .andWhere("s.organisation_id IN (:...orgIds)", { orgIds: organisationIds })
-            .orderBy("s.days_before", "ASC")
-            .getMany()
+        ? await reminderSettingRepo
+              .createQueryBuilder("s")
+              .where("s.is_active = true")
+              .andWhere("s.organisation_id IN (:...orgIds)", { orgIds: organisationIds })
+              .orderBy("s.days_before", "ASC")
+              .addOrderBy("s.recipient", "ASC")
+              .getMany()
         : [];
-    console.log("orgSettings", orgSettings);
+
     const orgSettingsMap = new Map<number, SessionReminderSetting[]>();
     for (const s of orgSettings) {
         const arr = orgSettingsMap.get(s.organisation_id) || [];
         arr.push(s);
         orgSettingsMap.set(s.organisation_id, arr);
     }
-    console.log("orgSettingsMap size", orgSettingsMap.size);
 
     for (const plan of plans) {
-        if (plan.reminder_email_sent_at) {
-            continue;
-        }
-
-        if (plan.Attended && CANCELLED_PLAN.includes(plan.Attended)) {
-            continue;
-        }
+        if (plan.Attended && CANCELLED_PLAN.includes(plan.Attended)) continue;
 
         const learners = plan.learners || [];
-        if (learners.length === 0) {
-            continue;
-        }
+        if (learners.length === 0) continue;
 
+        const sent = parseReminderSentMap(plan.reminder_sent_at);
+        let changed = false;
+
+        const trainerUser = plan.assessor_id as any;
         const trainerName =
-            `${(plan.assessor_id as any)?.first_name ?? ""} ${(plan.assessor_id as any)?.last_name ?? ""}`.trim() ||
-            (plan.assessor_id as any)?.user_name ||
-            "Trainer";
+            `${trainerUser?.first_name ?? ""} ${trainerUser?.last_name ?? ""}`.trim() || trainerUser?.user_name || "Trainer";
+        const trainerEmail = trainerUser?.email as string | undefined;
+
         const start = new Date(plan.startDate);
         const durationMinutes = Number(plan.Duration);
         const end = Number.isFinite(durationMinutes) ? new Date(start.getTime() + durationMinutes * 60 * 1000) : null;
-        const dateText = start.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
-        const startTimeText = start.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" });
+        const dateText = start.toLocaleDateString("en-GB", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+            timeZone: "Asia/Kolkata",
+        });
+        const startTimeText = start.toLocaleTimeString("en-GB", {
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+            timeZone: "Asia/Kolkata",
+        });
         const endTimeText = end
             ? end.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" })
             : "TBC";
         const sessionType = plan.type || "Training Session";
 
-        let anySent = false;
-        const sentEmails = new Set<string>();
         for (const learner of learners) {
             if (!learner.organisation_id || !learner.centre_id || !learner.centre) continue;
             if (learner.centre.organisation_id !== learner.organisation_id) continue;
 
-            const effectiveSettings = orgSettingsMap.get(learner.organisation_id) || [];
-            if (effectiveSettings.length === 0) continue;
+            const settings = orgSettingsMap.get(learner.organisation_id) || [];
+            const learnerSettings = settings.filter((s) => s.recipient === SessionReminderRecipient.Learner);
 
-            // Plan-level setting overrides org settings; otherwise use earliest org interval.
-            const chosenSetting = effectiveSettings[0];
-            const daysBefore = Number(chosenSetting.days_before);
-            if (!Number.isFinite(daysBefore) || daysBefore < 1) continue;
+            for (const setting of learnerSettings) {
+                const daysBefore = Number(setting.days_before);
+                if (!Number.isFinite(daysBefore) || daysBefore < 1) continue;
 
-            const sendDayIst = learnerPlanReminderSendDayIst(new Date(plan.startDate), daysBefore);
-            if (!isSameIstDay(sendDayIst, todayIst)) continue;
+                const key = learnerReminderKey(setting.id, learner.learner_id);
+                if (sent[key]) continue;
 
-            const email = learner.email || learner.user_id?.email;
-            if (!email) continue;
-            const emailKey = email.toLowerCase();
-            if (sentEmails.has(emailKey)) continue;
-            sentEmails.add(emailKey);
+                const sendDayIst = learnerPlanReminderSendDayIst(new Date(plan.startDate), daysBefore);
+                if (!isSameIstDay(sendDayIst, todayIst)) continue;
 
-            const learnerName = `${learner.first_name ?? ""} ${learner.last_name ?? ""}`.trim() || "Learner";
-            const subject = `Upcoming: Your training session is in ${daysBefore} day${daysBefore === 1 ? "" : "s"}!`;
-            const html = `
+                const email = learner.email || (learner.user_id as any)?.email;
+                if (!email) continue;
+
+                const learnerName = `${learner.first_name ?? ""} ${learner.last_name ?? ""}`.trim() || "Learner";
+                const subject = `Upcoming: Your training session is in ${daysBefore} day${daysBefore === 1 ? "" : "s"}!`;
+                const html = `
 <p>Hi ${learnerName},</p>
 <p>This is a friendly reminder that you have a training session scheduled in ${daysBefore} day${daysBefore === 1 ? "" : "s"}. Now is a great time to check your schedule and make sure you're all set to join your Trainer.</p>
 <p><strong>Session Details:</strong><br/>
@@ -178,20 +194,63 @@ Session Type: ${sessionType}</p>
 - Questions: Have a few questions ready for your Trainer to get the most out of the session!</p>
 <p>We look forward to seeing you there.</p>
 <p>Best regards,<br/>The Locker Team</p>
-            `.trim();
-            console.log("email", email);
-            try {
-                await sendSimpleEmailAsync(email, subject, html);
-                anySent = true;
-            } catch (e) {
-                console.error("Email failed:", email, e);
+                `.trim();
+
+                try {
+                    await sendSimpleEmailAsync(email, subject, html);
+                    sent[key] = new Date().toISOString();
+                    changed = true;
+                } catch (e) {
+                    console.error("Learner reminder email failed:", email, e);
+                }
             }
         }
 
-        if (anySent) {
-            // date store in utc same as db store, no string conversion
-            plan.reminder_email_sent_at = new Date(); 
-            console.log("reminder_email_sent_at", plan.reminder_email_sent_at);
+        const orgForTrainer =
+            learners.find((l) => l.organisation_id && l.centre?.organisation_id === l.organisation_id)?.organisation_id ??
+            null;
+        if (orgForTrainer != null) {
+            const settings = orgSettingsMap.get(orgForTrainer) || [];
+            const trainerSettings = settings.filter((s) => s.recipient === SessionReminderRecipient.Trainer);
+
+            for (const setting of trainerSettings) {
+                const daysBefore = Number(setting.days_before);
+                if (!Number.isFinite(daysBefore) || daysBefore < 1) continue;
+
+                const key = trainerReminderKey(setting.id);
+                if (sent[key]) continue;
+
+                const sendDayIst = learnerPlanReminderSendDayIst(new Date(plan.startDate), daysBefore);
+                if (!isSameIstDay(sendDayIst, todayIst)) continue;
+
+                if (!trainerEmail) continue;
+
+                const subject = `Reminder: training session in ${daysBefore} day${daysBefore === 1 ? "" : "s"} (${sessionType})`;
+                const html = `
+<p>Hi ${trainerName},</p>
+<p>This is a reminder that you have an upcoming session in Locker in ${daysBefore} calendar day${daysBefore === 1 ? "" : "s"} (IST).</p>
+<p><strong>Session Details:</strong><br/>
+Date: ${dateText}<br/>
+Time: ${startTimeText} - ${endTimeText}<br/>
+Session Type: ${sessionType}<br/>
+${plan.title ? `Title: ${plan.title}<br/>` : ""}
+Location: ${plan.location || "—"}</p>
+<p>Best regards,<br/>The Locker Team</p>
+                `.trim();
+
+                try {
+                    await sendSimpleEmailAsync(trainerEmail, subject, html);
+                    sent[key] = new Date().toISOString();
+                    changed = true;
+                } catch (e) {
+                    console.error("Trainer reminder email failed:", trainerEmail, e);
+                }
+            }
+        }
+
+        if (changed) {
+            plan.reminder_sent_at = sent;
+            plan.reminder_email_sent_at = new Date();
             await learnerPlanRepo.save(plan);
         }
     }
@@ -287,11 +346,11 @@ export function startScheduledJobs(): void {
         pattern,
         async () => {
             if (!AppDataSource.isInitialized) return;
-            // try {
-            //     await runSessionReminders();
-            // } catch (e) {
-            //     console.error("runSessionReminders:", e);
-            // }
+            try {
+                await runSessionReminders();
+            } catch (e) {
+                console.error("runSessionReminders:", e);
+            }
             try {
                 await runBilResumeInTraining();
             } catch (e) {

@@ -1,7 +1,7 @@
 import { Response } from "express";
 import { AppDataSource } from "../data-source";
 import { CustomRequest } from "../util/Interface/expressInterface";
-import { SessionReminderSetting } from "../entity/SessionReminderSetting.entity";
+import { SessionReminderSetting, SessionReminderRecipient } from "../entity/SessionReminderSetting.entity";
 import {
     getScopeContext,
     getAccessibleOrganisationIds,
@@ -10,8 +10,14 @@ import {
 } from "../util/organisationFilter";
 import { UserRole } from "../util/constants";
 
-const MIN_DAYS = 1;
-const MAX_DAYS = 365;
+/** Product-supported intervals: 1, 5, 7 days before (per org + recipient). */
+const ALLOWED_DAYS_BEFORE = [1, 5, 7] as const;
+
+function parseRecipient(raw: unknown): SessionReminderRecipient {
+    const s = String(raw ?? SessionReminderRecipient.Learner).trim();
+    if (s === SessionReminderRecipient.Trainer) return SessionReminderRecipient.Trainer;
+    return SessionReminderRecipient.Learner;
+}
 
 export class SessionReminderSettingController {
     /** List reminder interval options for session emails (scoped by organisation). */
@@ -61,18 +67,19 @@ export class SessionReminderSettingController {
     public async create(req: CustomRequest, res: Response) {
         try {
             const scopeContext = getScopeContext(req);
-            const { organisation_id: bodyOrgId, days_before, label, is_active } = req.body;
+            const { organisation_id: bodyOrgId, days_before, label, is_active, recipient } = req.body;
 
             if (days_before == null || days_before === "") {
                 return res.status(400).json({ message: "days_before is required", status: false });
             }
             const days = typeof days_before === "string" ? parseInt(days_before, 10) : Number(days_before);
-            if (isNaN(days) || days < MIN_DAYS || days > MAX_DAYS) {
+            if (isNaN(days) || !ALLOWED_DAYS_BEFORE.includes(days as 1 | 5 | 7)) {
                 return res.status(400).json({
-                    message: `days_before must be between ${MIN_DAYS} and ${MAX_DAYS}`,
+                    message: `days_before must be one of: ${ALLOWED_DAYS_BEFORE.join(", ")}`,
                     status: false,
                 });
             }
+            const recipientVal = parseRecipient(recipient);
 
             let organisationId: number | null =
                 bodyOrgId != null && bodyOrgId !== "" ? Number(bodyOrgId) : null;
@@ -109,6 +116,7 @@ export class SessionReminderSettingController {
             const row = repo.create({
                 organisation_id: organisationId,
                 days_before: days,
+                recipient: recipientVal,
                 label: label ?? null,
                 is_active: is_active !== undefined ? Boolean(is_active) : true,
             });
@@ -123,7 +131,8 @@ export class SessionReminderSettingController {
             } catch (e: any) {
                 if (String(e?.message || "").includes("unique") || e?.code === "23505") {
                     return res.status(400).json({
-                        message: "A reminder with this number of days already exists for this organisation",
+                        message:
+                            "A reminder with this number of days and recipient already exists for this organisation",
                         status: false,
                     });
                 }
@@ -156,13 +165,13 @@ export class SessionReminderSettingController {
                 return res.status(403).json({ message: "Forbidden", status: false });
             }
 
-            const { days_before, label, is_active } = req.body;
+            const { days_before, label, is_active, recipient } = req.body;
             if (days_before !== undefined && days_before !== null && days_before !== "") {
                 const days =
                     typeof days_before === "string" ? parseInt(days_before, 10) : Number(days_before);
-                if (isNaN(days) || days < MIN_DAYS || days > MAX_DAYS) {
+                if (isNaN(days) || !ALLOWED_DAYS_BEFORE.includes(days as 1 | 5 | 7)) {
                     return res.status(400).json({
-                        message: `days_before must be between ${MIN_DAYS} and ${MAX_DAYS}`,
+                        message: `days_before must be one of: ${ALLOWED_DAYS_BEFORE.join(", ")}`,
                         status: false,
                     });
                 }
@@ -170,6 +179,7 @@ export class SessionReminderSettingController {
             }
             if (label !== undefined) existing.label = label;
             if (is_active !== undefined) existing.is_active = Boolean(is_active);
+            if (recipient !== undefined) existing.recipient = parseRecipient(recipient);
 
             try {
                 const saved = await repo.save(existing);
@@ -181,7 +191,8 @@ export class SessionReminderSettingController {
             } catch (e: any) {
                 if (String(e?.message || "").includes("unique") || e?.code === "23505") {
                     return res.status(400).json({
-                        message: "A reminder with this number of days already exists for this organisation",
+                        message:
+                            "A reminder with this number of days and recipient already exists for this organisation",
                         status: false,
                     });
                 }
