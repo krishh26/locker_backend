@@ -1,4 +1,5 @@
 import { Response } from "express";
+import { Brackets } from "typeorm";
 import { AppDataSource } from "../data-source";
 import { SessionType } from "../entity/SessionType.entity";
 import { CustomRequest } from "../util/Interface/expressInterface";
@@ -21,6 +22,16 @@ export class SessionTypeController {
 
       if (!name) {
         return res.status(400).json({ message: "Name is required", status: false });
+      }
+
+      if (req.body?.is_system === true) {
+        return res.status(400).json({ message: "System session types cannot be created" });
+      }
+
+      //if name already exists and is_system=true, return error
+      const existing = await AppDataSource.getRepository(SessionType).findOne({ where: { name, is_system: true } });
+      if (existing) {
+        return res.status(400).json({ message: "System default session type already exists", status: false });
       }
 
       const scopeContext = getScopeContext(req);
@@ -85,6 +96,7 @@ export class SessionTypeController {
         name,
         is_off_the_job,
         active,
+        is_system: false,
         order: (maxOrder?.max ?? 0) + 1,
         organisation_id: organisationId,
         centre_id: centreId,
@@ -112,6 +124,15 @@ export class SessionTypeController {
       const item = await qb.getOne();
 
       if (!item) return res.status(404).json({ message: "Not found", status: false });
+      if (item.is_system) {
+        return res.status(403).json({ message: "System default session type cannot be updated", status: false });
+      }
+      if (item.name !== data.name) {
+        const existing = await AppDataSource.getRepository(SessionType).findOne({ where: { name: data.name, is_system: true } });
+        if (existing) {
+          return res.status(400).json({ message: "System default session type already exists", status: false });
+        }
+      }
 
       if (data.organisation_id != null && data.organisation_id !== item.organisation_id && req.user && !(await canAccessOrganisation(req.user, Number(data.organisation_id), getScopeContext(req)))) {
         return res.status(403).json({ message: "You cannot assign this session type to that organisation", status: false });
@@ -140,6 +161,9 @@ export class SessionTypeController {
       const item = await qb.getOne();
 
       if (!item) return res.status(404).json({ message: "Not found", status: false });
+      if (item.is_system) {
+        return res.status(403).json({ message: "System default session type cannot be deleted", status: false });
+      }
 
       item.active = false;
       await repo.save(item);
@@ -156,8 +180,36 @@ export class SessionTypeController {
     try {
       const repo = AppDataSource.getRepository(SessionType);
       const qb = repo.createQueryBuilder("session_type").orderBy("session_type.order", "ASC");
+      const scopeContext = getScopeContext(req);
       if (req.user) {
-        await applyScope(qb, req.user, "session_type", { scopeContext: getScopeContext(req) });
+        const role = resolveUserRole(req.user);
+        const skipScope = role === UserRole.MasterAdmin && !scopeContext?.organisationId;
+        if (!skipScope) {
+          const orgIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+          if (orgIds === null) {
+            if (role !== UserRole.MasterAdmin) {
+              qb.andWhere("session_type.is_system = true");
+            }
+          } else if (orgIds.length === 0) {
+            qb.andWhere("session_type.is_system = true");
+          } else {
+            const centreIds = await getAccessibleCentreIds(req.user, scopeContext);
+            qb.andWhere(
+              new Brackets((sub) => {
+                sub.where("session_type.is_system = true").orWhere(
+                  new Brackets((inner) => {
+                    inner.where("session_type.organisation_id IN (:...orgIds)", { orgIds });
+                    if (centreIds !== null && centreIds.length > 0) {
+                      inner.andWhere("session_type.centre_id IN (:...centreIds)", { centreIds });
+                    } else if (centreIds !== null && centreIds.length === 0) {
+                      inner.andWhere("1 = 0");
+                    }
+                  })
+                );
+              })
+            );
+          }
+        }
       }
       const data = await qb.getMany();
 
@@ -180,11 +232,20 @@ export class SessionTypeController {
       }
       const current = await currentQb.getOne();
       if (!current) return res.status(404).json({ message: "Not found" });
+      if (current.is_system) {
+        return res.status(403).json({ message: "System default session type cannot be reordered", status: false });
+      }
 
       const nextOrder = direction === "UP" ? current.order - 1 : current.order + 1;
       const swapQb = repo.createQueryBuilder("session_type")
         .where("session_type.organisation_id = :orgId", { orgId: current.organisation_id })
+        .andWhere("session_type.is_system = false")
         .andWhere("session_type.order = :ord", { ord: nextOrder });
+      if (current.centre_id != null) {
+        swapQb.andWhere("session_type.centre_id = :centreId", { centreId: current.centre_id });
+      } else {
+        swapQb.andWhere("session_type.centre_id IS NULL");
+      }
       if (req.user) {
         await applyScope(swapQb, req.user, "session_type", { scopeContext: getScopeContext(req) });
       }

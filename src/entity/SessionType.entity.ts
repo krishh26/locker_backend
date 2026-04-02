@@ -17,6 +17,10 @@ export class SessionType {
   @Column({ type: "int", default: 0 })
   order: number;
 
+  /** Global preset type (visible to all orgs, read-only). */
+  @Column({ type: "boolean", default: false })
+  is_system: boolean;
+
   @Column({ name: "organisation_id", type: "int", nullable: true })
   organisation_id: number | null;
 

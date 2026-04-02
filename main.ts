@@ -6,6 +6,7 @@ import MainRoutes from "./src/Routes/index";
 import bodyParser from 'body-parser';
 import morgan from 'morgan';
 import { initSocket } from './src/socket/socket';
+import { seedSessionTypes } from './src/seeds/sessionType.seed';
 
 const app: Express = express();
 const port = process.env.PORT || 4000;
@@ -21,6 +22,7 @@ AppDataSource.initialize().then(async () => {
     console.log("Data Source has been initialized! 🎈")
     const { startScheduledJobs } = await import("./src/jobs/scheduledJobs");
     startScheduledJobs();
+    await seedSessionTypes();
 }).catch((err) => {
     console.error("Error during Data Source initialization 🏃‍♂️:", err)
 })

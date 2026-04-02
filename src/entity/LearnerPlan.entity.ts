@@ -170,17 +170,13 @@ export class LearnerPlan {
     @Column({ type: 'boolean', default: false })
     status: boolean;
 
-    /** @deprecated Prefer reminder_sent_at for multi-interval reminders. */
+    // Set when the pre-session reminder email has been sent (cleared when start date or reminder interval changes).
     @Column({ type: 'timestamp', nullable: true })
     reminder_email_sent_at: Date | null;
 
-    /**
-     * Per-setting send tracking for scheduled session reminders (IST send days).
-     * Keys: `L:{settingId}:{learnerId}` for learner emails, `T:{settingId}` for trainer (once per plan).
-     * Values: ISO timestamp when that reminder was sent.
-     */
-    @Column({ type: 'json', nullable: true })
-    reminder_sent_at: Record<string, string> | null;
+    // Set when the trainer reminder email has been sent for this plan.
+    @Column({ type: 'timestamp', nullable: true })
+    trainer_reminder_email_sent_at: Date | null;
 
     @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
     created_at: Date;
