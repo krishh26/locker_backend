@@ -2,7 +2,7 @@ import cron from "node-cron";
 import { AppDataSource } from "../data-source";
 import { sendSimpleEmailAsync } from "../util/nodemailer";
 import { LearnerPlan, LearnerPlanAttendedStatus } from "../entity/LearnerPlan.entity";
-import { SessionReminderSetting } from "../entity/SessionReminderSetting.entity";
+import { SessionReminderRecipient, SessionReminderSetting } from "../entity/SessionReminderSetting.entity";
 import { UserCourse } from "../entity/UserCourse.entity";
 import { CourseStatus } from "../util/constants";
 
@@ -84,9 +84,9 @@ export async function runSessionReminders(): Promise<void> {
         .leftJoinAndSelect("learner.centre", "centre")
         .leftJoinAndSelect("learner.organisation", "organisation")
         .leftJoinAndSelect("lp.assessor_id", "assessor")
-        .andWhere("lp.reminder_email_sent_at IS NULL")
         .andWhere("lp.startDate IS NOT NULL") // start date should be greater than today
         .andWhere("lp.startDate > :today", { today: todayIst })
+        .andWhere("(lp.reminder_email_sent_at IS NULL OR lp.trainer_reminder_email_sent_at IS NULL)")
         .getMany();
     console.log(`Learner plans considered for reminders: ${plans.length}`);
     
@@ -112,10 +112,7 @@ export async function runSessionReminders(): Promise<void> {
     console.log("orgSettingsMap size", orgSettingsMap.size);
 
     for (const plan of plans) {
-        if (plan.reminder_email_sent_at) {
-            continue;
-        }
-
+        console.log("plan", plan.learner_plan_id);
         if (plan.Attended && CANCELLED_PLAN.includes(plan.Attended)) {
             continue;
         }
@@ -129,6 +126,7 @@ export async function runSessionReminders(): Promise<void> {
             `${(plan.assessor_id as any)?.first_name ?? ""} ${(plan.assessor_id as any)?.last_name ?? ""}`.trim() ||
             (plan.assessor_id as any)?.user_name ||
             "Trainer";
+        const trainerEmail = (plan.assessor_id as any)?.email as string | undefined;
         const start = new Date(plan.startDate);
         const durationMinutes = Number(plan.Duration);
         const end = Number.isFinite(durationMinutes) ? new Date(start.getTime() + durationMinutes * 60 * 1000) : null;
@@ -139,32 +137,34 @@ export async function runSessionReminders(): Promise<void> {
             : "TBC";
         const sessionType = plan.type || "Training Session";
 
-        let anySent = false;
-        const sentEmails = new Set<string>();
-        for (const learner of learners) {
-            if (!learner.organisation_id || !learner.centre_id || !learner.centre) continue;
-            if (learner.centre.organisation_id !== learner.organisation_id) continue;
+        let learnerAnySent = false;
+        let trainerAnySent = false;
 
-            const effectiveSettings = orgSettingsMap.get(learner.organisation_id) || [];
-            if (effectiveSettings.length === 0) continue;
+        // Resolve organisation from learners (validated mapping).
+        const orgId =
+            learners.find((l) => l.organisation_id && l.centre?.organisation_id === l.organisation_id)?.organisation_id ??
+            null;
+        const settings = orgId != null ? orgSettingsMap.get(orgId) || [] : [];
 
-            // Plan-level setting overrides org settings; otherwise use earliest org interval.
-            const chosenSetting = effectiveSettings[0];
-            const daysBefore = Number(chosenSetting.days_before);
-            if (!Number.isFinite(daysBefore) || daysBefore < 1) continue;
+        // Learner reminder (send once per plan, based on matching learner-recipient setting for today).
+        if (!plan.reminder_email_sent_at) {
+            const learnerSetting = settings.find((s) => s.recipient === SessionReminderRecipient.Learner && isSameIstDay(learnerPlanReminderSendDayIst(new Date(plan.startDate), Number(s.days_before)), todayIst));
+            if (learnerSetting) {
+                const daysBefore = Number(learnerSetting.days_before);
+                const sentEmails = new Set<string>();
+                for (const learner of learners) {
+                    if (!learner.organisation_id || !learner.centre_id || !learner.centre) continue;
+                    if (learner.centre.organisation_id !== learner.organisation_id) continue;
 
-            const sendDayIst = learnerPlanReminderSendDayIst(new Date(plan.startDate), daysBefore);
-            if (!isSameIstDay(sendDayIst, todayIst)) continue;
+                    const email = learner.email || learner.user_id?.email;
+                    if (!email) continue;
+                    const emailKey = email.toLowerCase();
+                    if (sentEmails.has(emailKey)) continue;
+                    sentEmails.add(emailKey);
 
-            const email = learner.email || learner.user_id?.email;
-            if (!email) continue;
-            const emailKey = email.toLowerCase();
-            if (sentEmails.has(emailKey)) continue;
-            sentEmails.add(emailKey);
-
-            const learnerName = `${learner.first_name ?? ""} ${learner.last_name ?? ""}`.trim() || "Learner";
-            const subject = `Upcoming: Your training session is in ${daysBefore} day${daysBefore === 1 ? "" : "s"}!`;
-            const html = `
+                    const learnerName = `${learner.first_name ?? ""} ${learner.last_name ?? ""}`.trim() || "Learner";
+                    const subject = `Upcoming: Your training session is in ${daysBefore} day${daysBefore === 1 ? "" : "s"}!`;
+                    const html = `
 <p>Hi ${learnerName},</p>
 <p>This is a friendly reminder that you have a training session scheduled in ${daysBefore} day${daysBefore === 1 ? "" : "s"}. Now is a great time to check your schedule and make sure you're all set to join your Trainer.</p>
 <p><strong>Session Details:</strong><br/>
@@ -179,19 +179,45 @@ Session Type: ${sessionType}</p>
 <p>We look forward to seeing you there.</p>
 <p>Best regards,<br/>The Locker Team</p>
             `.trim();
-            console.log("email", email);
-            try {
-                await sendSimpleEmailAsync(email, subject, html);
-                anySent = true;
-            } catch (e) {
-                console.error("Email failed:", email, e);
+                    try {
+                        console.log("email", email);
+                        await sendSimpleEmailAsync(email, subject, html);
+                        learnerAnySent = true;
+                    } catch (e) {
+                        console.error("Learner reminder email failed:", email, e);
+                    }
+                }
             }
         }
 
-        if (anySent) {
-            // date store in utc same as db store, no string conversion
-            plan.reminder_email_sent_at = new Date(); 
-            console.log("reminder_email_sent_at", plan.reminder_email_sent_at);
+        // Trainer reminder (send once per plan, based on matching trainer-recipient setting for today).
+        if (!plan.trainer_reminder_email_sent_at && trainerEmail) {
+            const trainerSetting = settings.find((s) => s.recipient === SessionReminderRecipient.Trainer && isSameIstDay(learnerPlanReminderSendDayIst(new Date(plan.startDate), Number(s.days_before)), todayIst));
+            if (trainerSetting) {
+                const daysBefore = Number(trainerSetting.days_before);
+                const subject = `Reminder: training session is in ${daysBefore} day${daysBefore === 1 ? "" : "s"} 🔒`;
+                const html = `
+<p>Hi ${trainerName},</p>
+<p>This is a friendly reminder that you have a training session scheduled in ${daysBefore} day${daysBefore === 1 ? "" : "s"}.</p>
+<p><strong>Session Details:</strong><br/>
+Date: ${dateText}<br/>
+Time: ${startTimeText} - ${endTimeText}<br/>
+Session Type: ${sessionType}</p>
+<p>Best regards,<br/>The Locker Team</p>
+                `.trim();
+                try {
+                    console.log("trainerEmail", trainerEmail);
+                    await sendSimpleEmailAsync(trainerEmail, subject, html);
+                    trainerAnySent = true;
+                } catch (e) {
+                    console.error("Trainer reminder email failed:", trainerEmail, e);
+                }
+            }
+        }
+
+        if (learnerAnySent || trainerAnySent) {
+            if (learnerAnySent && !plan.reminder_email_sent_at) plan.reminder_email_sent_at = new Date();
+            if (trainerAnySent && !plan.trainer_reminder_email_sent_at) plan.trainer_reminder_email_sent_at = new Date();
             await learnerPlanRepo.save(plan);
         }
     }
@@ -210,13 +236,14 @@ export async function runBilResumeInTraining(): Promise<void> {
         .where("uc.course_status = :status", { status: CourseStatus.TrainingSuspended })
         .andWhere("uc.bil_return_date IS NOT NULL")
         .getMany();
-
+    console.log("suspended", suspended.length);
     for (const uc of suspended) {
+        console.log("uc", uc.user_course_id);
         const returnRaw = uc.bil_return_date;
         if (!returnRaw) continue;
         const returnDayIst = istDay(returnRaw instanceof Date ? returnRaw : new Date(returnRaw));
         if (todayIst.getTime() < returnDayIst.getTime()) continue;
-
+        console.log("returnDayIst", returnDayIst);
         uc.course_status = CourseStatus.InTraining;
         uc.bil_return_date = null;
         uc.bil_return_reminder_sent_at = null;
@@ -269,6 +296,7 @@ export async function runBilReturnReminders(): Promise<void> {
 `.trim();
 
         try {
+            console.log("email", email);
             await sendSimpleEmailAsync(email, subject, html);
             uc.bil_return_reminder_sent_at = new Date();
             await ucRepo.save(uc);
@@ -287,11 +315,11 @@ export function startScheduledJobs(): void {
         pattern,
         async () => {
             if (!AppDataSource.isInitialized) return;
-            // try {
-            //     await runSessionReminders();
-            // } catch (e) {
-            //     console.error("runSessionReminders:", e);
-            // }
+            try {
+                await runSessionReminders();
+            } catch (e) {
+                console.error("runSessionReminders:", e);
+            }
             try {
                 await runBilResumeInTraining();
             } catch (e) {

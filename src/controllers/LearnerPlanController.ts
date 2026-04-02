@@ -242,6 +242,7 @@ Session Type: ${sessionType}</p>
                 upload_session_files: repeatSession ? upload_session_files || false : false,
                 file_attachments: repeatSession ? file_attachments || [] : [],
                 reminder_email_sent_at: null,
+                trainer_reminder_email_sent_at: null,
             });
 
             const savedLearnerPlan = await learnerPlanRepository.save(learnerPlan) as unknown as LearnerPlan;
@@ -379,6 +380,7 @@ Session Type: ${sessionType}</p>
 
 
             learnerPlan.reminder_email_sent_at = null;
+            (learnerPlan as any).trainer_reminder_email_sent_at = null;
 
             learnerPlan = await learnerPlanRepository.save(learnerPlan);
 
