@@ -550,6 +550,12 @@ class CentreController {
             });
             const previousUserIds = [...new Set(existingMappings.map(m => m.user_id))];
 
+            const prevSet = new Set(previousUserIds);
+
+            const newlyAddedUserIds = user_ids.filter(
+                id => !prevSet.has(id)
+            );
+
             // Remove existing mappings for this centre
             await userCentreRepository.delete({ centre_id: centre.id });
 
@@ -568,6 +574,18 @@ class CentreController {
                 }
             }
 
+             if (newlyAddedUserIds.length > 0) {
+                const newUsers = users.filter(u => newlyAddedUserIds.includes(u.user_id));
+
+                for (const user of newUsers) {
+                    await sendAdminAssignmentEmail(user.email, {
+                        type: "centre",
+                        centreName: centre.name,
+                        organisationName: centre.organisation?.name,
+                        assignedByName: `${req.user?.first_name || ""} ${req.user?.last_name || ""}`.trim() || undefined,
+                    });
+                }
+            }
             // Remove CentreAdmin from users who were removed from this centre and have no other centres
             const removedUserIds = previousUserIds.filter(id => !user_ids.includes(id));
             for (const uid of removedUserIds) {

@@ -618,6 +618,12 @@ class OrganisationController {
             });
             const previousUserIds = [...new Set(existingRows.map(r => r.user_id))];
 
+            const prevSet = new Set(previousUserIds);
+
+            const newlyAddedUserIds = user_ids.filter(
+                id => !prevSet.has(id)
+            );
+
             await userOrganisationRepository.delete({ organisation_id: organisationId });
 
             if (user_ids.length > 0) {
@@ -643,6 +649,14 @@ class OrganisationController {
                         organisation: { id: organisationId }
                     });
                     await userOrganisationRepository.save(userOrganisation);
+
+                    if (newlyAddedUserIds.includes(user.user_id)) {
+                        await sendAdminAssignmentEmail(user.email, {
+                            type: "organisation",
+                            organisationName: organisation.name,
+                            assignedByName: `${req.user?.first_name || ""} ${req.user?.last_name || ""}`.trim() || undefined,
+                        });
+                    }
                 }
             }
 
@@ -653,7 +667,7 @@ class OrganisationController {
                 if (remaining === 0) {
                     const u = await userRepository.findOne({ where: { user_id: uid } });
                     if (u && (u.roles.includes(UserRole.OrganisationAdmin) || u.roles.includes(UserRole.Admin))) {
-                        u.roles = u.roles.filter(role => role !== UserRole.OrganisationAdmin && role !== UserRole.Admin);
+                        u.roles = u.roles.filter(role => role !== UserRole.OrganisationAdmin);
                         await userRepository.save(u);
                     }
                 }
