@@ -326,6 +326,56 @@ export const sendUserEmail = async (email: string, data: any): Promise<any> => {
     return true;
 };
 
+export const sendAdminAssignmentEmail = async (email: string, data: { type: "organisation" | "centre"; organisationName?: string; centreName?: string; assignedByName?: string; }): Promise<boolean> => {
+    try {
+        const loginUrl = process.env.FRONTEND || "";
+        const title = data.type === "organisation" ? "You’ve been assigned as an Organisation Admin" : "You’ve been assigned as a Centre Admin";
+        const scopeLine =
+            data.type === "organisation"
+                ? (data.organisationName ? `Organisation: <strong>${data.organisationName}</strong>` : "")
+                : (data.centreName ? `Centre: <strong>${data.centreName}</strong>` : "");
+        const assignedByLine = data.assignedByName ? `<p>Assigned by: <strong>${data.assignedByName}</strong></p>` : "";
+
+        const html = `<!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                body { font-family: Arial, sans-serif; background-color: #f0f0f0; margin: 0; padding: 0; }
+                .container { max-width: 640px; margin: 20px auto; background-color: #ffffff; padding: 24px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.08); }
+                .logo { max-width: 160px; height: auto; display: block; margin: 0 auto 16px; }
+                .title { font-size: 20px; font-weight: 700; color: #222; margin: 8px 0 12px; text-align: center; }
+                .text { font-size: 14px; color: #444; line-height: 1.6; }
+                .box { background: #f7f9fb; border: 1px solid #e6eef5; border-radius: 8px; padding: 14px; margin: 14px 0; }
+                .btn { display: inline-block; padding: 12px 18px; background: #3498db; color: #fff !important; text-decoration: none; border-radius: 6px; font-weight: 600; }
+                .footer { font-size: 12px; color: #777; margin-top: 16px; text-align: center; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <img class="logo" src="https://jeel1.s3.ap-south-1.amazonaws.com/logo/logo.svg" alt="Locker Logo">
+                <div class="title">${title}</div>
+                <div class="text">
+                    <p>Your account permissions have been updated in Locker.</p>
+                    ${assignedByLine}
+                    ${scopeLine ? `<div class="box">${scopeLine}</div>` : ""}
+                    ${loginUrl ? `<p style="text-align:center"><a class="btn" href="${loginUrl}">Login to Locker</a></p>` : ""}
+                    <p>If you weren’t expecting this change, please contact support.</p>
+                </div>
+                <div class="footer">Sent from the Locker system. Please do not reply to this email.</div>
+            </div>
+        </body>
+        </html>`;
+
+        await SendEmailTemplet(email, `Locker - ${title}`, null, html);
+        return true;
+    } catch (error) {
+        console.log("sendAdminAssignmentEmail error:", error);
+        return false;
+    }
+};
+
 export const sendSessionInviteEmail = async (
     learnerEmail: string,
     sessionData: {

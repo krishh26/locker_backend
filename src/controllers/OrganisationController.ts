@@ -7,6 +7,7 @@ import { In } from "typeorm";
 import AuditLogController from "./AuditLogController";
 import { AuditActionType } from "../entity/AuditLog.entity";
 import { getAccessibleOrganisationIds, canAccessOrganisation, getScopeContext, validateOneOrganisationPerUser, getUserOrganisationIds } from "../util/organisationFilter";
+import { sendAdminAssignmentEmail } from "../util/mailSend";
 class OrganisationController {
     // Helper method to get accessible organisation IDs for user
 
@@ -475,6 +476,13 @@ class OrganisationController {
                 });
                 await userOrganisationRepository.save(userOrganisation);
             }
+
+            // Send email notification (do not block response on email failures)
+            await sendAdminAssignmentEmail(user.email, {
+                type: "organisation",
+                organisationName: organisation.name,
+                assignedByName: `${req.user?.first_name || ""} ${req.user?.last_name || ""}`.trim() || undefined,
+            });
 
             return res.status(200).json({
                 message: "Admin assigned to organisation successfully",

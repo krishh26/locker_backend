@@ -9,6 +9,7 @@ import { UserRole } from "../util/constants";
 import { In } from "typeorm";
 import { UserCentre } from "../entity/UserCentre.entity";
 import { UserOrganisation } from "../entity/UserOrganisation.entity";
+import { sendAdminAssignmentEmail } from "../util/mailSend";
 
 class CentreController {
     public async CreateCentre(req: CustomRequest, res: Response) {
@@ -394,6 +395,14 @@ class CentreController {
                 user.roles = [...user.roles, UserRole.CentreAdmin];
                 await userRepository.save(user);
             }
+
+            // Send email notification (do not block response on email failures)
+            await sendAdminAssignmentEmail(user.email, {
+                type: "centre",
+                centreName: centre.name,
+                organisationName: centre.organisation?.name,
+                assignedByName: `${req.user?.first_name || ""} ${req.user?.last_name || ""}`.trim() || undefined,
+            });
 
             return res.status(200).json({
                 message: "Admin assigned to centre successfully",
