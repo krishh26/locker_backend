@@ -22,6 +22,7 @@ import { SamplingPlanAction } from "../entity/SamplingPlanAction.entity";
 import { SamplingPlanDetail } from "../entity/SamplingPlanDetail.entity";
 import { Centre } from "../entity/Centre.entity";
 import { SamplingPlan } from "../entity/samplingPlan.entity";
+import { UserOrganisation } from "../entity/UserOrganisation.entity";
 import { In } from "typeorm";
 import { getAccessibleOrganisationIds, getAccessibleCentreAdminUserIds, applyLearnerScope, validateLearnerOrganisationCentre, canAccessOrganisation, canAccessCentre, getScopeContext } from "../util/organisationFilter";
 class LearnerController {
@@ -78,6 +79,7 @@ class LearnerController {
             }
             const userRepository = AppDataSource.getRepository(User)
             const learnerRepository = AppDataSource.getRepository(Learner)
+            const userOrganisationRepository = AppDataSource.getRepository(UserOrganisation);
 
             const userEmail = await userRepository.findOne({ where: { email: email } });
 
@@ -105,6 +107,15 @@ class LearnerController {
             const learner = await learnerRepository.create(req.body);
 
             const savelearner = await learnerRepository.save(learner)
+
+            // Keep learner user and user_organisations in sync for scope filters.
+            await userOrganisationRepository.delete({ user_id: user.user_id });
+            await userOrganisationRepository.save(
+                userOrganisationRepository.create({
+                    user_id: user.user_id,
+                    organisation_id: Number(organisation_id)
+                })
+            );
 
             const sendResult = await sendPasswordByEmail(email, password)
             if (!sendResult) {
@@ -142,6 +153,7 @@ class LearnerController {
 
             const userRepository = AppDataSource.getRepository(User);
             const learnerRepository = AppDataSource.getRepository(Learner);
+            const userOrganisationRepository = AppDataSource.getRepository(UserOrganisation);
 
             const results = [];
             const errors = [];
@@ -199,6 +211,16 @@ class LearnerController {
 
                     const learner = await learnerRepository.create(learnerCreateData);
                     const savedLearner = await learnerRepository.save(learner);
+
+                    if (learnerData.organisation_id != null) {
+                        await userOrganisationRepository.delete({ user_id: user.user_id });
+                        await userOrganisationRepository.save(
+                            userOrganisationRepository.create({
+                                user_id: user.user_id,
+                                organisation_id: Number(learnerData.organisation_id)
+                            })
+                        );
+                    }
 
                     // Send password email
                     const sendResult = await sendPasswordByEmail(email, password);
@@ -347,15 +369,17 @@ class LearnerController {
             } else if (status.length) {
                 qbUserCourse.andWhere("user_course.course_status IN (:...status)", { status });
             }
-
+            console.log(trainer_id)
             if (trainer_id) {
                 // Filter learners by trainer_id
                 usercourses = await qbUserCourse
                     .andWhere('user_course.trainer_id = :trainer_id', { trainer_id: parseInt(trainer_id) })
                     .getMany();
+                    console.log(usercourses.length)
                 learnerIdsArray = usercourses
                     .map(userCourse => userCourse?.learner_id?.learner_id)
                     .filter((id: any) => id != null);
+                    console.log(learnerIdsArray)
             } else if (user_id && role) {
                 const obj: any = {
                     EQA: "EQA_id",
@@ -426,6 +450,7 @@ class LearnerController {
                     employerIdsArray
                 });
             }
+            
             if ((trainer_id && learnerIdsArray.length) || (role && user_id && learnerIdsArray.length) || (course_id && learnerIdsArray.length) || (!status.includes("Show only archived users") && status.length && learnerIdsArray.length)) {
                 qb.andWhere('learner.learner_id IN (:...learnerIdsArray)', { learnerIdsArray })
             }
@@ -901,6 +926,7 @@ class LearnerController {
             const learnerRepository = AppDataSource.getRepository(Learner);
             const employerRepository = AppDataSource.getRepository(Employer);
             const userRepository = AppDataSource.getRepository(User);
+            const userOrganisationRepository = AppDataSource.getRepository(UserOrganisation);
             const existingLearner = await learnerRepository.findOne({ where: { learner_id: learnerId }, relations: ['user_id'] });
 
             if (!existingLearner) {
@@ -939,6 +965,16 @@ class LearnerController {
 
             learnerRepository.merge(existingLearner, req.body);
             const updatedLearner = await learnerRepository.save(existingLearner);
+
+            if (updatedLearner?.user_id?.user_id && updatedLearner.organisation_id != null) {
+                await userOrganisationRepository.delete({ user_id: updatedLearner.user_id.user_id });
+                await userOrganisationRepository.save(
+                    userOrganisationRepository.create({
+                        user_id: updatedLearner.user_id.user_id,
+                        organisation_id: Number(updatedLearner.organisation_id)
+                    })
+                );
+            }
 
             return res.status(200).json({
                 message: 'Learner updated successfully',

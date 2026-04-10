@@ -10,7 +10,7 @@ export class AssignmentMapping {
   @PrimaryGeneratedColumn()
   mapping_id: number;
 
-  @ManyToOne(() => Assignment)
+  @ManyToOne(() => Assignment, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'assignment_id' })
   assignment: Assignment;
 
