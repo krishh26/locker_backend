@@ -36,7 +36,7 @@ export class AssignmentMapping {
   @Column({ type: 'boolean', default: false })
   trainerMap: boolean;
 
-  @Column({ type: 'boolean', default: false })
+  @Column({ name: 'signed_off', type: 'boolean', default: false })
   signedOff: boolean;
 
   @Column({ type: 'varchar', length: 4000, nullable: true })
