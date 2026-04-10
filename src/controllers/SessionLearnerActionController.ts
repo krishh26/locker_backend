@@ -9,6 +9,20 @@ import { Course } from '../entity/Course.entity';
 import { uploadToS3 } from '../util/aws';
 import { applyLearnerScope, getScopeContext } from '../util/organisationFilter';
 
+/** Accepts enum values or common API aliases (e.g. in_progress → in progress). */
+function normalizeActionStatus(input: unknown): ActionStatus | undefined {
+    if (input === undefined || input === null || input === '') return undefined;
+    const s = String(input)
+        .trim()
+        .toLowerCase()
+        .replace(/_/g, ' ')
+        .replace(/\s+/g, ' ');
+    if (s === 'not started') return ActionStatus.NotStarted;
+    if (s === 'in progress') return ActionStatus.InProgress;
+    if (s === 'completed') return ActionStatus.Completed;
+    return undefined;
+}
+
 export class SessionLearnerActionController {
 
     public async uploadFile(req: CustomRequest, res: Response) {
@@ -136,6 +150,16 @@ export class SessionLearnerActionController {
                 }
             }
 
+            const boolStatus = typeof status === 'boolean' ? status : false;
+            const resolvedLearnerStatus =
+                normalizeActionStatus(learner_status) ?? ActionStatus.NotStarted;
+            const resolvedTrainerStatus =
+                normalizeActionStatus(trainer_status) ??
+                (typeof status !== 'boolean'
+                    ? normalizeActionStatus(status)
+                    : undefined) ??
+                ActionStatus.NotStarted;
+
             // Create action
             const action = actionRepository.create({
                 learner_plan: learnerPlan,
@@ -146,12 +170,12 @@ export class SessionLearnerActionController {
                 added_by: addedBy,
                 unit: unit || null,
                 file_attachment: fileAttachment,
-                status: status || false,
+                status: boolStatus,
                 trainer_feedback,
                 learner_feedback,
                 time_spent,
-                learner_status: learner_status || ActionStatus.NotStarted,
-                trainer_status: trainer_status || ActionStatus.NotStarted,
+                learner_status: resolvedLearnerStatus,
+                trainer_status: resolvedTrainerStatus,
                 who: who || null
             });
 
@@ -302,12 +326,30 @@ export class SessionLearnerActionController {
             action.job_type = job_type || action.job_type;
             action.unit = unit !== undefined ? unit : action.unit;
             action.file_attachment = fileAttachment;
-            action.status = status !== undefined ? status : action.status;
+
+            // `status` column is boolean; workflow strings belong on learner_status / trainer_status
+            if (typeof status === 'boolean') {
+                action.status = status;
+            }
+
+            const nextTrainerStatus = normalizeActionStatus(trainer_status);
+            if (nextTrainerStatus !== undefined) {
+                action.trainer_status = nextTrainerStatus;
+            } else if (status !== undefined && status !== null && typeof status !== 'boolean') {
+                const fromStatus = normalizeActionStatus(status);
+                if (fromStatus !== undefined) {
+                    action.trainer_status = fromStatus;
+                }
+            }
+
+            const nextLearnerStatus = normalizeActionStatus(learner_status);
+            if (nextLearnerStatus !== undefined) {
+                action.learner_status = nextLearnerStatus;
+            }
+
             action.trainer_feedback = trainer_feedback || action.trainer_feedback;
             action.learner_feedback = learner_feedback || action.learner_feedback;
             action.time_spent = time_spent || action.time_spent;
-            action.learner_status = learner_status || action.learner_status;
-            action.trainer_status = trainer_status || action.trainer_status;
             action.who = who || action.who;
 
             const updatedAction = await actionRepository.save(action);

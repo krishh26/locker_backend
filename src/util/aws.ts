@@ -55,8 +55,14 @@ export const uploadMultipleFilesToS3 = async (files, folderName) => {
   }
 }
 
-export const deleteFromS3 = async (obj) => {
-  const key = obj.key
+export const deleteFromS3 = async (obj: { key?: string } | string) => {
+  const key =
+    typeof obj === "string" ? obj : obj?.key;
+  if (!key || typeof key !== "string") {
+    console.warn("deleteFromS3: missing key, skipping delete");
+    return;
+  }
+
   const params = {
     Bucket: process.env.AWS_BUCKET_NAME,
     Key: key,
