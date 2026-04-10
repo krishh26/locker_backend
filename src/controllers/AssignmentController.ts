@@ -990,7 +990,7 @@ class AssignmentController {
                 course_id: m.course.course_id,
                 learner_map: m.learnerMap,
                 trainer_map: m.trainerMap,
-                signed_off: m.signedOff ?? false,
+                signed_off: m.signed_off ?? false,
                 comment: m.comment,
                 comment_updated_by: m.comment_updated_by,
                 comment_updated_at: m.comment_updated_at
@@ -1218,15 +1218,15 @@ class AssignmentController {
                 learnerMap,
                 trainerMap,
                 comment,
-                signedOff,
+                signedOff: signedOffLegacy,
                 signed_off,
             } = req.body;
 
-            const signedOffPayload =
-                signedOff !== undefined
-                    ? signedOff
-                    : signed_off !== undefined
-                      ? signed_off
+            const signed_off_payload =
+                signed_off !== undefined
+                    ? signed_off
+                    : signedOffLegacy !== undefined
+                      ? signedOffLegacy
                       : undefined;
 
             if (!assignment_id || !course_id || !unit_code) {
@@ -1286,8 +1286,8 @@ class AssignmentController {
                         }
                     }
 
-                    if (signedOffPayload !== undefined) {
-                        row.signedOff = !!signedOffPayload;
+                    if (signed_off_payload !== undefined) {
+                        row.signed_off = !!signed_off_payload;
                     }
 
                     rows.push(row);
@@ -1325,8 +1325,8 @@ class AssignmentController {
                     }
                 }
 
-                if (signedOffPayload !== undefined) {
-                    row.signedOff = !!signedOffPayload;
+                if (signed_off_payload !== undefined) {
+                    row.signed_off = !!signed_off_payload;
                 }
 
                 rows.push(row);
@@ -1407,7 +1407,7 @@ class AssignmentController {
 
     public async toggleMappingFlag(req: CustomRequest, res: Response) {
         try {
-            const { mapping_id, learnerMap, trainerMap, comment, signedOff, signed_off } =
+            const { mapping_id, learnerMap, trainerMap, comment, signedOff: signedOffLegacy, signed_off } =
                 req.body;
 
             if (
@@ -1415,7 +1415,7 @@ class AssignmentController {
                 (learnerMap === undefined &&
                     trainerMap === undefined &&
                     comment === undefined &&
-                    signedOff === undefined &&
+                    signedOffLegacy === undefined &&
                     signed_off === undefined)
             ) {
                 return res.status(400).json({
@@ -1440,10 +1440,10 @@ class AssignmentController {
             if (learnerMap !== undefined) row.learnerMap = learnerMap;
             if (trainerMap !== undefined) row.trainerMap = trainerMap;
 
-            const signedOffVal =
-                signedOff !== undefined ? signedOff : signed_off !== undefined ? signed_off : undefined;
-            if (signedOffVal !== undefined) {
-                row.signedOff = !!signedOffVal;
+            const signed_off_val =
+                signed_off !== undefined ? signed_off : signedOffLegacy !== undefined ? signedOffLegacy : undefined;
+            if (signed_off_val !== undefined) {
+                row.signed_off = !!signed_off_val;
             }
 
             if (comment !== undefined) {

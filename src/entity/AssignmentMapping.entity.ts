@@ -10,7 +10,7 @@ export class AssignmentMapping {
   @PrimaryGeneratedColumn()
   mapping_id: number;
 
-  @ManyToOne(() => Assignment, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Assignment)
   @JoinColumn({ name: 'assignment_id' })
   assignment: Assignment;
 
@@ -37,7 +37,7 @@ export class AssignmentMapping {
   trainerMap: boolean;
 
   @Column({ name: 'signed_off', type: 'boolean', default: false })
-  signedOff: boolean;
+  signed_off: boolean;
 
   @Column({ type: 'varchar', length: 4000, nullable: true })
   comment: string;
