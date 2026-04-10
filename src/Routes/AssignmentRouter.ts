@@ -15,7 +15,12 @@ AssignmentRoutes.get("/list-with-signatures", authorizeRoles(), paginationMiddle
 AssignmentRoutes.patch("/update/:id", authorizeRoles(), Controller.updateAssignment);
 AssignmentRoutes.delete("/delete/:id", authorizeRoles(), Controller.deleteAssignment);
 AssignmentRoutes.get("/get/:id", authorizeRoles(), Controller.getAssignment);
-AssignmentRoutes.patch('/:id/reupload', singleFileUpload('file'), Controller.reuploadAssignmentFile);
+AssignmentRoutes.patch(
+    '/:id/reupload',
+    authorizeRoles(),
+    singleFileUpload('file'),
+    Controller.reuploadAssignmentFile
+);
 
 // Audio feedback routes
 AssignmentRoutes.post('/:id/external-feedback', authorizeRoles(), singleFileUpload("audio"), Controller.uploadAudioFeedback);

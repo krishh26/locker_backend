@@ -9,7 +9,9 @@ import { AssignmentSignature } from "../entity/AssignmentSignature.entity";
 import { Learner } from "../entity/Learner.entity";
 import { User } from "../entity/User.entity";
 import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
-import { AssessmentStatus } from "../util/constants";
+import { AssignmentPCReview } from "../entity/AssignmentPCReview.entity";
+import { AssignmentReview } from "../entity/AssignmentReview.entity";
+import { AssessmentMethod, AssessmentStatus } from "../util/constants";
 import { applyLearnerScope, canAccessOrganisation, canAccessCentre, getScopeContext } from "../util/organisationFilter";
 class AssignmentController {
     /**
@@ -50,6 +52,20 @@ class AssignmentController {
             console.error('Error checking user authorization:', error);
             return false;
         }
+    }
+
+    private static parseAssessmentMethod(input: any): AssessmentMethod[] | undefined {
+        if (input === undefined || input === null || input === "") return undefined;
+        const raw: string[] = Array.isArray(input)
+            ? input.map((v) => String(v))
+            : String(input)
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean);
+
+        const allowed = new Set(Object.values(AssessmentMethod));
+        const cleaned = raw.filter((v) => allowed.has(v as AssessmentMethod)) as AssessmentMethod[];
+        return cleaned.length ? cleaned : undefined;
     }
 
     // Assignment listing with course and signature summary for roles: Trainer, Learner, Employer, IQA
@@ -176,7 +192,19 @@ class AssignmentController {
 
     public async CreateAssignment(req: CustomRequest, res: Response) {
         try {
-            const { evidence_time_log, title, description, declaration, user_id } = req.body;
+            const {
+                evidence_time_log,
+                title,
+                description,
+                declaration,
+                user_id,
+                learner_comments,
+                points_for_improvement,
+                assessment_method,
+                session,
+                grade,
+                trainer_feedback,
+            } = req.body;
 
             let userId = user_id ? user_id : req.user.user_id;
             if (!req.file) {
@@ -200,6 +228,12 @@ class AssignmentController {
                 description,
                 declaration,
                 evidence_time_log: evidence_time_log || false,
+                learner_comments,
+                points_for_improvement,
+                assessment_method: AssignmentController.parseAssessmentMethod(assessment_method),
+                session,
+                grade,
+                trainer_feedback,
                 status: AssessmentStatus.NotStarted
             })
 
@@ -311,8 +345,10 @@ class AssignmentController {
                 learner_comments ?? assignment.learner_comments;
             assignment.points_for_improvement =
                 points_for_improvement ?? assignment.points_for_improvement;
-            assignment.assessment_method =
-                assessment_method ?? assignment.assessment_method;
+            if (assessment_method !== undefined) {
+                assignment.assessment_method =
+                    AssignmentController.parseAssessmentMethod(assessment_method);
+            }
             assignment.session = session ?? assignment.session;
             assignment.grade = grade ?? assignment.grade;
             assignment.status = status ?? assignment.status;
@@ -505,10 +541,9 @@ class AssignmentController {
         try {
             const assignmentId = parseInt(req.params.id);
             const assignmentRepository = AppDataSource.getRepository(Assignment);
-            const assignmentSignatureRepository = AppDataSource.getRepository(AssignmentSignature);
             const assignment = await assignmentRepository.findOne({
                 where: { assignment_id: assignmentId },
-                relations: ['user']
+                relations: ['user'],
             });
 
             if (!assignment) {
@@ -518,20 +553,75 @@ class AssignmentController {
                 });
             }
 
-            // Check authorization
-            if (assignment.user.user_id !== req.user.user_id &&
-                !req.user.roles.includes(UserRole.Admin)) {
-                return res.status(403).json({ message: "Not authorized", status: false });
+            if (
+                assignment.user?.user_id !== req.user?.user_id &&
+                !req.user?.roles?.includes(UserRole.Admin)
+            ) {
+                return res.status(403).json({
+                    message: 'Not authorized',
+                    status: false,
+                });
             }
 
-            deleteFromS3(assignment.file)
-            await assignmentRepository.remove(assignment);
+            const externalMeta = assignment.external_feedback as
+                | { key?: string }
+                | null
+                | undefined;
+
+            await AppDataSource.transaction(async (manager) => {
+                const mappingRepo = manager.getRepository(AssignmentMapping);
+                const mappings = await mappingRepo.find({
+                    where: { assignment: { assignment_id: assignmentId } as any },
+                });
+                const mappingIds = mappings.map((m) => m.mapping_id);
+
+                if (mappingIds.length > 0) {
+                    await manager
+                        .createQueryBuilder()
+                        .delete()
+                        .from(AssignmentSignature)
+                        .where('mapping_id IN (:...ids)', { ids: mappingIds })
+                        .execute();
+                    await manager
+                        .createQueryBuilder()
+                        .delete()
+                        .from(AssignmentPCReview)
+                        .where('mapping_id IN (:...ids)', { ids: mappingIds })
+                        .execute();
+                    await manager
+                        .createQueryBuilder()
+                        .delete()
+                        .from(AssignmentReview)
+                        .where('mapping_id IN (:...ids)', { ids: mappingIds })
+                        .execute();
+                }
+
+                await manager
+                    .createQueryBuilder()
+                    .delete()
+                    .from(AssignmentMapping)
+                    .where('assignment_id = :aid', { aid: assignmentId })
+                    .execute();
+
+                await manager.getRepository(Assignment).delete({
+                    assignment_id: assignmentId,
+                });
+            });
+
+            deleteFromS3(assignment.file);
+            if (
+                externalMeta &&
+                typeof externalMeta === 'object' &&
+                externalMeta.key
+            ) {
+                await deleteFromS3({ key: externalMeta.key });
+            }
 
             return res.status(200).json({
                 message: 'Assignment deleted successfully',
                 status: true,
             });
-        } catch (error) {
+        } catch (error: any) {
             return res.status(500).json({
                 message: 'Internal Server Error',
                 status: false,
@@ -900,6 +990,7 @@ class AssignmentController {
                 course_id: m.course.course_id,
                 learner_map: m.learnerMap,
                 trainer_map: m.trainerMap,
+                signed_off: m.signedOff ?? false,
                 comment: m.comment,
                 comment_updated_by: m.comment_updated_by,
                 comment_updated_at: m.comment_updated_at
@@ -975,10 +1066,12 @@ class AssignmentController {
                 });
             }
 
-            // 🔐 Authorization
+            // 🔐 Authorization (req.user set by authorizeRoles middleware)
+            const ownerUserId = assignment.user?.user_id;
+            const requesterUserId = req.user?.user_id;
             if (
-                assignment.user.user_id !== req.user.user_id &&
-                !req.user.roles?.includes(UserRole.Admin)
+                ownerUserId !== requesterUserId &&
+                !req.user?.roles?.includes(UserRole.Admin)
             ) {
                 return res.status(403).json({
                     message: "Not authorized",
@@ -1002,7 +1095,7 @@ class AssignmentController {
 
             // 🔹 delete old file (if exists)
             if (oldKey) {
-                await deleteFromS3(oldKey);
+                await deleteFromS3({ key: oldKey });
             }
 
             return res.status(200).json({
@@ -1033,7 +1126,7 @@ class AssignmentController {
             const assignmentRepository = AppDataSource.getRepository(Assignment);
             const assignment = await assignmentRepository.findOne({
                 where: { assignment_id: assignmentId },
-                relations: ['course_id', 'user']
+                relations: ['user'],
             });
 
             if (!assignment) {
@@ -1043,22 +1136,17 @@ class AssignmentController {
                 });
             }
 
-            let audioFeedbackData = null;
+            const audioUpload = await uploadToS3(req.file, 'AudioFeedback');
+            const audioFeedbackData = {
+                name: req.file.originalname,
+                size: req.file.size,
+                type: req.file.mimetype,
+                ...audioUpload,
+                uploaded_at: new Date(),
+                uploaded_by: req.user.user_id,
+            };
 
-            // Handle audio file upload
-            if (req.file) {
-                const audioUpload = await uploadToS3(req.file, 'AudioFeedback');
-                audioFeedbackData = {
-                    name: req.file.originalname,
-                    size: req.file.size,
-                    type: req.file.mimetype,
-                    ...audioUpload,
-                    uploaded_at: new Date(),
-                    uploaded_by: req.user.user_id
-                };
-            }
-
-            
+            assignment.external_feedback = audioFeedbackData as object;
 
             const updatedAssignment = await assignmentRepository.save(assignment);
 
@@ -1087,7 +1175,7 @@ class AssignmentController {
             const assignmentRepository = AppDataSource.getRepository(Assignment);
             const assignment = await assignmentRepository.findOne({
                 where: { assignment_id: assignmentId },
-                relations: ['course_id', 'user', 'user.user_id']
+                relations: ['user'],
             });
 
             if (!assignment) {
@@ -1097,7 +1185,7 @@ class AssignmentController {
                 });
             }
 
-            
+            assignment.external_feedback = null;
 
             const updatedAssignment = await assignmentRepository.save(assignment);
 
@@ -1128,8 +1216,18 @@ class AssignmentController {
                 sub_unit_ids = [],
                 mapped_by,
                 learnerMap,
-                trainerMap
+                trainerMap,
+                comment,
+                signedOff,
+                signed_off,
             } = req.body;
+
+            const signedOffPayload =
+                signedOff !== undefined
+                    ? signedOff
+                    : signed_off !== undefined
+                      ? signed_off
+                      : undefined;
 
             if (!assignment_id || !course_id || !unit_code) {
                 return res.status(400).json({
@@ -1179,6 +1277,19 @@ class AssignmentController {
                     row.learnerMap = learnerMap !== undefined ? learnerMap : isLearner;
                     row.trainerMap = trainerMap !== undefined ? trainerMap : !isLearner;
 
+                    if (comment !== undefined) {
+                        row.comment =
+                            comment === '' || comment === null ? null : String(comment);
+                        if (req.user?.user_id) {
+                            row.comment_updated_by = { user_id: req.user.user_id } as any;
+                            row.comment_updated_at = new Date();
+                        }
+                    }
+
+                    if (signedOffPayload !== undefined) {
+                        row.signedOff = !!signedOffPayload;
+                    }
+
                     rows.push(row);
                 }
             }
@@ -1204,6 +1315,19 @@ class AssignmentController {
 
                 row.learnerMap = learnerMap !== undefined ? learnerMap : isLearner;
                 row.trainerMap = trainerMap !== undefined ? trainerMap : !isLearner;
+
+                if (comment !== undefined) {
+                    row.comment =
+                        comment === '' || comment === null ? null : String(comment);
+                    if (req.user?.user_id) {
+                        row.comment_updated_by = { user_id: req.user.user_id } as any;
+                        row.comment_updated_at = new Date();
+                    }
+                }
+
+                if (signedOffPayload !== undefined) {
+                    row.signedOff = !!signedOffPayload;
+                }
 
                 rows.push(row);
             }
@@ -1283,13 +1407,16 @@ class AssignmentController {
 
     public async toggleMappingFlag(req: CustomRequest, res: Response) {
         try {
-            const { mapping_id, learnerMap, trainerMap, comment } = req.body;
+            const { mapping_id, learnerMap, trainerMap, comment, signedOff, signed_off } =
+                req.body;
 
             if (
                 !mapping_id ||
                 (learnerMap === undefined &&
                     trainerMap === undefined &&
-                    comment === undefined)
+                    comment === undefined &&
+                    signedOff === undefined &&
+                    signed_off === undefined)
             ) {
                 return res.status(400).json({
                     status: false,
@@ -1312,6 +1439,12 @@ class AssignmentController {
 
             if (learnerMap !== undefined) row.learnerMap = learnerMap;
             if (trainerMap !== undefined) row.trainerMap = trainerMap;
+
+            const signedOffVal =
+                signedOff !== undefined ? signedOff : signed_off !== undefined ? signed_off : undefined;
+            if (signedOffVal !== undefined) {
+                row.signedOff = !!signedOffVal;
+            }
 
             if (comment !== undefined) {
                 row.comment = comment;
