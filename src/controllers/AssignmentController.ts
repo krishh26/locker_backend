@@ -76,12 +76,12 @@ class AssignmentController {
             const qb = AppDataSource.getRepository(AssignmentMapping)
                 .createQueryBuilder('am')
                 .leftJoinAndSelect('am.assignment', 'a')
-                .leftJoinAndSelect('a.user', 'learnerUser')
+                .leftJoinAndSelect('a.user', 'assignmentLearnerUser')
                 .leftJoinAndSelect('am.course', 'course')
                 .leftJoinAndSelect('am.signatures', 'sig')
                 .leftJoinAndSelect('sig.user', 'sigUser')
                 .leftJoinAndSelect('sig.requested_by', 'requestedBy')
-                .leftJoin(UserCourse, 'uc', 'uc.learner_id = learnerUser.user_id')
+                .leftJoin(UserCourse, 'uc', 'uc.learner_id = assignmentLearnerUser.user_id')
                 .leftJoin('uc.trainer_id', 'trainer')
                 .leftJoin('uc.employer_id', 'employer')
                 .where('sig.is_requested = true');
@@ -93,7 +93,7 @@ class AssignmentController {
 
             if (learner_name) {
                 qb.andWhere(
-                    "LOWER(learnerUser.first_name || ' ' || learnerUser.last_name) LIKE :learner_name",
+                    "LOWER(assignmentLearnerUser.first_name || ' ' || assignmentLearnerUser.last_name) LIKE :learner_name",
                     { learner_name: `%${learner_name.toLowerCase()}%` }
                 );
             }
@@ -107,7 +107,7 @@ class AssignmentController {
 
             // Apply scope filtering through learner
             if (req.user) {
-                qb.leftJoin(Learner, 'learner', 'learner.user_id = learnerUser.user_id')
+                qb.leftJoin(Learner, 'learner', 'learner.user_id = assignmentLearnerUser.user_id')
                   .leftJoin('learner.organisation', 'org')
                   .leftJoin('learner.centre', 'centre');
                 await applyLearnerScope(qb, req.user, 'learner', { scopeContext: getScopeContext(req) });
