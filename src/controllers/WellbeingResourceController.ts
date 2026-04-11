@@ -8,6 +8,7 @@ import { uploadToS3 } from '../util/aws';
 import { User } from '../entity/User.entity';
 import { applyScope, getScopeContext, getAccessibleOrganisationIds, canAccessOrganisation, resolveUserRole } from '../util/organisationFilter';
 import { UserRole } from '../util/constants';
+import { getAuthUserId } from '../util/getAuthUserId';
 
 export class WellbeingResourceController {
     // Admin: Add Resource
@@ -63,12 +64,17 @@ export class WellbeingResourceController {
                 return res.status(400).json({ message: 'Invalid resourceType', status: false });
             }
 
+            const actorId = getAuthUserId(req.user);
+            if (actorId == null) {
+                return res.status(401).json({ message: 'Unauthorized', status: false });
+            }
+
             const entity = repo.create({
                 resourceType,
                 location,
                 description: description || null,
                 isActive: true,
-                createdBy: String(req.user.user_id),
+                createdBy: String(actorId),
                 updatedBy: null,
                 resource_name: resource_name || null,
                 organisation_id: organisationId,
@@ -115,12 +121,17 @@ export class WellbeingResourceController {
 
             const parsedIsActive = typeof isActive === 'string' ? isActive.toLowerCase() === 'true' : (typeof isActive === 'boolean' ? isActive : existing.isActive);
 
+            const actorId = getAuthUserId(req.user);
+            if (actorId == null) {
+                return res.status(401).json({ message: 'Unauthorized', status: false });
+            }
+
             repo.merge(existing, {
                 description: description ?? existing.description,
                 resourceType: resourceType ?? existing.resourceType,
                 isActive: parsedIsActive,
                 location,
-                updatedBy: String(req.user.user_id)
+                updatedBy: String(actorId)
             });
 
             const saved = await repo.save(existing);
@@ -215,8 +226,12 @@ export class WellbeingResourceController {
             }
             const resource = await qb.getOne();
             if (!resource) return res.status(404).json({ message: 'Resource not found', status: false });
+            const actorId = getAuthUserId(req.user);
+            if (actorId == null) {
+                return res.status(401).json({ message: 'Unauthorized', status: false });
+            }
             resource.isActive = !resource.isActive;
-            resource.updatedBy = String(req.user.user_id);
+            resource.updatedBy = String(actorId);
             await repo.save(resource);
             return res.status(200).json({ message: 'Toggled', status: true, data: { id: resource.id, isActive: resource.isActive } });
         } catch (error: any) {
@@ -227,9 +242,16 @@ export class WellbeingResourceController {
     // Learner: Get all active resources with lastOpenedDate for this learner (scoped by learner's organisation)
     public async getAllActiveForLearner(req: CustomRequest, res: Response) {
         try {
-            const learnerId = req.user.user_id;
+            const learnerId = getAuthUserId(req.user);
+            if (learnerId == null) {
+                return res.status(401).json({ message: 'Unauthorized', status: false });
+            }
             const learnerRepo = AppDataSource.getRepository(Learner);
-            const learner = await learnerRepo.findOne({ where: { user_id: { user_id: learnerId } } as any, select: ['learner_id', 'organisation_id'] });
+            const learner = await learnerRepo
+                .createQueryBuilder('l')
+                .select(['l.learner_id', 'l.organisation_id'])
+                .where('l.user_id = :uid', { uid: learnerId })
+                .getOne();
             const repo = AppDataSource.getRepository(WellbeingResource);
             const actRepo = AppDataSource.getRepository(LearnerResourceActivity);
 
@@ -242,7 +264,7 @@ export class WellbeingResourceController {
 
             const activities: LearnerResourceActivity[] = await actRepo.createQueryBuilder('a')
                 .leftJoinAndSelect('a.resource', 'r')
-                .where('a.learner = :learnerId', { learnerId })
+                .where('a.learner_id = :learnerId', { learnerId })
                 .getMany();
 
             const activityMap = new Map<number, LearnerResourceActivity>();
@@ -267,7 +289,10 @@ export class WellbeingResourceController {
     // Learner: Track Resource Open
     public async trackOpen(req: CustomRequest, res: Response) {
         try {
-            const learnerId = req.user.user_id;
+            const learnerId = getAuthUserId(req.user);
+            if (learnerId == null) {
+                return res.status(401).json({ message: 'Unauthorized', status: false });
+            }
             const { resourceId } = req.body as any;
 
             if (!resourceId) return res.status(400).json({ message: 'resourceId required', status: false });
@@ -275,7 +300,11 @@ export class WellbeingResourceController {
             const resourceRepo = AppDataSource.getRepository(WellbeingResource);
             const actRepo = AppDataSource.getRepository(LearnerResourceActivity);
 
-            const learnerRec = await AppDataSource.getRepository(Learner).findOne({ where: { user_id: { user_id: learnerId } } as any, select: ['organisation_id'] });
+            const learnerRec = await AppDataSource.getRepository(Learner)
+                .createQueryBuilder('l')
+                .select(['l.organisation_id'])
+                .where('l.user_id = :uid', { uid: learnerId })
+                .getOne();
             const resource = await resourceRepo.findOne({ where: { id: Number(resourceId) } });
             if (!resource || !resource.isActive) return res.status(404).json({ message: 'Resource not found or inactive', status: false });
             if (resource.organisation_id != null && learnerRec?.organisation_id !== resource.organisation_id) {
@@ -302,13 +331,20 @@ export class WellbeingResourceController {
     // Learner: Add Feedback
     public async addFeedback(req: CustomRequest, res: Response) {
         try {
-            const learnerId = req.user.user_id;
+            const learnerId = getAuthUserId(req.user);
+            if (learnerId == null) {
+                return res.status(401).json({ message: 'Unauthorized', status: false });
+            }
             const { resourceId, feedback } = req.body as any;
             if (!resourceId) return res.status(400).json({ message: 'resourceId required', status: false });
 
             const actRepo = AppDataSource.getRepository(LearnerResourceActivity);
             const resourceRepo = AppDataSource.getRepository(WellbeingResource);
-            const learnerRec = await AppDataSource.getRepository(Learner).findOne({ where: { user_id: { user_id: learnerId } } as any, select: ['organisation_id'] });
+            const learnerRec = await AppDataSource.getRepository(Learner)
+                .createQueryBuilder('l')
+                .select(['l.organisation_id'])
+                .where('l.user_id = :uid', { uid: learnerId })
+                .getOne();
             const resource = await resourceRepo.findOne({ where: { id: Number(resourceId) } });
             if (!resource) return res.status(404).json({ message: 'Resource not found', status: false });
             if (resource.organisation_id != null && learnerRec?.organisation_id !== resource.organisation_id) {
@@ -335,11 +371,14 @@ export class WellbeingResourceController {
     // Learner: Get own feedback list
     public async getOwnFeedback(req: CustomRequest, res: Response) {
         try {
-            const learnerId = req.user.user_id;
+            const learnerId = getAuthUserId(req.user);
+            if (learnerId == null) {
+                return res.status(401).json({ message: 'Unauthorized', status: false });
+            }
             const actRepo = AppDataSource.getRepository(LearnerResourceActivity);
             const list = await actRepo.createQueryBuilder('a')
                 .leftJoinAndSelect('a.resource', 'r')
-                .where('a.learner = :learnerId', { learnerId })
+                .where('a.learner_id = :learnerId', { learnerId })
                 .getMany();
 
             const data = list.map(a => ({

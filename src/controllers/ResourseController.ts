@@ -98,7 +98,12 @@ class ResourceController {
                 query.andWhere('resource.job_type = :job_type', { job_type });
             }
 
-            const resources = await query.select('resource').distinct(true).getMany();
+            // DISTINCT on all columns fails for json columns (e.g. resource.url): Postgres has no = for type json.
+            const resources = await query
+                .select('resource')
+                .distinctOn(['resource.resource_id'])
+                .orderBy('resource.resource_id', 'ASC')
+                .getMany();
 
             return res.status(200).json({
                 message: 'Resources fetched successfully',
