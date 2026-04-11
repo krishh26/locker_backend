@@ -1109,7 +1109,15 @@ class UserController {
                 }
             }
 
-            const { userEmployers, userOrganisations, userCentres, ...jwtPayload } = profile
+            const {
+                userEmployers,
+                userOrganisations,
+                userCentres,
+                assigned_employers,
+                assigned_organisations,
+                assigned_centers,
+                ...jwtPayload
+            } = profile
             let accessToken = generateToken({
                 ...jwtPayload,
                 displayName: profile.first_name + " " + profile.last_name,
