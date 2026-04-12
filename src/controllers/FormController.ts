@@ -222,10 +222,13 @@ class FormController {
                     }
                     // Join with users and filter by organization
                     if (!req.query.user_id) {
-                        qb.innerJoin('form.users', 'formUser');
+                        qb.innerJoin('form.users', 'formUser')
+                            .leftJoin('formUser.userOrganisations', 'userOrganisation')
+                            .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
+                    } else {
+                        qb.leftJoin('user.userOrganisations', 'userOrganisation')
+                            .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
                     }
-                    qb.leftJoin('formUser.userOrganisations', 'userOrganisation')
-                      .andWhere('userOrganisation.organisation_id IN (:...orgIds)', { orgIds: accessibleIds });
                 }
                 const centreAdminUserIds = await getAccessibleCentreAdminUserIds(req.user);
                 if (centreAdminUserIds !== null) {
