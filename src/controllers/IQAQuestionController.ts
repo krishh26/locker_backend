@@ -127,7 +127,7 @@ export class IQAQuestionController {
             const repo = AppDataSource.getRepository(IQAQuestion);
 
             const qb = repo.createQueryBuilder('q')
-                .leftJoin(User, 'u', 'u.user_id = CAST(q.createdBy AS INT)')
+                .innerJoin(User, 'u', 'u.user_id = CAST(q.createdBy AS INT)')
                 .addSelect(['u.first_name', 'u.last_name'])
                 .leftJoin(User, 'uu', 'uu.user_id = CAST(q.updatedBy AS INT)')
                 .addSelect(['uu.first_name AS updated_first_name', 'uu.last_name AS updated_last_name']);
@@ -154,7 +154,7 @@ export class IQAQuestionController {
                         status: false
                     });
                 }
-                qb.where('q.questionType = :questionType', { questionType });
+                qb.andWhere('q.questionType = :questionType', { questionType });
             }
 
             // Filter by active status if provided
@@ -163,7 +163,7 @@ export class IQAQuestionController {
                 if (questionType) {
                     qb.andWhere('q.isActive = :isActive', { isActive: activeFilter });
                 } else {
-                    qb.where('q.isActive = :isActive', { isActive: activeFilter });
+                    qb.andWhere('q.isActive = :isActive', { isActive: activeFilter });
                 }
             }
 
@@ -206,7 +206,7 @@ export class IQAQuestionController {
             const repo = AppDataSource.getRepository(IQAQuestion);
 
             const qb = repo.createQueryBuilder('q')
-                .leftJoin(User, 'u', 'u.user_id = CAST(q.createdBy AS INT)')
+                .innerJoin(User, 'u', 'u.user_id = CAST(q.createdBy AS INT)')
                 .addSelect(['u.first_name', 'u.last_name'])
                 .leftJoin(User, 'uu', 'uu.user_id = CAST(q.updatedBy AS INT)')
                 .addSelect(['uu.first_name AS updated_first_name', 'uu.last_name AS updated_last_name'])
