@@ -543,7 +543,7 @@ class AssignmentController {
             const assignmentRepository = AppDataSource.getRepository(Assignment);
             const assignment = await assignmentRepository.findOne({
                 where: { assignment_id: assignmentId },
-                relations: ['user'],
+                relations: ['user']
             });
 
             if (!assignment) {
@@ -990,7 +990,6 @@ class AssignmentController {
                 course_id: m.course.course_id,
                 learner_map: m.learnerMap,
                 trainer_map: m.trainerMap,
-                signed_off: m.signedOff ?? false,
                 comment: m.comment,
                 comment_updated_by: m.comment_updated_by,
                 comment_updated_at: m.comment_updated_at
@@ -1095,7 +1094,7 @@ class AssignmentController {
 
             // 🔹 delete old file (if exists)
             if (oldKey) {
-                await deleteFromS3({ key: oldKey });
+                await deleteFromS3(oldKey);
             }
 
             return res.status(200).json({
@@ -1126,7 +1125,7 @@ class AssignmentController {
             const assignmentRepository = AppDataSource.getRepository(Assignment);
             const assignment = await assignmentRepository.findOne({
                 where: { assignment_id: assignmentId },
-                relations: ['user'],
+                relations: ['course_id', 'user']
             });
 
             if (!assignment) {
@@ -1216,18 +1215,8 @@ class AssignmentController {
                 sub_unit_ids = [],
                 mapped_by,
                 learnerMap,
-                trainerMap,
-                comment,
-                signedOff,
-                signed_off,
+                trainerMap
             } = req.body;
-
-            const signedOffPayload =
-                signedOff !== undefined
-                    ? signedOff
-                    : signed_off !== undefined
-                      ? signed_off
-                      : undefined;
 
             if (!assignment_id || !course_id || !unit_code) {
                 return res.status(400).json({
@@ -1277,19 +1266,6 @@ class AssignmentController {
                     row.learnerMap = learnerMap !== undefined ? learnerMap : isLearner;
                     row.trainerMap = trainerMap !== undefined ? trainerMap : !isLearner;
 
-                    if (comment !== undefined) {
-                        row.comment =
-                            comment === '' || comment === null ? null : String(comment);
-                        if (req.user?.user_id) {
-                            row.comment_updated_by = { user_id: req.user.user_id } as any;
-                            row.comment_updated_at = new Date();
-                        }
-                    }
-
-                    if (signedOffPayload !== undefined) {
-                        row.signedOff = !!signedOffPayload;
-                    }
-
                     rows.push(row);
                 }
             }
@@ -1315,19 +1291,6 @@ class AssignmentController {
 
                 row.learnerMap = learnerMap !== undefined ? learnerMap : isLearner;
                 row.trainerMap = trainerMap !== undefined ? trainerMap : !isLearner;
-
-                if (comment !== undefined) {
-                    row.comment =
-                        comment === '' || comment === null ? null : String(comment);
-                    if (req.user?.user_id) {
-                        row.comment_updated_by = { user_id: req.user.user_id } as any;
-                        row.comment_updated_at = new Date();
-                    }
-                }
-
-                if (signedOffPayload !== undefined) {
-                    row.signedOff = !!signedOffPayload;
-                }
 
                 rows.push(row);
             }
@@ -1407,16 +1370,13 @@ class AssignmentController {
 
     public async toggleMappingFlag(req: CustomRequest, res: Response) {
         try {
-            const { mapping_id, learnerMap, trainerMap, comment, signedOff, signed_off } =
-                req.body;
+            const { mapping_id, learnerMap, trainerMap, comment } = req.body;
 
             if (
                 !mapping_id ||
                 (learnerMap === undefined &&
                     trainerMap === undefined &&
-                    comment === undefined &&
-                    signedOff === undefined &&
-                    signed_off === undefined)
+                    comment === undefined)
             ) {
                 return res.status(400).json({
                     status: false,
@@ -1439,12 +1399,6 @@ class AssignmentController {
 
             if (learnerMap !== undefined) row.learnerMap = learnerMap;
             if (trainerMap !== undefined) row.trainerMap = trainerMap;
-
-            const signedOffVal =
-                signedOff !== undefined ? signedOff : signed_off !== undefined ? signed_off : undefined;
-            if (signedOffVal !== undefined) {
-                row.signedOff = !!signedOffVal;
-            }
 
             if (comment !== undefined) {
                 row.comment = comment;

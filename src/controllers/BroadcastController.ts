@@ -4,6 +4,7 @@ import { CustomRequest } from "../util/Interface/expressInterface";
 import { Broadcast } from "../entity/Broadcast.entity";
 import { SocketDomain, UserRole } from "../util/constants";
 import { User } from "../entity/User.entity";
+import { Learner } from "../entity/Learner.entity";
 import { SendNotifications } from "../util/socket/notification";
 import { UserCourse } from "../entity/UserCourse.entity";
 import { In } from "typeorm";
@@ -193,6 +194,7 @@ class BroadcastController {
                 const rows = await ucQb.getRawMany<{ user_id: number }>();
                 usersToAdd = rows.map(r => ({ user_id: r.user_id }));
             } else if (assign) {
+                const assignValue = String(assign).trim();
                 const roleMap: Record<string, string | null> = {
                     "All": null,
                     "All Learner": UserRole.Learner,
@@ -202,15 +204,44 @@ class BroadcastController {
                     "All LIQA": UserRole.LIQA,
                     "All EQA": UserRole.EQA
                 };
-                if (assign in roleMap) {
-                    const role = roleMap[assign];
-                    const userQb = userRepository.createQueryBuilder("user").select(["user.user_id", "user.roles"]);
+
+                if (!(assignValue in roleMap)) {
+                    return res.status(400).json({
+                        message: "Invalid assign value",
+                        status: false,
+                    });
+                }
+
+                if (assignValue === "All Learner") {
+                    const learnerRepository = AppDataSource.getRepository(Learner);
+                    const learnerQb = learnerRepository
+                        .createQueryBuilder("learner")
+                        .leftJoinAndSelect("learner.user_id", "user");
+
                     if (req.user) {
-                        await addUserScopeFilter(userQb, req.user, 'user', getScopeContext(req));
+                        await applyLearnerScope(learnerQb, req.user, "learner", { scopeContext: getScopeContext(req) });
                     }
-                    if (role) {
+
+                    const learnersInScope = await learnerQb.getMany();
+                    usersToAdd = learnersInScope
+                        .map((l: any) => l.user_id)
+                        .filter((u: any): u is User => !!u && !!u.user_id);
+                } else {
+                    const role = roleMap[assignValue];
+                    const userQb = userRepository
+                        .createQueryBuilder("user")
+                        .select(["user.user_id", "user.roles"]);
+
+                    if (req.user) {
+                        await addUserScopeFilter(userQb, req.user, "user", getScopeContext(req));
+                    }
+
+                    if (role === null) {
+                        userQb.andWhere("NOT :adminRole = ANY(user.roles)", { adminRole: UserRole.Admin });
+                    } else {
                         userQb.andWhere(":role = ANY(user.roles)", { role });
                     }
+
                     usersToAdd = await userQb.getMany();
                 }
             }

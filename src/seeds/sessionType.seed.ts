@@ -20,6 +20,7 @@ export const seedSessionTypes = async () => {
     "Workplace",
   ];
 
+  const offTheJobTypes = new Set(["Learner Support", "Workplace"]);
   for (const name of defaults) {
     const exists = await repo.findOne({
       where: { name, is_system: true },
@@ -29,6 +30,7 @@ export const seedSessionTypes = async () => {
       await repo.save({
         name,
         is_system: true,
+        is_off_the_job: offTheJobTypes.has(name),
         organisation_id: null,
         centre_id: null,
       });
