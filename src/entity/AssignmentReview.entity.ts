@@ -18,7 +18,7 @@ export class AssignmentReview {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @ManyToOne(() => AssignmentMapping)
+  @ManyToOne(() => AssignmentMapping, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'mapping_id' })
   mapping: AssignmentMapping;
 

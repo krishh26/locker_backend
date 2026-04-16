@@ -14,11 +14,12 @@ import { NotificationType, SocketDomain, UserRole, CourseType, CourseStatus } fr
 import { convertDataToJson } from "../util/convertDataToJson";
 import { EnhancedUnit, LearningOutcome, AssessmentCriterion } from "../types/courseBuilder.types";
 import { In, Raw } from 'typeorm';
-import { applyScope, canAccessOrganisation, getScopeContext } from "../util/organisationFilter";
+import { canAccessOrganisation, getAccessibleOrganisationIds, getScopeContext, resolveUserRole } from "../util/organisationFilter";
 
 const enhanceCourseData = (course: any) => {
     return {
         ...course,
+        scope: course.organisation_id == null ? 'global' : 'organisation',
         duration_period: course.duration_period || '',
         duration_value: course.duration_value || '',
         two_page_standard_link: course.two_page_standard_link || '',
@@ -52,14 +53,24 @@ class CourseController {
                 return res.status(400).json({ message: 'questions must be an array', status: false });
             }
 
-            const organisation_id = data.organisation_id != null ? Number(data.organisation_id) : null;
-            if (organisation_id == null || isNaN(organisation_id)) {
+            const role = req.user ? resolveUserRole(req.user) : undefined;
+            const hasOrganisationId = data.organisation_id !== undefined && data.organisation_id !== null && data.organisation_id !== '';
+            const organisation_id = hasOrganisationId ? Number(data.organisation_id) : null;
+            if (hasOrganisationId && isNaN(organisation_id as number)) {
+                return res.status(400).json({
+                    message: 'organisation_id must be a valid number',
+                    status: false,
+                });
+            }
+
+            if (!hasOrganisationId && role !== UserRole.MasterAdmin) {
                 return res.status(400).json({
                     message: 'organisation_id is required when creating a course',
                     status: false,
                 });
             }
-            if (req.user && !(await canAccessOrganisation(req.user, organisation_id, getScopeContext(req)))) {
+
+            if (req.user && organisation_id != null && !(await canAccessOrganisation(req.user, organisation_id, getScopeContext(req)))) {
                 return res.status(403).json({
                     message: 'You do not have access to create courses for this organisation',
                     status: false,
@@ -486,14 +497,6 @@ class CourseController {
             if (req.user && course.organisation_id != null && !(await canAccessOrganisation(req.user, course.organisation_id, getScopeContext(req)))) {
                 return res.status(403).json({ message: 'You do not have access to this course', status: false });
             }
-            if (req.user && course.organisation_id == null) {
-                const { resolveUserRole } = await import('../util/organisationFilter');
-                const { UserRole } = await import('../util/constants');
-                if (resolveUserRole(req.user) !== UserRole.MasterAdmin) {
-                    return res.status(403).json({ message: 'You do not have access to this course', status: false });
-                }
-            }
-
             const enhancedCourse = enhanceCourseData(course);
 
             let assignedStandardsDetails: any[] = [];
@@ -532,10 +535,32 @@ class CourseController {
             const courseRepository = AppDataSource.getRepository(Course);
 
             // Direct organisation scope: course.organisation_id in user scope (no join-based visibility)
+            // scope filter 
+            const scope = String(req.query.scope || '').toLowerCase();
+
             const qb = courseRepository.createQueryBuilder("course");
+            if (scope === 'global') {
+              qb.andWhere('course.organisation_id IS NULL');
+            } else if (scope === 'organisation') {
+              qb.andWhere('course.organisation_id IS NOT NULL');
+            }
 
             if (req.user) {
-                await applyScope(qb, req.user, 'course', { organisationOnly: true, scopeContext: getScopeContext(req) });
+                const scopeContext = getScopeContext(req);
+                const role = resolveUserRole(req.user);
+                const accessibleOrgIds = await getAccessibleOrganisationIds(req.user, scopeContext);
+
+                if (!(role === UserRole.MasterAdmin && !scopeContext?.organisationId)) {
+                    if (accessibleOrgIds == null) {
+                        qb.andWhere('course.organisation_id IS NULL');
+                    } else if (accessibleOrgIds.length === 0) {
+                        qb.andWhere('course.organisation_id IS NULL');
+                    } else {
+                        qb.andWhere('(course.organisation_id IS NULL OR course.organisation_id IN (:...orgIds))', {
+                            orgIds: accessibleOrgIds,
+                        });
+                    }
+                }
             }
 
             if (req.query.keyword) {

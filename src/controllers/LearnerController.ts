@@ -10,7 +10,6 @@ import { Assignment } from "../entity/Assignment.entity";
 import XLSX from 'xlsx';
 import { Employer } from "../entity/Employer.entity";
 import { TimeLog } from "../entity/TimeLog.entity";
-import { Session } from "../entity/Session.entity";
 import { FundingBand } from "../entity/FundingBand.entity";
 import { LearnerPlan, LearnerPlanType } from "../entity/LearnerPlan.entity";
 import { SessionLearnerAction } from "../entity/SessionLearnerAction.entity";
@@ -1995,15 +1994,17 @@ class LearnerController {
                     const qb = assignmentRepository
                         .createQueryBuilder("assignment")
                         .leftJoin("assignment.user", "user")
+                        .leftJoin(Learner, "learner", "learner.user_id = user.user_id")
                         .leftJoin(
                             AssignmentMapping,
                             "mapping",
                             "mapping.assignment_id = assignment.assignment_id"
                         )
                         .where("mapping.mapping_id IS NULL");
-                    
-                    applyOrgFilterOnUserAlias(qb, "user");
-                    applyCentreAssignmentLearnerFilter(qb, "user.user_id");
+
+                    if (req.user) {
+                        await applyLearnerScope(qb, req.user, "learner", { scopeContext });
+                    }
                     
                     const assignments_without_mapped = await qb.getMany();
                     return res.status(200).json({
@@ -2011,6 +2012,94 @@ class LearnerController {
                         status: true,
                         data: assignments_without_mapped,
                     })
+                }
+                else if (type === "unmapped_evidence" || type === "unmapped evidence") {
+                    if (hasNoAccess) {
+                        return res.status(200).json({
+                            message: "Unmapped evidence fetched successfully",
+                            status: true,
+                            data: [],
+                        });
+                    }
+
+                    const qb = AppDataSource.getRepository(AssignmentMapping)
+                        .createQueryBuilder("am")
+                        .leftJoinAndSelect("am.assignment", "a")
+                        .leftJoinAndSelect("a.user", "assignmentUser")
+                        .leftJoinAndSelect("am.course", "course")
+                        .leftJoinAndSelect("am.signatures", "sig")
+                        .leftJoinAndSelect("sig.user", "sigUser")
+                        .leftJoinAndSelect("sig.requested_by", "requestedBy")
+                        .leftJoin(UserCourse, "uc", "uc.learner_id = assignmentUser.user_id")
+                        .leftJoin("uc.trainer_id", "trainer")
+                        .leftJoin("uc.employer_id", "employer")
+                        .where("sig.is_requested = true");
+
+                    if (req.user) {
+                        qb.leftJoin(Learner, "learner", "learner.user_id = assignmentUser.user_id")
+                          .leftJoin("learner.organisation", "org")
+                          .leftJoin("learner.centre", "centre");
+                        await applyLearnerScope(qb, req.user, "learner", { scopeContext: getScopeContext(req) });
+                    }
+
+                    qb.orderBy("a.created_at", "DESC");
+
+                    const rows = await qb.getMany();
+
+                    const data = rows.map((am: any) => {
+                        const a = am.assignment;
+                        const roleSig: any = {};
+                        (am.signatures || []).forEach((s: any) => {
+                            roleSig[s.role] = {
+                                id: s.id,
+                                user_id: s.user?.user_id || null,
+                                name: s.user ? `${s.user.first_name} ${s.user.last_name}`.trim() : null,
+                                isSigned: s.is_signed,
+                                signedAt: s.signed_at,
+                                is_requested: s.is_requested,
+                                requestedAt: s.requested_at,
+                                requestedBy: s.requested_by
+                                    ? `${s.requested_by.first_name} ${s.requested_by.last_name}`.trim()
+                                    : null,
+                            };
+                        });
+
+                        return {
+                            assignment_id: a.assignment_id,
+                            mapping_id: am.mapping_id,
+                            learner: {
+                                id: a.user?.user_id || null,
+                                name: a.user ? `${a.user.first_name} ${a.user.last_name}`.trim() : null,
+                            },
+                            course: {
+                                id: am.course?.course_id || null,
+                                name: am.course?.course_name || null,
+                                code: am.course?.course_code || null,
+                            },
+                            employer_name: a.employer
+                                ? `${a.employer.first_name} ${a.employer.last_name}`.trim()
+                                : null,
+                            trainer_name: a.trainer
+                                ? `${a.trainer.first_name} ${a.trainer.last_name}`.trim()
+                                : null,
+                            file_type: "Evidence",
+                            file_name: a.file?.name || null,
+                            file_description: a.description || null,
+                            uploaded_at: a.created_at,
+                            signatures: {
+                                Trainer: roleSig["Trainer"] || null,
+                                Learner: roleSig["Learner"] || null,
+                                Employer: roleSig["Employer"] || null,
+                                IQA: roleSig["IQA"] || null,
+                            },
+                        };
+                    });
+
+                    return res.status(200).json({
+                        message: "Unmapped evidence fetched successfully",
+                        status: true,
+                        data,
+                    });
                 }
                 else if (type === "learners_over_due") {
                     if (hasNoAccess) {
@@ -2332,15 +2421,14 @@ class LearnerController {
                             data: [],
                         });
                     }
-                    const sessionRepository = AppDataSource.getRepository(Session);
-                    const qb = sessionRepository
-                        .createQueryBuilder("session")
-                        .leftJoinAndSelect("session.trainer_id", "trainer")
-                        .leftJoinAndSelect("session.learners", "learners")
+                    const qb = learnerPlanRepository
+                        .createQueryBuilder("learner_plan")
+                        .leftJoinAndSelect("learner_plan.assessor_id", "assessor")
+                        .leftJoinAndSelect("learner_plan.learners", "learners")
                         .leftJoinAndSelect("learners.user_id", "learner_user")
-                        .where("DATE(session.startDate) = CURRENT_DATE");
+                        .where("DATE(learner_plan.startDate) = CURRENT_DATE");
                     applyOrgFilterOnUserAlias(qb, "learner_user");
-                    applyCentreUserFilter(qb, "trainer.user_id");
+                    applyCentreUserFilter(qb, "assessor.user_id");
                     const session_due_today = await qb.getMany();
                     return res.status(200).json({
                         message: "Session due today fetched successfully",
@@ -2357,15 +2445,15 @@ class LearnerController {
                             data: [],
                         });
                     }
-                    const sessionRepository = AppDataSource.getRepository(Session);
-                    const qb = sessionRepository
-                        .createQueryBuilder("session")
-                        .leftJoinAndSelect("session.trainer_id", "trainer")
-                        .leftJoinAndSelect("session.learners", "learners")
+                    const qb = learnerPlanRepository
+                        .createQueryBuilder("learner_plan")
+                        .leftJoinAndSelect("learner_plan.assessor_id", "assessor")
+                        .leftJoinAndSelect("learner_plan.learners", "learners")
                         .leftJoinAndSelect("learners.user_id", "learner_user")
-                        .where("session.startDate BETWEEN NOW() AND NOW() + INTERVAL '7 days'");
+                        .where("learner_plan.startDate BETWEEN NOW() AND NOW() + INTERVAL '7 days'");
+
                     applyOrgFilterOnUserAlias(qb, "learner_user");
-                    applyCentreUserFilter(qb, "trainer.user_id");
+                    applyCentreUserFilter(qb, "assessor.user_id");
                     const session_due_in_7_days = await qb.getMany();
                     return res.status(200).json({
                         message: "Session due in 7 days fetched successfully",
@@ -2506,12 +2594,29 @@ class LearnerController {
             const assignmentsWithoutMappedQb = assignmentRepository
                 .createQueryBuilder("assignment")
                 .leftJoin("assignment.user", "user")
+                .leftJoin(Learner, "learner", "learner.user_id = user.user_id")
                 .leftJoin(AssignmentMapping, "mapping", "mapping.assignment_id = assignment.assignment_id")
                 .where("mapping.mapping_id IS NULL");
-            applyOrgFilterOnUserAlias(assignmentsWithoutMappedQb, "user");
-            applyCentreAssignmentLearnerFilter(assignmentsWithoutMappedQb, "user.user_id");
+            if (req.user) {
+                await applyLearnerScope(assignmentsWithoutMappedQb, req.user, "learner", { scopeContext });
+            }
             const assignmentsWithoutMappedCountRaw = await assignmentsWithoutMappedQb
                 .select("COUNT(DISTINCT assignment.assignment_id)", "count")
+                .getRawOne();
+
+            const unmappedAssignmentsQb = AppDataSource.getRepository(AssignmentMapping)
+                .createQueryBuilder("am")
+                .leftJoin("am.assignment", "a")
+                .leftJoin("a.user", "assignmentUser")
+                .leftJoin("am.signatures", "sig")
+                .where("sig.is_requested = true");
+            if (req.user) {
+                unmappedAssignmentsQb
+                    .leftJoin(Learner, "learner", "learner.user_id = assignmentUser.user_id");
+                await applyLearnerScope(unmappedAssignmentsQb, req.user, "learner", { scopeContext });
+            }
+            const unmappedAssignmentsCountRaw = await unmappedAssignmentsQb
+                .select("COUNT(DISTINCT am.mapping_id)", "count")
                 .getRawOne();
 
             const learnersOverDueQb = userCourseRepository
@@ -2657,26 +2762,29 @@ class LearnerController {
             }
             const iqaActionsDueIn30DaysCountRaw = await iqaActionsDueIn30DaysQb.select("COUNT(DISTINCT action.id)", "count").getRawOne();
 
-            const sessionRepository = AppDataSource.getRepository(Session);
-            const sessionDueTodayQb = sessionRepository
-                .createQueryBuilder("session")
-                .leftJoin("session.trainer_id", "trainer")
-                .leftJoin("session.learners", "learners")
+            const sessionDueTodayQb = learnerPlanRepository
+                .createQueryBuilder("learner_plan")
+                .leftJoin("learner_plan.assessor_id", "assessor")
+                .leftJoin("learner_plan.learners", "learners")
                 .leftJoin("learners.user_id", "learner_user")
-                .where("DATE(session.startDate) = CURRENT_DATE");
+                .where("DATE(learner_plan.startDate) = CURRENT_DATE");
             applyOrgFilterOnUserAlias(sessionDueTodayQb, "learner_user");
-            applyCentreUserFilter(sessionDueTodayQb, "trainer.user_id");
-            const sessionDueTodayCountRaw = await sessionDueTodayQb.select("COUNT(DISTINCT session.session_id)", "count").getRawOne();
+            applyCentreUserFilter(sessionDueTodayQb, "assessor.user_id");
+            const sessionDueTodayCountRaw = await sessionDueTodayQb
+                .select("COUNT(DISTINCT learner_plan.learner_plan_id)", "count")
+                .getRawOne();
 
-            const sessionDueIn7DaysQb = sessionRepository
-                .createQueryBuilder("session")
-                .leftJoin("session.trainer_id", "trainer")
-                .leftJoin("session.learners", "learners")
+            const sessionDueIn7DaysQb = learnerPlanRepository
+                .createQueryBuilder("learner_plan")
+                .leftJoin("learner_plan.assessor_id", "assessor")
+                .leftJoin("learner_plan.learners", "learners")
                 .leftJoin("learners.user_id", "learner_user")
-                .where("session.startDate BETWEEN NOW() AND NOW() + INTERVAL '7 days'");
+                .where("learner_plan.startDate BETWEEN NOW() AND NOW() + INTERVAL '7 days'");
             applyOrgFilterOnUserAlias(sessionDueIn7DaysQb, "learner_user");
-            applyCentreUserFilter(sessionDueIn7DaysQb, "trainer.user_id");
-            const sessionDueIn7DaysCountRaw = await sessionDueIn7DaysQb.select("COUNT(DISTINCT session.session_id)", "count").getRawOne();
+            applyCentreUserFilter(sessionDueIn7DaysQb, "assessor.user_id");
+            const sessionDueIn7DaysCountRaw = await sessionDueIn7DaysQb
+                .select("COUNT(DISTINCT learner_plan.learner_plan_id)", "count")
+                .getRawOne();
 
             const samplingPlanDetailRepository = AppDataSource.getRepository(SamplingPlanDetail);
             const sampleDueInMonthQb = samplingPlanDetailRepository

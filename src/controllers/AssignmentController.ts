@@ -543,7 +543,7 @@ class AssignmentController {
             const assignmentRepository = AppDataSource.getRepository(Assignment);
             const assignment = await assignmentRepository.findOne({
                 where: { assignment_id: assignmentId },
-                relations: ['user'],
+                relations: ['user']
             });
 
             if (!assignment) {
@@ -990,7 +990,6 @@ class AssignmentController {
                 course_id: m.course.course_id,
                 learner_map: m.learnerMap,
                 trainer_map: m.trainerMap,
-                signed_off: m.signed_off ?? false,
                 comment: m.comment,
                 comment_updated_by: m.comment_updated_by,
                 comment_updated_at: m.comment_updated_at
@@ -1095,7 +1094,7 @@ class AssignmentController {
 
             // 🔹 delete old file (if exists)
             if (oldKey) {
-                await deleteFromS3({ key: oldKey });
+                await deleteFromS3(oldKey);
             }
 
             return res.status(200).json({
@@ -1126,7 +1125,7 @@ class AssignmentController {
             const assignmentRepository = AppDataSource.getRepository(Assignment);
             const assignment = await assignmentRepository.findOne({
                 where: { assignment_id: assignmentId },
-                relations: ['user'],
+                relations: ['course_id', 'user']
             });
 
             if (!assignment) {
@@ -1218,16 +1217,7 @@ class AssignmentController {
                 learnerMap,
                 trainerMap,
                 comment,
-                signedOff: signedOffLegacy,
-                signed_off,
             } = req.body;
-
-            const signed_off_payload =
-                signed_off !== undefined
-                    ? signed_off
-                    : signedOffLegacy !== undefined
-                      ? signedOffLegacy
-                      : undefined;
 
             if (!assignment_id || !course_id || !unit_code) {
                 return res.status(400).json({
@@ -1286,10 +1276,6 @@ class AssignmentController {
                         }
                     }
 
-                    if (signed_off_payload !== undefined) {
-                        row.signed_off = !!signed_off_payload;
-                    }
-
                     rows.push(row);
                 }
             }
@@ -1323,10 +1309,6 @@ class AssignmentController {
                         row.comment_updated_by = { user_id: req.user.user_id } as any;
                         row.comment_updated_at = new Date();
                     }
-                }
-
-                if (signed_off_payload !== undefined) {
-                    row.signed_off = !!signed_off_payload;
                 }
 
                 rows.push(row);
@@ -1407,16 +1389,13 @@ class AssignmentController {
 
     public async toggleMappingFlag(req: CustomRequest, res: Response) {
         try {
-            const { mapping_id, learnerMap, trainerMap, comment, signedOff: signedOffLegacy, signed_off } =
-                req.body;
+            const { mapping_id, learnerMap, trainerMap, comment } = req.body;
 
             if (
                 !mapping_id ||
                 (learnerMap === undefined &&
                     trainerMap === undefined &&
-                    comment === undefined &&
-                    signedOffLegacy === undefined &&
-                    signed_off === undefined)
+                    comment === undefined)
             ) {
                 return res.status(400).json({
                     status: false,
@@ -1439,12 +1418,6 @@ class AssignmentController {
 
             if (learnerMap !== undefined) row.learnerMap = learnerMap;
             if (trainerMap !== undefined) row.trainerMap = trainerMap;
-
-            const signed_off_val =
-                signed_off !== undefined ? signed_off : signedOffLegacy !== undefined ? signedOffLegacy : undefined;
-            if (signed_off_val !== undefined) {
-                row.signed_off = !!signed_off_val;
-            }
 
             if (comment !== undefined) {
                 row.comment = comment;
