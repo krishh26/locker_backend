@@ -340,6 +340,7 @@ class LearnerController {
                     'learner.iqas_name',
                     'learner.custom_funding_data',
                     'learner.comment',
+                    'learner.isShowMessage',
                     'user_id.user_id',
                     'user_id.avatar',
                     'user_id.deleted_at',
@@ -627,6 +628,11 @@ class LearnerController {
                             sub_unit_id: mapping.sub_unit_id,
                         });
 
+                        const hasLearner = sub.evidenceBoxes.some((e: any) => e.learnerMap);
+                        const hasTrainer = sub.evidenceBoxes.some((e: any) => e.trainerMap);
+
+                        sub.learnerMap = hasLearner;
+                        sub.trainerMap = hasTrainer;
                         unit.subUnit[subIndex] = sub;
                     }
 
