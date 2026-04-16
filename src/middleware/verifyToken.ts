@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import { Response, NextFunction } from "express";
 import { CustomRequest } from '../util/Interface/expressInterface';
+import { getAuthUserId } from '../util/getAuthUserId';
 
 const secret: string = process.env.SECRET_KEY
 
@@ -42,6 +43,10 @@ export const authorizeRoles = (...roles: string[]) => {
                     status: false,
                     message: `Role: ${userRole} is not allowed to access this resource`
                 });
+            }
+            const canonicalId = getAuthUserId(tokenResult);
+            if (canonicalId != null) {
+                tokenResult.user_id = canonicalId;
             }
             req.tokenrole = tokenResult.role;
             req.user = tokenResult;

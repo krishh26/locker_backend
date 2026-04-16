@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import { Brackets } from 'typeorm';
 import { AppDataSource } from '../data-source';
 import { CustomRequest } from '../util/Interface/expressInterface';
 import { WellbeingResource, WellbeingResourceType } from '../entity/WellbeingResource.entity';
@@ -8,6 +9,8 @@ import { uploadToS3 } from '../util/aws';
 import { User } from '../entity/User.entity';
 import { applyScope, getScopeContext, getAccessibleOrganisationIds, canAccessOrganisation, resolveUserRole } from '../util/organisationFilter';
 import { UserRole } from '../util/constants';
+import { getAuthUserId } from '../util/getAuthUserId';
+import { buildCsvWithBom } from '../util/csvExport';
 
 export class WellbeingResourceController {
     // Admin: Add Resource
@@ -58,9 +61,16 @@ export class WellbeingResourceController {
                     return res.status(400).json({ message: 'url is required for URL resourceType', status: false });
                 }
                 location = url;
-                resource_name = url;
+                const trimmed =
+                    typeof resource_name === 'string' ? resource_name.trim() : resource_name;
+                resource_name = trimmed || url;
             } else {
                 return res.status(400).json({ message: 'Invalid resourceType', status: false });
+            }
+
+            const actorId = getAuthUserId(req.user);
+            if (actorId == null) {
+                return res.status(401).json({ message: 'Unauthorized', status: false });
             }
 
             const entity = repo.create({
@@ -68,7 +78,7 @@ export class WellbeingResourceController {
                 location,
                 description: description || null,
                 isActive: true,
-                createdBy: String(req.user.user_id),
+                createdBy: String(actorId),
                 updatedBy: null,
                 resource_name: resource_name || null,
                 organisation_id: organisationId,
@@ -115,12 +125,17 @@ export class WellbeingResourceController {
 
             const parsedIsActive = typeof isActive === 'string' ? isActive.toLowerCase() === 'true' : (typeof isActive === 'boolean' ? isActive : existing.isActive);
 
+            const actorId = getAuthUserId(req.user);
+            if (actorId == null) {
+                return res.status(401).json({ message: 'Unauthorized', status: false });
+            }
+
             repo.merge(existing, {
                 description: description ?? existing.description,
                 resourceType: resourceType ?? existing.resourceType,
                 isActive: parsedIsActive,
                 location,
-                updatedBy: String(req.user.user_id)
+                updatedBy: String(actorId)
             });
 
             const saved = await repo.save(existing);
@@ -201,8 +216,86 @@ export class WellbeingResourceController {
             });
         }
     }
-    
-    
+
+    // Admin: Export learner feedback rows as CSV (scoped; optional search matches admin list)
+    public async exportFeedbacksCsv(req: CustomRequest, res: Response) {
+        try {
+            const { search } = req.query as { search?: string };
+            const actRepo = AppDataSource.getRepository(LearnerResourceActivity);
+
+            const qb = actRepo
+                .createQueryBuilder('lra')
+                .innerJoinAndSelect('lra.resource', 'r')
+                .leftJoinAndSelect('lra.learner', 'lu')
+                .where('lra.feedback IS NOT NULL')
+                .andWhere("TRIM(COALESCE(lra.feedback, '')) <> ''");
+
+            if (req.user) {
+                await applyScope(qb, req.user, 'r', { organisationOnly: true, scopeContext: getScopeContext(req) });
+            }
+            if (search) {
+                qb.andWhere(
+                    new Brackets((sub) => {
+                        sub
+                            .where('r.location ILIKE :search', { search: `%${search}%` })
+                            .orWhere('r.resource_name ILIKE :search', { search: `%${search}%` });
+                    })
+                );
+            }
+
+            const activities = await qb.orderBy('r.id', 'ASC').addOrderBy('lra.id', 'ASC').getMany();
+
+            if (activities.length === 0) {
+                return res.status(404).json({ message: 'No feedback data to export', status: false });
+            }
+
+            const header = [
+                'Resource ID',
+                'Resource Name',
+                'Resource Type',
+                'Location',
+                'Description',
+                'Learner User ID',
+                'Learner Name',
+                'Username',
+                'Feedback',
+                'Last Opened (UTC)',
+                'Resource Created (UTC)',
+            ];
+
+            const rows: string[][] = [header];
+            for (const a of activities) {
+                const r = a.resource;
+                const u = a.learner;
+                const learnerName = u
+                    ? `${u.first_name || ''} ${u.last_name || ''}`.trim()
+                    : '';
+                rows.push([
+                    String(r.id),
+                    r.resource_name ?? '',
+                    r.resourceType,
+                    r.location,
+                    r.description ?? '',
+                    u?.user_id != null ? String(u.user_id) : '',
+                    learnerName,
+                    u?.user_name ?? '',
+                    a.feedback ?? '',
+                    a.lastOpenedDate ? new Date(a.lastOpenedDate).toISOString() : '',
+                    r.createdAt ? new Date(r.createdAt).toISOString() : '',
+                ]);
+            }
+
+            const csv = buildCsvWithBom(rows);
+            const dateStamp = new Date().toISOString().slice(0, 10);
+            const filename = `wellbeing-feedbacks-${dateStamp}.csv`;
+
+            res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+            res.setHeader('Content-Disposition', `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+            return res.status(200).send(csv);
+        } catch (error: any) {
+            return res.status(500).json({ message: 'Internal Server Error', status: false, error: error.message });
+        }
+    }
 
     // Admin: Toggle activate/deactivate
     public async toggleActive(req: CustomRequest, res: Response) {
@@ -215,10 +308,52 @@ export class WellbeingResourceController {
             }
             const resource = await qb.getOne();
             if (!resource) return res.status(404).json({ message: 'Resource not found', status: false });
+            const actorId = getAuthUserId(req.user);
+            if (actorId == null) {
+                return res.status(401).json({ message: 'Unauthorized', status: false });
+            }
             resource.isActive = !resource.isActive;
-            resource.updatedBy = String(req.user.user_id);
+            resource.updatedBy = String(actorId);
             await repo.save(resource);
             return res.status(200).json({ message: 'Toggled', status: true, data: { id: resource.id, isActive: resource.isActive } });
+        } catch (error: any) {
+            return res.status(500).json({ message: 'Internal Server Error', status: false, error: error.message });
+        }
+    }
+
+    // Admin: Delete resource (and related learner activity rows)
+    public async deleteResource(req: CustomRequest, res: Response) {
+        try {
+            const id = parseInt(req.params.id, 10);
+            if (isNaN(id)) {
+                return res.status(400).json({ message: 'Invalid id', status: false });
+            }
+
+            const repo = AppDataSource.getRepository(WellbeingResource);
+            const qb = repo.createQueryBuilder('r').where('r.id = :id', { id });
+            if (req.user) {
+                await applyScope(qb, req.user, 'r', { organisationOnly: true, scopeContext: getScopeContext(req) });
+            }
+            const existing = await qb.getOne();
+            if (!existing) {
+                return res.status(404).json({ message: 'Resource not found', status: false });
+            }
+
+            const actorId = getAuthUserId(req.user);
+            if (actorId == null) {
+                return res.status(401).json({ message: 'Unauthorized', status: false });
+            }
+
+            const actRepo = AppDataSource.getRepository(LearnerResourceActivity);
+            await actRepo
+                .createQueryBuilder()
+                .delete()
+                .from(LearnerResourceActivity)
+                .where('resource_id = :id', { id })
+                .execute();
+
+            await repo.remove(existing);
+            return res.status(200).json({ message: 'Resource deleted', status: true });
         } catch (error: any) {
             return res.status(500).json({ message: 'Internal Server Error', status: false, error: error.message });
         }
@@ -227,9 +362,16 @@ export class WellbeingResourceController {
     // Learner: Get all active resources with lastOpenedDate for this learner (scoped by learner's organisation)
     public async getAllActiveForLearner(req: CustomRequest, res: Response) {
         try {
-            const learnerId = req.user.user_id;
+            const learnerId = getAuthUserId(req.user);
+            if (learnerId == null) {
+                return res.status(401).json({ message: 'Unauthorized', status: false });
+            }
             const learnerRepo = AppDataSource.getRepository(Learner);
-            const learner = await learnerRepo.findOne({ where: { user_id: { user_id: learnerId } } as any, select: ['learner_id', 'organisation_id'] });
+            const learner = await learnerRepo
+                .createQueryBuilder('l')
+                .select(['l.learner_id', 'l.organisation_id'])
+                .where('l.user_id = :uid', { uid: learnerId })
+                .getOne();
             const repo = AppDataSource.getRepository(WellbeingResource);
             const actRepo = AppDataSource.getRepository(LearnerResourceActivity);
 
@@ -242,7 +384,7 @@ export class WellbeingResourceController {
 
             const activities: LearnerResourceActivity[] = await actRepo.createQueryBuilder('a')
                 .leftJoinAndSelect('a.resource', 'r')
-                .where('a.learner = :learnerId', { learnerId })
+                .where('a.learner_id = :learnerId', { learnerId })
                 .getMany();
 
             const activityMap = new Map<number, LearnerResourceActivity>();
@@ -250,6 +392,7 @@ export class WellbeingResourceController {
 
             const data = resources.map(r => ({
                 id: r.id,
+                resource_name: r.resource_name,
                 description: r.description,
                 resourceType: r.resourceType,
                 location: r.location,
@@ -267,7 +410,10 @@ export class WellbeingResourceController {
     // Learner: Track Resource Open
     public async trackOpen(req: CustomRequest, res: Response) {
         try {
-            const learnerId = req.user.user_id;
+            const learnerId = getAuthUserId(req.user);
+            if (learnerId == null) {
+                return res.status(401).json({ message: 'Unauthorized', status: false });
+            }
             const { resourceId } = req.body as any;
 
             if (!resourceId) return res.status(400).json({ message: 'resourceId required', status: false });
@@ -275,7 +421,11 @@ export class WellbeingResourceController {
             const resourceRepo = AppDataSource.getRepository(WellbeingResource);
             const actRepo = AppDataSource.getRepository(LearnerResourceActivity);
 
-            const learnerRec = await AppDataSource.getRepository(Learner).findOne({ where: { user_id: { user_id: learnerId } } as any, select: ['organisation_id'] });
+            const learnerRec = await AppDataSource.getRepository(Learner)
+                .createQueryBuilder('l')
+                .select(['l.organisation_id'])
+                .where('l.user_id = :uid', { uid: learnerId })
+                .getOne();
             const resource = await resourceRepo.findOne({ where: { id: Number(resourceId) } });
             if (!resource || !resource.isActive) return res.status(404).json({ message: 'Resource not found or inactive', status: false });
             if (resource.organisation_id != null && learnerRec?.organisation_id !== resource.organisation_id) {
@@ -302,13 +452,20 @@ export class WellbeingResourceController {
     // Learner: Add Feedback
     public async addFeedback(req: CustomRequest, res: Response) {
         try {
-            const learnerId = req.user.user_id;
+            const learnerId = getAuthUserId(req.user);
+            if (learnerId == null) {
+                return res.status(401).json({ message: 'Unauthorized', status: false });
+            }
             const { resourceId, feedback } = req.body as any;
             if (!resourceId) return res.status(400).json({ message: 'resourceId required', status: false });
 
             const actRepo = AppDataSource.getRepository(LearnerResourceActivity);
             const resourceRepo = AppDataSource.getRepository(WellbeingResource);
-            const learnerRec = await AppDataSource.getRepository(Learner).findOne({ where: { user_id: { user_id: learnerId } } as any, select: ['organisation_id'] });
+            const learnerRec = await AppDataSource.getRepository(Learner)
+                .createQueryBuilder('l')
+                .select(['l.organisation_id'])
+                .where('l.user_id = :uid', { uid: learnerId })
+                .getOne();
             const resource = await resourceRepo.findOne({ where: { id: Number(resourceId) } });
             if (!resource) return res.status(404).json({ message: 'Resource not found', status: false });
             if (resource.organisation_id != null && learnerRec?.organisation_id !== resource.organisation_id) {
@@ -335,11 +492,14 @@ export class WellbeingResourceController {
     // Learner: Get own feedback list
     public async getOwnFeedback(req: CustomRequest, res: Response) {
         try {
-            const learnerId = req.user.user_id;
+            const learnerId = getAuthUserId(req.user);
+            if (learnerId == null) {
+                return res.status(401).json({ message: 'Unauthorized', status: false });
+            }
             const actRepo = AppDataSource.getRepository(LearnerResourceActivity);
             const list = await actRepo.createQueryBuilder('a')
                 .leftJoinAndSelect('a.resource', 'r')
-                .where('a.learner = :learnerId', { learnerId })
+                .where('a.learner_id = :learnerId', { learnerId })
                 .getMany();
 
             const data = list.map(a => ({

@@ -11,7 +11,9 @@ const Controller = new SupplementaryTrainingController();
 supplementaryTrainingRoutes.post('/admin/resources', authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), singleFileUpload('file'), Controller.addResource);
 supplementaryTrainingRoutes.patch('/admin/resources/:id', authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), singleFileUpload('file'), Controller.updateResource);
 supplementaryTrainingRoutes.get('/admin/resources', authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), Controller.getAllAdmin);
+supplementaryTrainingRoutes.get('/admin/resources/feedbacks/export', authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), Controller.exportFeedbacksCsv);
 supplementaryTrainingRoutes.patch('/admin/resources/:id/toggle', authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), Controller.toggleActive);
+supplementaryTrainingRoutes.delete('/admin/resources/:id', authorizeRoles(UserRole.Admin, UserRole.MasterAdmin, UserRole.OrganisationAdmin, UserRole.CentreAdmin), Controller.deleteResource);
 
 // Learner endpoints
 supplementaryTrainingRoutes.get('/learner/resources', authorizeRoles(), Controller.getAllActiveForLearner);

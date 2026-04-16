@@ -17,6 +17,89 @@ import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
 import { UserEmployer } from '../entity/UserEmployers.entity';
 import { addUserScopeFilter, getAccessibleOrganisationIds, getAccessibleCentreIds, resolveUserRole, getScopeContext, validateCentreOrganisation, canAccessOrganisation, canAccessCentre } from "../util/organisationFilter";
 
+/**
+ * Same `data` shape as GET /user/get (password stripped; includes assigned_* and org centres tree).
+ * Module-level so Express can call controller methods without losing `this`.
+ */
+async function buildUserProfileForClient(userId: number): Promise<Record<string, any> | null> {
+    const userRepository = AppDataSource.getRepository(User)
+
+    const user = await userRepository.findOne({
+        where: { user_id: userId },
+        relations: {
+            userEmployers: {
+                employer: true
+            },
+            userOrganisations: {
+                organisation: true
+            },
+            userCentres: {
+                centre: true
+            }
+        }
+    });
+
+    if (!user) {
+        return null;
+    }
+
+    const assignedEmployers = user.userEmployers?.map(ue => ({
+        employer_id: ue.employer.employer_id,
+        employer_name: ue.employer.employer_name
+    })) || [];
+
+    const assignedOrganisations = user.userOrganisations?.map(uo => ({
+        id: uo.organisation.id,
+        name: uo.organisation.name
+    })) || [];
+
+    const orgIds = assignedOrganisations.map(o => o.id);
+    let centresByOrg: Record<number, { id: number; name: string; status: string }[]> = {};
+
+    if (orgIds.length) {
+        const { Centre } = await import("../entity/Centre.entity");
+        const centreRepo = AppDataSource.getRepository(Centre);
+        const centres = await centreRepo.find({
+            where: { organisation_id: In(orgIds) },
+            select: ["id", "name", "status", "organisation_id"],
+        });
+
+        const activeCentres = centres.filter(
+            (c) => (c as any).status === "active"
+        );
+
+        centresByOrg = activeCentres.reduce((acc, centre) => {
+            const orgId = (centre as any).organisation_id as number;
+            if (!acc[orgId]) acc[orgId] = [];
+            acc[orgId].push({
+                id: centre.id,
+                name: centre.name,
+                status: centre.status as string,
+            });
+            return acc;
+        }, {} as Record<number, { id: number; name: string; status: string }[]>);
+    }
+
+    const enrichedAssignedOrganisations = assignedOrganisations.map(org => ({
+        ...org,
+        centres: centresByOrg[org.id] ?? [],
+    }));
+
+    const assignedCentres = user.userCentres?.map(uc => ({
+        id: uc.centre.id,
+        name: uc.centre.name
+    })) || [];
+
+    delete user.password;
+
+    return {
+        ...user,
+        assigned_employers: assignedEmployers,
+        assigned_organisations: enrichedAssignedOrganisations,
+        assigned_centers: assignedCentres
+    };
+}
+
 class UserController {
 
     public async CreateUser(req: CustomRequest, res: Response) {
@@ -193,89 +276,20 @@ class UserController {
 
     public async GetUser(req: CustomRequest, res: Response) {
         try {
-            const userRepository = AppDataSource.getRepository(User)
             const id: number = parseInt(req.user.user_id.toString());
+            const data = await buildUserProfileForClient(id);
 
-            const user = await userRepository.findOne({
-                where: { user_id: id },
-                relations: {
-                    userEmployers: {
-                        employer: true
-                    },
-                    userOrganisations: {
-                        organisation: true
-                    },
-                    userCentres: {
-                        centre: true
-                    }
-                }
-            });
-
-            if (!user) {
+            if (!data) {
                 return res.status(404).json({
                     message: "User does not exist",
                     status: false
                 });
             }
 
-            const assignedEmployers = user.userEmployers?.map(ue => ({
-                employer_id: ue.employer.employer_id,
-                employer_name: ue.employer.employer_name
-            })) || [];
-
-            const assignedOrganisations = user.userOrganisations?.map(uo => ({
-                id: uo.organisation.id,
-                name: uo.organisation.name
-            })) || [];
-
-            // Load centres for each assigned organisation so FE can see organisation → centres tree
-            const orgIds = assignedOrganisations.map(o => o.id);
-            let centresByOrg: Record<number, { id: number; name: string; status: string }[]> = {};
-
-            if (orgIds.length) {
-                const { Centre } = await import("../entity/Centre.entity");
-                const centreRepo = AppDataSource.getRepository(Centre);
-                const centres = await centreRepo.find({
-                    where: { organisation_id: In(orgIds) },
-                    select: ["id", "name", "status", "organisation_id"],
-                });
-
-                const activeCentres = centres.filter(
-                    (c) => (c as any).status === "active"
-                );
-
-                centresByOrg = activeCentres.reduce((acc, centre) => {
-                    const orgId = (centre as any).organisation_id as number;
-                    if (!acc[orgId]) acc[orgId] = [];
-                    acc[orgId].push({
-                        id: centre.id,
-                        name: centre.name,
-                        status: centre.status as string,
-                    });
-                    return acc;
-                }, {} as Record<number, { id: number; name: string; status: string }[]>);
-            }
-
-            const enrichedAssignedOrganisations = assignedOrganisations.map(org => ({
-                ...org,
-                centres: centresByOrg[org.id] ?? [],
-            }));
-
-            const assignedCentres = user.userCentres?.map(uc => ({
-                id: uc.centre.id,
-                name: uc.centre.name
-            })) || [];
-            delete user.password;
-
             return res.status(200).json({
                 message: "User fetched successfully",
                 status: true,
-                data: {
-                    ...user,
-                    assigned_employers: assignedEmployers,
-                    assigned_organisations: enrichedAssignedOrganisations,
-                    assigned_centers: assignedCentres
-                }
+                data
             })
 
         } catch (error) {
@@ -1071,11 +1085,17 @@ class UserController {
             const user_id: number = parseInt(req.user.user_id);
             const { role } = req.body
 
-            const userRepository = AppDataSource.getRepository(User)
             const learnerRepository = AppDataSource.getRepository(Learner)
-            let user: any = await userRepository.findOne({ where: { user_id } });
+            let profile: any = await buildUserProfileForClient(user_id);
 
-            if (!user.roles.includes(role)) {
+            if (!profile) {
+                return res.status(404).json({
+                    message: "User does not exist",
+                    status: false,
+                })
+            }
+
+            if (!profile.roles.includes(role)) {
                 return res.status(404).json({
                     message: "You are not allowed to change this user role",
                     status: false,
@@ -1083,20 +1103,33 @@ class UserController {
             }
 
             if (role === UserRole.Learner) {
-                const learner = await learnerRepository.findOne({ where: { user_id: { user_id: user.user_id } } })
+                const learner = await learnerRepository.findOne({ where: { user_id: { user_id: profile.user_id } } })
                 if (learner) {
-                    user.learner_id = learner.learner_id
+                    profile = { ...profile, learner_id: learner.learner_id }
                 }
             }
 
-            let accessToken = generateToken({ ...user, displayName: user.first_name + " " + user.last_name, role })
+            const {
+                userEmployers,
+                userOrganisations,
+                userCentres,
+                assigned_employers,
+                assigned_organisations,
+                assigned_centers,
+                ...jwtPayload
+            } = profile
+            let accessToken = generateToken({
+                ...jwtPayload,
+                displayName: profile.first_name + " " + profile.last_name,
+                role
+            })
 
             return res.status(200).json({
                 message: "Your role has been changed successfully",
                 status: true,
                 data: {
                     accessToken: accessToken,
-                    user: { ...user, role }
+                    user: { ...profile, role }
                 }
             })
 
