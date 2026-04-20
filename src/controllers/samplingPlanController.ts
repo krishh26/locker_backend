@@ -1126,16 +1126,17 @@ export class SamplingPlanController {
         return res.status(200).json({ status: true, data: [] });
       }
 
-      // 2️⃣ Fetch assignment mappings (learner-mapped only)
-      const mappings = await mappingRepo.find({
-        where: {
-          course: { course_id: courseId } as any,
-          unit_code,
-          learnerMap: true,
-        },
-        relations: ["assignment"],
-        order: { created_at: "DESC" },
-      });
+      // 2️⃣ Fetch assignment mappings for this sampled learner only
+      const mappings = await mappingRepo
+        .createQueryBuilder("mapping")
+        .leftJoinAndSelect("mapping.assignment", "assignment")
+        .leftJoin("assignment.user", "user")
+        .where("mapping.course = :courseId", { courseId: Number(courseId) })
+        .andWhere("mapping.unit_code = :unit_code", { unit_code })
+        .andWhere("mapping.learnerMap = :learnerMap", { learnerMap: true })
+        .andWhere("user.user_id = :learnerUserId", { learnerUserId: Number(learnerUserId) })
+        .orderBy("mapping.created_at", "DESC")
+        .getMany();
 
       if (!mappings.length) {
         return res.status(200).json({
