@@ -10,6 +10,11 @@ import { SendNotification } from "../util/socket/notification";
 import { UserCourse } from "../entity/UserCourse.entity";
 import { RiskRating } from "../entity/RiskRating.entity";
 import { SamplingPlan } from "../entity/samplingPlan.entity";
+import { OrganisationCourseExclusion } from "../entity/OrganisationCourseExclusion.entity";
+import {
+    getOrganisationCourseExclusion,
+    getOrganisationCourseExclusionMap,
+} from "../util/organisationCourseExclusion";
 import { NotificationType, SocketDomain, UserRole, CourseType, CourseStatus } from "../util/constants";
 import { convertDataToJson } from "../util/convertDataToJson";
 import { EnhancedUnit, LearningOutcome, AssessmentCriterion } from "../types/courseBuilder.types";
@@ -32,6 +37,7 @@ const enhanceCourseData = (course: any) => {
         assigned_standards: course.assigned_standards || []
     };
 };
+
 class CourseController {
 
     public async CreateCourse(req: CustomRequest, res: Response) {
@@ -498,26 +504,32 @@ class CourseController {
                 return res.status(403).json({ message: 'You do not have access to this course', status: false });
             }
             const enhancedCourse = enhanceCourseData(course);
+            const scopeContext = getScopeContext(req);
+            const organisationId =
+                req.query.organisation_id != null && req.query.organisation_id !== ''
+                    ? Number(req.query.organisation_id)
+                    : scopeContext?.organisationId ?? course.organisation_id ?? null;
+            const is_excluded = organisationId
+                ? await getOrganisationCourseExclusion(organisationId, course.course_id)
+                : false;
 
             let assignedStandardsDetails: any[] = [];
+            const assignedIds: number[] = Array.isArray(course.assigned_standards)
+                ? course.assigned_standards.map((id: any) => Number(id)).filter(Boolean)
+                : [];
 
-            if (course.course_core_type === 'Gateway') {
-                const assignedIds: number[] = Array.isArray(course.assigned_standards)
-                    ? course.assigned_standards.map((id: any) => Number(id)).filter(Boolean)
-                    : [];
-
-                if (assignedIds.length > 0) {
-                    assignedStandardsDetails = await courseRepository.findBy({
-                        course_id: In(assignedIds),
-                    });
-                }
+            if (assignedIds.length > 0) {
+                assignedStandardsDetails = await courseRepository.findBy({
+                    course_id: In(assignedIds),
+                });
             }
 
             return res.status(200).json({
                 message: 'Course fetched successfully',
                 data: {
                     ...enhancedCourse,
-                    assigned_standards_details: assignedStandardsDetails
+                    assigned_standards_details: assignedStandardsDetails,
+                    is_excluded
                 },
                 status: true,
             });
@@ -577,6 +589,19 @@ class CourseController {
                 .take(Number(req.pagination.limit))
                 .getManyAndCount();
 
+            const scopeContext = getScopeContext(req);
+            const organisationIdForExclusion =
+                req.query.organisation_id != null && req.query.organisation_id !== ''
+                    ? Number(req.query.organisation_id)
+                    : scopeContext?.organisationId ?? null;
+            const exclusionMap =
+                organisationIdForExclusion && courses.length
+                    ? await getOrganisationCourseExclusionMap(
+                          organisationIdForExclusion,
+                          courses.map((c) => c.course_id)
+                      )
+                    : new Map<number, boolean>();
+
             // enhance + add assigned_standards_details for Gateway
             const enhancedCourses = await Promise.all(
                 courses.map(async (course) => {
@@ -597,6 +622,7 @@ class CourseController {
                     return {
                         ...enhancedCourse,
                         assigned_standards_details: assignedStandardsDetails,
+                        is_excluded: exclusionMap.get(course.course_id) ?? false,
                     };
                 })
             );
@@ -614,6 +640,152 @@ class CourseController {
                     }
                 })
             })
+        } catch (error) {
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                error: error.message,
+                status: false,
+            });
+        }
+    }
+
+    public async upsertCourseExclusion(req: CustomRequest, res: Response): Promise<Response> {
+        try {
+            const { organisation_id, course_id, is_excluded } = req.body;
+
+            if (!organisation_id || !course_id || typeof is_excluded !== 'boolean') {
+                return res.status(400).json({
+                    message: 'organisation_id, course_id and is_excluded(boolean) are required',
+                    status: false,
+                });
+            }
+
+            const orgId = Number(organisation_id);
+            if (req.user && !(await canAccessOrganisation(req.user, orgId, getScopeContext(req)))) {
+                return res.status(403).json({
+                    message: 'You do not have access to this organisation',
+                    status: false,
+                });
+            }
+
+            const courseRepository = AppDataSource.getRepository(Course);
+            const courseExists = await courseRepository.findOne({ where: { course_id: Number(course_id) } });
+            if (!courseExists) {
+                return res.status(404).json({ message: 'Course not found', status: false });
+            }
+
+            const repo = AppDataSource.getRepository(OrganisationCourseExclusion);
+            let exclusion = await repo.findOne({
+                where: {
+                    organisation_id: orgId,
+                    course_id: Number(course_id),
+                },
+            });
+
+            if (!exclusion) {
+                exclusion = repo.create({
+                    organisation_id: orgId,
+                    course_id: Number(course_id),
+                    is_excluded,
+                });
+            } else {
+                exclusion.is_excluded = is_excluded;
+            }
+
+            const saved = await repo.save(exclusion);
+
+            return res.status(200).json({
+                message: 'Course exclusion saved successfully',
+                status: true,
+                data: saved,
+            });
+        } catch (error) {
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                error: error.message,
+                status: false,
+            });
+        }
+    }
+
+    public async getCourseExclusions(req: CustomRequest, res: Response): Promise<Response> {
+        try {
+            const organisation_id = Number(req.query.organisation_id);
+            const course_id = req.query.course_id ? Number(req.query.course_id) : undefined;
+
+            if (!organisation_id) {
+                return res.status(400).json({
+                    message: 'organisation_id is required',
+                    status: false,
+                });
+            }
+
+            if (req.user && !(await canAccessOrganisation(req.user, organisation_id, getScopeContext(req)))) {
+                return res.status(403).json({
+                    message: 'You do not have access to this organisation',
+                    status: false,
+                });
+            }
+
+            const repo = AppDataSource.getRepository(OrganisationCourseExclusion);
+            const where: any = { organisation_id };
+            if (course_id) where.course_id = course_id;
+
+            const exclusions = await repo.find({
+                where,
+                relations: ['course'],
+                order: { course_id: 'ASC' },
+            });
+
+            const data = exclusions.map((item) => ({
+                id: item.id,
+                organisation_id: item.organisation_id,
+                course_id: item.course_id,
+                is_excluded: item.is_excluded,
+                course_name: item.course?.course_name || null,
+            }));
+
+            return res.status(200).json({
+                message: 'Course exclusions retrieved successfully',
+                status: true,
+                data,
+            });
+        } catch (error) {
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                error: error.message,
+                status: false,
+            });
+        }
+    }
+
+    public async deleteCourseExclusion(req: CustomRequest, res: Response): Promise<Response> {
+        try {
+            const organisation_id = Number(req.query.organisation_id);
+            const course_id = Number(req.query.course_id);
+
+            if (!organisation_id || !course_id) {
+                return res.status(400).json({
+                    message: 'organisation_id and course_id are required',
+                    status: false,
+                });
+            }
+
+            if (req.user && !(await canAccessOrganisation(req.user, organisation_id, getScopeContext(req)))) {
+                return res.status(403).json({
+                    message: 'You do not have access to this organisation',
+                    status: false,
+                });
+            }
+
+            const repo = AppDataSource.getRepository(OrganisationCourseExclusion);
+            const result = await repo.delete({ organisation_id, course_id });
+
+            return res.status(200).json({
+                message: 'Course exclusion removed',
+                status: true,
+                data: { affected: result.affected ?? 0 },
+            });
         } catch (error) {
             return res.status(500).json({
                 message: 'Internal Server Error',

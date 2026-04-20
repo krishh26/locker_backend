@@ -22,6 +22,12 @@ SubscriptionRoutes.post('/change-plan', authorizeRoles(UserRole.MasterAdmin), tr
 SubscriptionRoutes.post('/suspend-access', authorizeRoles(UserRole.MasterAdmin), trimMiddleware, Controller.SuspendOrganisationAccess);
 
 // Existing subscription endpoints
+SubscriptionRoutes.patch(
+    '/organisation/:organisationId/licence',
+    authorizeRoles(UserRole.MasterAdmin),
+    trimMiddleware,
+    Controller.UpdateSubscriptionLicence
+);
 SubscriptionRoutes.get('/organisation/:organisationId', authorizeRoles(), Controller.GetSubscription);
 SubscriptionRoutes.get('/', authorizeRoles(), Controller.GetSubscriptions);
 

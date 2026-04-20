@@ -987,9 +987,11 @@ class AssignmentController {
                 mapping_id: m.mapping_id,
                 unit_code: m.unit_code,
                 sub_unit_id: m.sub_unit_id,
+                topic_id: m.topic_id,
                 course_id: m.course.course_id,
                 learner_map: m.learnerMap,
                 trainer_map: m.trainerMap,
+                signed_off: m.signed_off,
                 comment: m.comment,
                 comment_updated_by: m.comment_updated_by,
                 comment_updated_at: m.comment_updated_at
@@ -1212,11 +1214,13 @@ class AssignmentController {
                 assignment_id,
                 course_id,
                 unit_code,
-                sub_unit_ids = [],
+                sub_unit_ids = [], // Backward compatibility for standard courses
+                mappings = [], // New nested structure for qualification courses: [{ sub_unit_id, topic_id }]
                 mapped_by,
                 learnerMap,
                 trainerMap,
                 comment,
+                topic_id // Backward compatibility
             } = req.body;
 
             if (!assignment_id || !course_id || !unit_code) {
@@ -1243,72 +1247,45 @@ class AssignmentController {
             const isLearner = mapped_by === "Learner";
             const rows: AssignmentMapping[] = [];
 
-            // Sub-unit based mapping
-            if (sub_unit_ids.length) {
-                for (const sid of sub_unit_ids) {
-                    let row = await mappingRepo.findOne({
-                        where: {
-                            assignment: { assignment_id } as any,
-                            course: { course_id } as any,
-                            unit_code,
-                            sub_unit_id: sid
-                        }
-                    });
+            // Determine mapping strategy based on input
+            let mappingItems: { sub_unit_id: string | null; topic_id: string | null }[] = [];
 
-                    if (!row) {
-                        row = mappingRepo.create({
-                            assignment,
-                            course: { course_id } as any,
-                            unit_code,
-                            sub_unit_id: sid
-                        });
-                    }
-
-                    row.learnerMap = learnerMap !== undefined ? learnerMap : isLearner;
-                    row.trainerMap = trainerMap !== undefined ? trainerMap : !isLearner;
-
-                    if (comment !== undefined) {
-                        row.comment =
-                            comment === '' || comment === null ? null : String(comment);
-                        if (req.user?.user_id) {
-                            row.comment_updated_by = { user_id: req.user.user_id } as any;
-                            row.comment_updated_at = new Date();
-                        }
-                    }
-
-                    rows.push(row);
-                }
+            if (mappings.length > 0) {
+                // New nested structure for qualification courses
+                mappingItems = mappings.map((m: any) => ({
+                    sub_unit_id: m.sub_unit_id || null,
+                    topic_id: m.topic_id || null
+                }));
+            } else if (sub_unit_ids.length > 0) {
+                // Backward compatibility: standard courses with multiple sub-units
+                mappingItems = sub_unit_ids.map((sid: string) => ({
+                    sub_unit_id: sid,
+                    topic_id: null
+                }));
+            } else if (topic_id) {
+                // Backward compatibility: single topic_id (if provided)
+                mappingItems = [{ sub_unit_id: null, topic_id }];
+            } else {
+                // Unit-only mapping
+                mappingItems = [{ sub_unit_id: null, topic_id: null }];
             }
-            // Unit-only mapping
-            else {
-                let row = await mappingRepo.findOne({
-                    where: {
-                        assignment: { assignment_id } as any,
-                        course: { course_id } as any,
-                        unit_code,
-                        sub_unit_id: null
-                    }
+
+            // Create ONE mapping record per combination (each = one evidence box)
+            for (const item of mappingItems) {
+                const row = mappingRepo.create({
+                    assignment,
+                    course: { course_id } as any,
+                    unit_code,
+                    sub_unit_id: item.sub_unit_id,
+                    topic_id: item.topic_id,
+                    learnerMap: learnerMap !== undefined ? learnerMap : isLearner,
+                    trainerMap: trainerMap !== undefined ? trainerMap : !isLearner,
+                    comment: comment ? String(comment) : null
                 });
 
-                if (!row) {
-                    row = mappingRepo.create({
-                        assignment,
-                        course: { course_id } as any,
-                        unit_code,
-                        sub_unit_id: null
-                    });
-                }
-
-                row.learnerMap = learnerMap !== undefined ? learnerMap : isLearner;
-                row.trainerMap = trainerMap !== undefined ? trainerMap : !isLearner;
-
-                if (comment !== undefined) {
-                    row.comment =
-                        comment === '' || comment === null ? null : String(comment);
-                    if (req.user?.user_id) {
-                        row.comment_updated_by = { user_id: req.user.user_id } as any;
-                        row.comment_updated_at = new Date();
-                    }
+                if (comment && req.user?.user_id) {
+                    row.comment_updated_by = { user_id: req.user.user_id } as any;
+                    row.comment_updated_at = new Date();
                 }
 
                 rows.push(row);
@@ -1369,8 +1346,10 @@ class AssignmentController {
                 file: m.assignment.file,
                 unit_ref: m.unit_code,
                 sub_unit_ref: m.sub_unit_id,
+                topic_id: m.topic_id,
                 learnerMap: m.learnerMap,
                 trainerMap: m.trainerMap,
+                signed_off: m.signed_off,
                 uploaded_at: m.assignment.created_at,
             }));
 
@@ -1389,17 +1368,21 @@ class AssignmentController {
 
     public async toggleMappingFlag(req: CustomRequest, res: Response) {
         try {
-            const { mapping_id, learnerMap, trainerMap, comment } = req.body;
+            const { mapping_id, learnerMap, trainerMap, comment, signed_off } = req.body;
+
+            // Note: topic_id updates are NOT allowed - create new mapping instead
+            // This prevents data shifting to wrong topics in UI
 
             if (
                 !mapping_id ||
                 (learnerMap === undefined &&
                     trainerMap === undefined &&
-                    comment === undefined)
+                    comment === undefined &&
+                    signed_off === undefined)
             ) {
                 return res.status(400).json({
                     status: false,
-                    message: "Invalid payload",
+                    message: "Invalid payload - at least one field to update is required",
                 });
             }
 
@@ -1418,6 +1401,7 @@ class AssignmentController {
 
             if (learnerMap !== undefined) row.learnerMap = learnerMap;
             if (trainerMap !== undefined) row.trainerMap = trainerMap;
+            if (signed_off !== undefined) row.signed_off = signed_off;
 
             if (comment !== undefined) {
                 row.comment = comment;
@@ -1441,10 +1425,21 @@ class AssignmentController {
 
     public async unmapAssignment(req: CustomRequest, res: Response) {
         try {
-            const { assignment_id, course_id, unit_code, sub_unit_id } = req.body;
+            const { mapping_id, assignment_id, course_id, unit_code, sub_unit_id, topic_id } = req.body;
 
+            // Prefer mapping_id for safety (each mapping = one evidence box)
+            if (mapping_id) {
+                const repo = AppDataSource.getRepository(AssignmentMapping);
+                await repo.delete({ mapping_id });
+                return res.status(200).json({ status: true, message: "Unmapped successfully" });
+            }
+
+            // Fallback: full combination (but still dangerous - can affect multiple boxes)
             if (!assignment_id || !course_id || !unit_code) {
-                return res.status(400).json({ status: false, message: "Invalid payload" });
+                return res.status(400).json({
+                    status: false,
+                    message: "Either mapping_id OR (assignment_id, course_id, unit_code) are required"
+                });
             }
 
             const repo = AppDataSource.getRepository(AssignmentMapping);
@@ -1454,6 +1449,7 @@ class AssignmentController {
                 course: { course_id } as any,
                 unit_code,
                 sub_unit_id: sub_unit_id ?? null,
+                topic_id: topic_id ?? null,
             });
 
             return res.status(200).json({ status: true, message: "Unmapped successfully" });

@@ -8,6 +8,11 @@ import { CustomRequest } from "../util/Interface/expressInterface";
 import { UserRole } from "../util/constants";
 import { In } from "typeorm";
 import { getAccessibleOrganisationIds, getScopeContext, canAccessOrganisation } from "../util/organisationFilter";
+import {
+    countLicenceEligibleLearners,
+    countLicenceEligibleLearnersByOrganisationIds,
+    formatSubscriptionApiPayload,
+} from "../util/subscriptionLicence";
 
 class SubscriptionController {
     public async CreatePlan(req: CustomRequest, res: Response) {
@@ -395,7 +400,13 @@ class SubscriptionController {
                 });
             }
 
-            const { organisationId, planId } = req.body;
+            const {
+                organisationId,
+                planId,
+                totalLicenses,
+                tolerancePercentage,
+                warningThresholdPercentage,
+            } = req.body;
 
             if (!organisationId || !planId) {
                 return res.status(400).json({
@@ -447,20 +458,33 @@ class SubscriptionController {
                 organisation_id: organisationId,
                 plan_id: planId,
                 status: SubscriptionStatus.Active,
-                start_date: new Date()
+                start_date: new Date(),
+                total_licenses:
+                    totalLicenses !== undefined && totalLicenses !== null
+                        ? Number(totalLicenses)
+                        : null,
+                tolerance_percentage:
+                    tolerancePercentage !== undefined && tolerancePercentage !== null
+                        ? String(tolerancePercentage)
+                        : null,
+                warning_threshold_percentage:
+                    warningThresholdPercentage !== undefined &&
+                    warningThresholdPercentage !== null
+                        ? String(warningThresholdPercentage)
+                        : null,
             });
 
             const savedSubscription = await subscriptionRepository.save(subscription);
+            const withPlan = await subscriptionRepository.findOne({
+                where: { id: savedSubscription.id },
+                relations: ["plan"],
+            });
+            const used = await countLicenceEligibleLearners(organisationId);
 
             return res.status(200).json({
                 message: "Plan assigned to organisation successfully",
                 status: true,
-                data: {
-                    id: savedSubscription.id,
-                    organisationId: savedSubscription.organisation_id,
-                    plan: plan.name,
-                    status: savedSubscription.status
-                }
+                data: formatSubscriptionApiPayload(withPlan!, used),
             });
 
         } catch (error) {
@@ -638,17 +662,12 @@ class SubscriptionController {
                 });
             }
 
+            const used = await countLicenceEligibleLearners(organisationId);
+
             return res.status(200).json({
                 message: "Subscription retrieved successfully",
                 status: true,
-                data: {
-                    id: subscription.id,
-                    organisationId: subscription.organisation_id,
-                    plan: subscription.plan?.name || '',
-                    status: subscription.status,
-                    startDate: subscription.start_date,
-                    endDate: subscription.end_date
-                }
+                data: formatSubscriptionApiPayload(subscription, used),
             });
 
         } catch (error) {
@@ -681,18 +700,19 @@ class SubscriptionController {
             }
 
             const subscriptions = await query.getMany();
+            const usedMap = await countLicenceEligibleLearnersByOrganisationIds(
+                subscriptions.map((s) => s.organisation_id)
+            );
 
             return res.status(200).json({
                 message: "Subscriptions retrieved successfully",
                 status: true,
-                data: subscriptions.map(sub => ({
-                    id: sub.id,
-                    organisationId: sub.organisation_id,
-                    plan: sub.plan?.name || '',
-                    status: sub.status,
-                    startDate: sub.start_date,
-                    endDate: sub.end_date
-                }))
+                data: subscriptions.map((sub) =>
+                    formatSubscriptionApiPayload(
+                        sub,
+                        usedMap.get(sub.organisation_id) ?? 0
+                    )
+                ),
             });
 
         } catch (error) {
@@ -700,6 +720,71 @@ class SubscriptionController {
                 message: "Internal Server Error",
                 status: false,
                 error: error.message
+            });
+        }
+    }
+
+    public async UpdateSubscriptionLicence(req: CustomRequest, res: Response) {
+        try {
+            if (req.user.role !== UserRole.MasterAdmin) {
+                return res.status(403).json({
+                    message:
+                        "Only MasterAdmin can update subscription licence settings",
+                    status: false,
+                });
+            }
+
+            const organisationId = parseInt(req.params.organisationId, 10);
+            const {
+                totalLicenses,
+                tolerancePercentage,
+                warningThresholdPercentage,
+            } = req.body;
+
+            const subscriptionRepository = AppDataSource.getRepository(Subscription);
+
+            const subscription = await subscriptionRepository.findOne({
+                where: { organisation_id: organisationId },
+                relations: ["plan"],
+            });
+
+            if (!subscription) {
+                return res.status(404).json({
+                    message: "Subscription not found",
+                    status: false,
+                });
+            }
+
+            if (totalLicenses !== undefined) {
+                subscription.total_licenses =
+                    totalLicenses === null ? null : Number(totalLicenses);
+            }
+            if (tolerancePercentage !== undefined) {
+                subscription.tolerance_percentage =
+                    tolerancePercentage === null
+                        ? null
+                        : String(tolerancePercentage);
+            }
+            if (warningThresholdPercentage !== undefined) {
+                subscription.warning_threshold_percentage =
+                    warningThresholdPercentage === null
+                        ? null
+                        : String(warningThresholdPercentage);
+            }
+
+            await subscriptionRepository.save(subscription);
+            const used = await countLicenceEligibleLearners(organisationId);
+
+            return res.status(200).json({
+                message: "Subscription licence updated successfully",
+                status: true,
+                data: formatSubscriptionApiPayload(subscription, used),
+            });
+        } catch (error) {
+            return res.status(500).json({
+                message: "Internal Server Error",
+                status: false,
+                error: error.message,
             });
         }
     }

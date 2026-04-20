@@ -37,12 +37,14 @@ export const getUnitCompletionStatus = (unit: any): UnitCompletionStatus => {
 };
 
 export const unitCompletionStatus = (unit: any) => {
+  // Count mapping rows (each = one evidence box) instead of nested structure
   let learnerDone = false;
   let trainerDone = false;
 
   // CASE 1: Unit has sub-units
-  if (Array.isArray(unit.subUnit) && unit.subUnit.length > 0) {
+  if (Array.isArray(unit?.subUnit) && unit.subUnit.length > 0) {
     unit.subUnit.forEach((sub: any) => {
+      // Count each mapping row that has learnerMap/trainerMap flags
       (sub.evidenceBoxes || []).forEach((box: any) => {
         if (box.learnerMap) learnerDone = true;
         if (box.trainerMap) trainerDone = true;

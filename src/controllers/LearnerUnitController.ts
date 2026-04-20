@@ -189,6 +189,12 @@ class LearnerUnitController {
                 if (Array.isArray(unit?.subUnit)) {
                     unit.subUnit.forEach((su: any) => {
                         if (Array.isArray(su?.evidenceBoxes)) su.evidenceBoxes.forEach(countBox);
+                        // Also count topic-level evidence boxes for qualification courses
+                        if (Array.isArray(su?.topics)) {
+                            su.topics.forEach((topic: any) => {
+                                if (Array.isArray(topic?.evidenceBoxes)) topic.evidenceBoxes.forEach(countBox);
+                            });
+                        }
                     });
                 }
 

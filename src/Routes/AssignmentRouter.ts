@@ -34,4 +34,6 @@ AssignmentRoutes.get('/:id/signatures', authorizeRoles(), Controller.getAssignme
 //Mapping
 AssignmentRoutes.post('/mapping', authorizeRoles(), Controller.mapAssignment);
 AssignmentRoutes.get('/get-mapped', authorizeRoles(), Controller.getMappedEvidence);
+AssignmentRoutes.patch('/signoff', authorizeRoles(), Controller.toggleMappingFlag);
+
 export default AssignmentRoutes;
