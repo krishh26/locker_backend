@@ -24,6 +24,7 @@ import { SamplingPlan } from "../entity/samplingPlan.entity";
 import { UserOrganisation } from "../entity/UserOrganisation.entity";
 import { In } from "typeorm";
 import { getAccessibleOrganisationIds, getAccessibleCentreAdminUserIds, applyLearnerScope, validateLearnerOrganisationCentre, canAccessOrganisation, canAccessCentre, getScopeContext } from "../util/organisationFilter";
+import { getOrganisationCourseExclusionMap } from "../util/organisationCourseExclusion";
 class LearnerController {
 
     public async CreateLearner(req: CustomRequest, res: Response) {
@@ -580,10 +581,10 @@ class LearnerController {
                 //     userCourse.course.units = (userCourse.course.units || []).filter((u: any) => courseFilter.activeSet.has(String(u.id)) || courseFilter.activeSet.has(String(u.unit_ref)));
                 // }
 
-                // Using AssignmentMapping: merge mapping flags into course units/subUnits
+                // Using AssignmentMapping: merge mapping flags into course units/subUnits/topics
                 let courseMappings: any = filteredMappings.filter(mapping => mapping.course.course_id == userCourse.course.course_id);
 
-                // Apply mapping flags onto units/subUnits
+                // Apply mapping flags onto units/subUnits/topics
                 courseMappings.forEach(mapping => {
                     const unitsArray = userCourse.course.units || [];
 
@@ -596,8 +597,8 @@ class LearnerController {
 
                     const unit = unitsArray[unitIndex];
 
-                    // UNIT LEVEL
-                    if (!mapping.sub_unit_id) {
+                    // UNIT LEVEL (no sub-unit, no topic)
+                    if (!mapping.sub_unit_id && !mapping.topic_id) {
                         unit.evidenceBoxes = unit.evidenceBoxes || [];
                         unit.evidenceBoxes.push({
                             mapping_id: mapping.mapping_id,
@@ -605,11 +606,12 @@ class LearnerController {
                             learnerMap: mapping.learnerMap,
                             trainerMap: mapping.trainerMap,
                             sub_unit_id: null,
+                            topic_id: null,
                         });
                     }
 
-                    // SUB-UNIT LEVEL
-                    if (mapping.sub_unit_id) {
+                    // SUB-UNIT LEVEL (sub-unit but no topic)
+                    else if (mapping.sub_unit_id && !mapping.topic_id) {
                         unit.subUnit = unit.subUnit || [];
 
                         const subIndex = unit.subUnit.findIndex(
@@ -626,7 +628,59 @@ class LearnerController {
                             learnerMap: mapping.learnerMap,
                             trainerMap: mapping.trainerMap,
                             sub_unit_id: mapping.sub_unit_id,
+                            topic_id: null,
                         });
+
+                        const hasLearner = sub.evidenceBoxes.some((e: any) => e.learnerMap);
+                        const hasTrainer = sub.evidenceBoxes.some((e: any) => e.trainerMap);
+
+                        sub.learnerMap = hasLearner;
+                        sub.trainerMap = hasTrainer;
+                        unit.subUnit[subIndex] = sub;
+                    }
+
+                    // TOPIC LEVEL (sub-unit + topic for qualification courses)
+                    else if (mapping.sub_unit_id && mapping.topic_id) {
+                        unit.subUnit = unit.subUnit || [];
+
+                        const subIndex = unit.subUnit.findIndex(
+                            (s: any) => String(s.id) === String(mapping.sub_unit_id)
+                        );
+                        if (subIndex === -1) return;
+
+                        const sub = unit.subUnit[subIndex];
+                        sub.evidenceBoxes = sub.evidenceBoxes || [];
+
+                        // For qualification courses, we need to handle topic-level evidence boxes
+                        // Check if this sub-unit has topics structure
+                        if (sub.topics && Array.isArray(sub.topics)) {
+                            const topicIndex = sub.topics.findIndex(
+                                (t: any) => String(t.id) === String(mapping.topic_id)
+                            );
+                            if (topicIndex !== -1) {
+                                const topic = sub.topics[topicIndex];
+                                topic.evidenceBoxes = topic.evidenceBoxes || [];
+                                topic.evidenceBoxes.push({
+                                    mapping_id: mapping.mapping_id,
+                                    assignment_id: mapping.assignment.assignment_id,
+                                    learnerMap: mapping.learnerMap,
+                                    trainerMap: mapping.trainerMap,
+                                    sub_unit_id: mapping.sub_unit_id,
+                                    topic_id: mapping.topic_id,
+                                });
+                                sub.topics[topicIndex] = topic;
+                            }
+                        } else {
+                            // Fallback: attach to sub-unit level if no topics structure
+                            sub.evidenceBoxes.push({
+                                mapping_id: mapping.mapping_id,
+                                assignment_id: mapping.assignment.assignment_id,
+                                learnerMap: mapping.learnerMap,
+                                trainerMap: mapping.trainerMap,
+                                sub_unit_id: mapping.sub_unit_id,
+                                topic_id: mapping.topic_id,
+                            });
+                        }
 
                         const hasLearner = sub.evidenceBoxes.some((e: any) => e.learnerMap);
                         const hasTrainer = sub.evidenceBoxes.some((e: any) => e.trainerMap);
@@ -682,6 +736,29 @@ class LearnerController {
                     unitsFullyCompleted: fullyCompletedUnits.size,
                 }
             })
+
+            const organisationIdForCourseExclusion =
+                (learner as any).organisation_id ??
+                (learner as any).employer_id?.organisation_id ??
+                getScopeContext(req as any)?.organisationId ??
+                null;
+            const exclusionMap =
+                organisationIdForCourseExclusion && course_ids.length
+                    ? await getOrganisationCourseExclusionMap(
+                          organisationIdForCourseExclusion,
+                          course_ids as number[]
+                      )
+                    : new Map<number, boolean>();
+            courses = courses.map((uc: any) => {
+                const cid = uc.course?.course_id;
+                return {
+                    ...uc,
+                    course: {
+                        ...(typeof uc.course === 'object' && uc.course ? uc.course : {}),
+                        is_excluded: cid != null ? exclusionMap.get(cid) ?? false : false,
+                    },
+                };
+            });
 
             const result = await timeLogRepository.createQueryBuilder('timelog')
                 .select('SUM((split_part(timelog.spend_time, \':\', 1)::int) * 60 + split_part(timelog.spend_time, \':\', 2)::int)', 'totalMinutes')
@@ -2919,16 +2996,39 @@ const getCourseData = async (courses: any[], user_id: string) => {
 
                 const unit = unitsArray[unitIndex] || {};
 
-                if (mapping.sub_unit_id) {
+                // UNIT LEVEL (no sub-unit, no topic)
+                if (!mapping.sub_unit_id && !mapping.topic_id) {
+                    unit.learnerMap = unit.learnerMap || mapping.learnerMap;
+                    unit.trainerMap = unit.trainerMap || mapping.trainerMap;
+                }
+                // SUB-UNIT LEVEL (sub-unit but no topic)
+                else if (mapping.sub_unit_id && !mapping.topic_id) {
                     unit.subUnit = unit.subUnit || [];
                     const subIndex = unit.subUnit.findIndex((s: any) => String(s.id) === String(mapping.sub_unit_id));
                     if (subIndex !== -1) {
                         unit.subUnit[subIndex].learnerMap = unit.subUnit[subIndex].learnerMap || mapping.learnerMap;
                         unit.subUnit[subIndex].trainerMap = unit.subUnit[subIndex].trainerMap || mapping.trainerMap;
                     }
-                } else {
-                    unit.learnerMap = unit.learnerMap || mapping.learnerMap;
-                    unit.trainerMap = unit.trainerMap || mapping.trainerMap;
+                }
+                // TOPIC LEVEL (sub-unit + topic for qualification courses)
+                else if (mapping.sub_unit_id && mapping.topic_id) {
+                    unit.subUnit = unit.subUnit || [];
+                    const subIndex = unit.subUnit.findIndex((s: any) => String(s.id) === String(mapping.sub_unit_id));
+                    if (subIndex !== -1) {
+                        const sub = unit.subUnit[subIndex];
+                        // For qualification courses, we need to handle topic-level mappings
+                        if (sub.topics && Array.isArray(sub.topics)) {
+                            const topicIndex = sub.topics.findIndex((t: any) => String(t.id) === String(mapping.topic_id));
+                            if (topicIndex !== -1) {
+                                sub.topics[topicIndex].learnerMap = sub.topics[topicIndex].learnerMap || mapping.learnerMap;
+                                sub.topics[topicIndex].trainerMap = sub.topics[topicIndex].trainerMap || mapping.trainerMap;
+                            }
+                        }
+                        // Fallback: set on sub-unit level if no topics structure
+                        sub.learnerMap = sub.learnerMap || mapping.learnerMap;
+                        sub.trainerMap = sub.trainerMap || mapping.trainerMap;
+                        unit.subUnit[subIndex] = sub;
+                    }
                 }
 
                 unitsArray[unitIndex] = unit;

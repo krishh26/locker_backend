@@ -10,8 +10,45 @@ import { Subscription } from "../entity/Subscription.entity";
 import { AuditLog } from "../entity/AuditLog.entity";
 import { getAccessibleOrganisationIds, getAccessibleCentreIds, addUserScopeFilter, applyLearnerScope, getScopeContext } from "../util/organisationFilter";
 import { Learner } from "../entity/Learner.entity";
+import { buildLicencePayload, countLicenceEligibleLearners } from "../util/subscriptionLicence";
 
 class DashboardController {
+    constructor() {
+        this.GetSystemSummary = this.GetSystemSummary.bind(this);
+        this.GetOrganisationMetrics = this.GetOrganisationMetrics.bind(this);
+        this.GetUserMetrics = this.GetUserMetrics.bind(this);
+        this.GetAccountManagerMetrics = this.GetAccountManagerMetrics.bind(this);
+        this.GetActivityMetrics = this.GetActivityMetrics.bind(this);
+        this.GetStatusOverview = this.GetStatusOverview.bind(this);
+    }
+
+    private getLicenceWarningMessage(status: "none" | "near_limit" | "exceeded"): string {
+        if (status === "exceeded") return "Licence limit exceeded";
+        if (status === "near_limit") return "Approaching licence limit";
+        return "Licence usage is within limit";
+    }
+
+    private async getSingleOrgLicenceUsage(organisationId: number) {
+        const subscriptionRepository = AppDataSource.getRepository(Subscription);
+        const subscription = await subscriptionRepository.findOne({
+            where: { organisation_id: organisationId, deleted_at: null as any },
+        });
+
+        if (!subscription) return null;
+
+        const usedLicences = await countLicenceEligibleLearners(organisationId);
+        const licence = buildLicencePayload({
+            total_licenses: subscription.total_licenses,
+            tolerance_percentage: subscription.tolerance_percentage,
+            warning_threshold_percentage: subscription.warning_threshold_percentage,
+            used_licenses: usedLicences,
+        });
+
+        return {
+            ...licence,
+            warning_message: this.getLicenceWarningMessage(licence.warning_status),
+        };
+    }
 
     public async GetSystemSummary(req: CustomRequest, res: Response) {
         try {
@@ -37,7 +74,8 @@ class DashboardController {
                             totalLearners: 0,
                             totalSubscriptions: 0,
                             activeOrganisations: 0,
-                            activeSubscriptions: 0
+                            activeSubscriptions: 0,
+                            licenceUsage: null,
                         }
                     });
                 }
@@ -92,8 +130,30 @@ class DashboardController {
             }
             const totalSubscriptions = await subQuery.getCount();
             const activeSubscriptions = await subQuery
+                .clone()
                 .andWhere("sub.status = :status", { status: 'active' })
                 .getCount();
+
+            let licenceOrgId: number | null = null;
+            if (scopeContext?.organisationId != null) {
+                // MasterAdmin org-mode via X-Organisation-Id / organisation_id query.
+                licenceOrgId = scopeContext.organisationId;
+            } else if (accessibleIds !== null && accessibleIds.length === 1) {
+                // Role is already single-org scoped (e.g. OrganisationAdmin).
+                licenceOrgId = accessibleIds[0];
+            } else if (totalSubscriptions === 1) {
+                // Global-scope users with exactly one subscription in current scope.
+                const onlySub = await subQuery
+                    .clone()
+                    .select("sub.organisation_id", "organisation_id")
+                    .getRawOne<{ organisation_id: number }>();
+                licenceOrgId = onlySub?.organisation_id ? Number(onlySub.organisation_id) : null;
+            }
+
+            const licenceUsage =
+                licenceOrgId !== null
+                    ? await this.getSingleOrgLicenceUsage(licenceOrgId)
+                    : null;
 
             return res.status(200).json({
                 message: "System summary retrieved successfully",
@@ -105,7 +165,8 @@ class DashboardController {
                     totalLearners,
                     totalSubscriptions,
                     activeOrganisations,
-                    activeSubscriptions
+                    activeSubscriptions,
+                    licenceUsage,
                 }
             });
 

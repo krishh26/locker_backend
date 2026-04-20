@@ -30,6 +30,9 @@ export class AssignmentMapping {
   @Column({ type: 'varchar', nullable: true })
   sub_unit_id: string; // PC / subUnit id (optional)
 
+  @Column({ type: 'varchar', nullable: true })
+  topic_id: string; // Topic id (optional, for qualification courses)
+
   @Column({ type: 'boolean', default: false })
   learnerMap: boolean;
 

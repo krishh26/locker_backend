@@ -43,6 +43,18 @@ export class Subscription {
     @Column({ type: 'timestamp', nullable: true })
     suspended_at: Date;
 
+    /** Purchased seat allocation; null means licence limits are not configured (backward compatible). */
+    @Column({ type: 'int', nullable: true })
+    total_licenses: number | null;
+
+    /** Extra headroom above total_licenses, stored as percent (e.g. 5 = 5%). Null treated as 5 when total_licenses is set. */
+    @Column({ type: 'decimal', precision: 5, scale: 2, nullable: true })
+    tolerance_percentage: string | null;
+
+    /** Warn when used seats reach this percent of total_licenses (e.g. 90). */
+    @Column({ type: 'decimal', precision: 5, scale: 2, nullable: true })
+    warning_threshold_percentage: string | null;
+
     @DeleteDateColumn({ type: 'timestamp', nullable: true })
     deleted_at: Date;
 

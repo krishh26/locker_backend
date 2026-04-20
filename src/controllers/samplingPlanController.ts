@@ -1200,43 +1200,82 @@ export class SamplingPlanController {
       });
 
       // 5️⃣ Build response (UI-SAFE)
-      const data = mappings.map(m => {
-        const assignment = m.assignment;
+      // const data = mappings.map(m => {
+      //   const assignment = m.assignment;
 
-        return {
-          mapping_id: m.mapping_id,
-          assignment_id: assignment.assignment_id,
-          title: assignment.title || assignment.file?.name,
-          description: assignment.description,
-          file: assignment.file,
-          created_at: assignment.created_at,
+      //   return {
+      //     mapping_id: m.mapping_id,
+      //     assignment_id: assignment.assignment_id,
+      //     title: assignment.title || assignment.file?.name,
+      //     description: assignment.description,
+      //     file: assignment.file,
+      //     created_at: assignment.created_at,
 
-          unit: {
-            unit_ref: unit_code,
-          },
+      //     unit: {
+      //       unit_ref: unit_code,
+      //     },
 
-          mappedSubUnits: m.sub_unit_id
-            ? [
-              {
-                id: m.sub_unit_id,
-                learnerMapped: m.learnerMap,
-                trainerMapped: m.trainerMap,
-                review: pcReviewMap[m.mapping_id]?.[m.sub_unit_id] || null,
-              },
-            ]
-            : [
-              {
-                id: unit_code,
-                learnerMapped: m.learnerMap,
-                trainerMapped: m.trainerMap,
-                review: pcReviewMap[m.mapping_id]?.[unit_code] || null,
-              },
-            ],
+      //     mappedSubUnits: m.sub_unit_id
+      //       ? [
+      //         {
+      //           id: m.sub_unit_id,
+      //           learnerMapped: m.learnerMap,
+      //           trainerMapped: m.trainerMap,
+      //           review: pcReviewMap[m.mapping_id]?.[m.sub_unit_id] || null,
+      //         },
+      //       ]
+      //       : [
+      //         {
+      //           id: unit_code,
+      //           learnerMapped: m.learnerMap,
+      //           trainerMapped: m.trainerMap,
+      //           review: pcReviewMap[m.mapping_id]?.[unit_code] || null,
+      //         },
+      //       ],
 
-          reviews: reviewMap[m.mapping_id] || {},
-        };
-      });
+      //     reviews: reviewMap[m.mapping_id] || {},
+      //   };
+      // });
 
+      const grouped: any = {};
+
+mappings.forEach((m: any) => {
+  const assignment = m.assignment;
+  const aid = assignment.assignment_id;
+
+  if (!grouped[aid]) {
+    grouped[aid] = {
+      assignment_id: aid,
+      title: assignment.title || assignment.file?.name,
+      description: assignment.description,
+      file: assignment.file,
+      created_at: assignment.created_at,
+      unit: {
+        unit_ref: unit_code,
+      },
+      mappedSubUnits: [],
+      reviews: {}
+    };
+  }
+
+  grouped[aid].mappedSubUnits.push({
+    mapping_id: m.mapping_id,
+    id: m.sub_unit_id,
+    topic_id: m.topic_id,
+    learnerMapped: m.learnerMap,
+    trainerMapped: m.trainerMap,
+    review: pcReviewMap[m.mapping_id]?.[m.sub_unit_id] || null
+  });
+
+  if (reviewMap[m.mapping_id]) {
+    grouped[aid].reviews = {
+      ...grouped[aid].reviews,
+      ...reviewMap[m.mapping_id]
+    };
+  }
+});
+
+const data = Object.values(grouped);
       return res.status(200).json({
         status: true,
         message: "Evidence list loaded",
@@ -1611,7 +1650,7 @@ export class SamplingPlanController {
         },
       });
 
-      // 3️⃣ Build lookup: unit_ref → subUnit_ref → flags
+      // 3️⃣ Build lookup: unit_ref → subUnit_ref → topics/flags
       const unitMap = new Map<
         string,
         {
@@ -1619,7 +1658,11 @@ export class SamplingPlanController {
           trainerMapped: boolean;
           subUnits: Map<
             string,
-            { learnerMapped: boolean; trainerMapped: boolean }
+            {
+              learnerMapped: boolean;
+              trainerMapped: boolean;
+              topics: Map<string, { learnerMapped: boolean; trainerMapped: boolean }>;
+            }
           >;
         }
       >();
@@ -1635,15 +1678,43 @@ export class SamplingPlanController {
 
         const u = unitMap.get(m.unit_code)!;
 
-        if (m.learnerMap) u.learnerMapped = true;
-        if (m.trainerMap) u.trainerMapped = true;
+        // Unit-level mapping (no sub-unit, no topic)
+        if (!m.sub_unit_id && !m.topic_id) {
+          if (m.learnerMap) u.learnerMapped = true;
+          if (m.trainerMap) u.trainerMapped = true;
+        }
 
-        // subUnit based
-        if (m.sub_unit_id) {
-          u.subUnits.set(m.sub_unit_id, {
+        // Sub-unit level mapping
+        if (m.sub_unit_id && !m.topic_id) {
+          if (!u.subUnits.has(m.sub_unit_id)) {
+            u.subUnits.set(m.sub_unit_id, {
+              learnerMapped: false,
+              trainerMapped: false,
+              topics: new Map(),
+            });
+          }
+          const subUnit = u.subUnits.get(m.sub_unit_id)!;
+          if (m.learnerMap) subUnit.learnerMapped = true;
+          if (m.trainerMap) subUnit.trainerMapped = true;
+        }
+
+        // Topic level mapping (qualification courses)
+        if (m.sub_unit_id && m.topic_id) {
+          if (!u.subUnits.has(m.sub_unit_id)) {
+            u.subUnits.set(m.sub_unit_id, {
+              learnerMapped: false,
+              trainerMapped: false,
+              topics: new Map(),
+            });
+          }
+          const subUnit = u.subUnits.get(m.sub_unit_id)!;
+          subUnit.topics.set(m.topic_id, {
             learnerMapped: m.learnerMap,
             trainerMapped: m.trainerMap,
           });
+          // Also mark sub-unit as mapped if topic is mapped
+          if (m.learnerMap) subUnit.learnerMapped = true;
+          if (m.trainerMap) subUnit.trainerMapped = true;
         }
       });
 
