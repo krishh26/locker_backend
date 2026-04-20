@@ -681,12 +681,6 @@ class LearnerController {
                                 topic_id: mapping.topic_id,
                             });
                         }
-
-                        const hasLearner = sub.evidenceBoxes.some((e: any) => e.learnerMap);
-                        const hasTrainer = sub.evidenceBoxes.some((e: any) => e.trainerMap);
-
-                        sub.learnerMap = hasLearner;
-                        sub.trainerMap = hasTrainer;
                         unit.subUnit[subIndex] = sub;
                     }
 
@@ -709,7 +703,7 @@ class LearnerController {
 
                     if (Array.isArray(unit.subUnit)) {
                         unit.subUnit.forEach((sub: any) => {
-                            if (sub?.learnerMap && sub?.trainerMap) {
+                            if (sub?.completed) {
                                 fullyCompleted.add(sub.id);
                             } else if (sub?.learnerMap || sub?.trainerMap) {
                                 partiallyCompleted.add(sub.id);
@@ -3023,10 +3017,11 @@ const getCourseData = async (courses: any[], user_id: string) => {
                                 sub.topics[topicIndex].learnerMap = sub.topics[topicIndex].learnerMap || mapping.learnerMap;
                                 sub.topics[topicIndex].trainerMap = sub.topics[topicIndex].trainerMap || mapping.trainerMap;
                             }
+                        } else {
+                            // Fallback: no topics array, keep sub-unit-level mapping behaviour
+                            sub.learnerMap = sub.learnerMap || mapping.learnerMap;
+                            sub.trainerMap = sub.trainerMap || mapping.trainerMap;
                         }
-                        // Fallback: set on sub-unit level if no topics structure
-                        sub.learnerMap = sub.learnerMap || mapping.learnerMap;
-                        sub.trainerMap = sub.trainerMap || mapping.trainerMap;
                         unit.subUnit[subIndex] = sub;
                     }
                 }
