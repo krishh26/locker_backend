@@ -1708,14 +1708,22 @@ const data = Object.values(grouped);
               topics: new Map(),
             });
           }
+        
           const subUnit = u.subUnits.get(m.sub_unit_id)!;
-          subUnit.topics.set(m.topic_id, {
-            learnerMapped: m.learnerMap,
-            trainerMapped: m.trainerMap,
-          });
-          // Also mark sub-unit as mapped if topic is mapped
-          if (m.learnerMap) subUnit.learnerMapped = true;
-          if (m.trainerMap) subUnit.trainerMapped = true;
+        
+          if (!subUnit.topics.has(m.topic_id)) {
+            subUnit.topics.set(m.topic_id, {
+              learnerMapped: false,
+              trainerMapped: false,
+            });
+          }
+        
+          const topic = subUnit.topics.get(m.topic_id)!;
+        
+          if (m.learnerMap) topic.learnerMapped = true;
+          if (m.trainerMap) topic.trainerMapped = true;
+        
+          return;
         }
       });
 
@@ -1740,10 +1748,41 @@ const data = Object.values(grouped);
                 id: su.id,
                 title: su.title,
                 code: su.code,
-                learnerMapped: suMap?.learnerMapped || false,
-                trainerMapped: suMap?.trainerMapped || false,
+
+                // derive from topics if exist
+                learnerMapped: Array.isArray(su.topics)
+                  ? su.topics.some((t: any) => {
+                    const tMap = suMap?.topics?.get(t.id);
+                    return tMap?.learnerMapped;
+                  })
+                  : suMap?.learnerMapped || false,
+
+                trainerMapped: Array.isArray(su.topics)
+                  ? su.topics.some((t: any) => {
+                    const tMap = suMap?.topics?.get(t.id);
+                    return tMap?.trainerMapped;
+                  })
+                  : suMap?.trainerMapped || false,
+
+                // ADD THIS (topics mapping)
+                topics: Array.isArray(su.topics)
+                  ? su.topics.map((t: any) => {
+                    const tMap = suMap?.topics?.get(t.id);
+
+                    return {
+                      id: t.id,
+                      title: t.title,
+                      learnerMapped: tMap?.learnerMapped || false,
+                      trainerMapped: tMap?.trainerMapped || false,
+                    };
+                  })
+                  : [],
               };
             });
+
+            // update unit level from subUnits
+            learnerMapped = subUnits.some((s: any) => s.learnerMapped);
+            trainerMapped = subUnits.some((s: any) => s.trainerMapped);
 
             return {
               unit_code: unitRef,
