@@ -20,6 +20,7 @@ import { convertDataToJson } from "../util/convertDataToJson";
 import { EnhancedUnit, LearningOutcome, AssessmentCriterion } from "../types/courseBuilder.types";
 import { In, Raw } from 'typeorm';
 import { canAccessOrganisation, getAccessibleOrganisationIds, getScopeContext, resolveUserRole } from "../util/organisationFilter";
+import { countLicenceEligibleLearners, notifyMasterAdminsIfLicenceExceeded } from "../util/subscriptionLicence";
 
 const enhanceCourseData = (course: any) => {
     return {
@@ -425,7 +426,10 @@ class CourseController {
             //     courseData.units = (courseData.units || []).filter((u: any) => activeSet.has(String(u.id)) || activeSet.has(String(u.unit_ref)));
             // }
 
+            const orgIdForLicence = Number(learner.organisation_id);
+            const usedBeforeChange = await countLicenceEligibleLearners(orgIdForLicence);
             await userCourseRepository.save(userCourseRepository.create({ learner_id, trainer_id, IQA_id, LIQA_id, EQA_id, employer_id, course: courseData, start_date, end_date, is_main_course }))
+            await notifyMasterAdminsIfLicenceExceeded(orgIdForLicence, usedBeforeChange);
             if (IQA_id) {
                 const existingPlan = await samplingPlanRepository
                     .createQueryBuilder("plan")
@@ -1001,8 +1005,19 @@ class CourseController {
             if (req.body.bil_return_date !== undefined) {
                 existingCourse.bil_return_reminder_sent_at = null;
             }
+            const orgIdForLicence = Number(existingCourseWithRelations.learner_id?.organisation_id);
+            const usedBeforeChange =
+                Number.isFinite(orgIdForLicence) && orgIdForLicence > 0
+                    ? await countLicenceEligibleLearners(orgIdForLicence)
+                    : 0;
             userCourseRepository.merge(existingCourse, req.body);
             const updatedCourse = await userCourseRepository.save(existingCourse);
+            if (Number.isFinite(orgIdForLicence) && orgIdForLicence > 0) {
+                await notifyMasterAdminsIfLicenceExceeded(
+                    orgIdForLicence,
+                    usedBeforeChange
+                );
+            }
 
             return res.status(200).json({
                 message: 'User Course updated successfully',

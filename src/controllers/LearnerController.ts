@@ -25,6 +25,8 @@ import { UserOrganisation } from "../entity/UserOrganisation.entity";
 import { In } from "typeorm";
 import { getAccessibleOrganisationIds, getAccessibleCentreAdminUserIds, applyLearnerScope, validateLearnerOrganisationCentre, canAccessOrganisation, canAccessCentre, getScopeContext } from "../util/organisationFilter";
 import { getOrganisationCourseExclusionMap } from "../util/organisationCourseExclusion";
+import { Subscription } from "../entity/Subscription.entity";
+import { countLicenceEligibleLearners, notifyMasterAdminsIfLicenceExceeded } from "../util/subscriptionLicence";
 class LearnerController {
 
     public async CreateLearner(req: CustomRequest, res: Response) {
@@ -1727,6 +1729,8 @@ class LearnerController {
                         });
                         continue;
                     }
+                    const orgIdForLicence = Number(centre.organisation_id);
+                    const usedBeforeChange = await countLicenceEligibleLearners(orgIdForLicence);
 
                     // Check if email already exists
                     const normalizedEmail = typeof email === "string" ? email.trim() : email;
@@ -1908,6 +1912,10 @@ class LearnerController {
                             })
                         );
                     }
+                    await notifyMasterAdminsIfLicenceExceeded(
+                        orgIdForLicence,
+                        usedBeforeChange
+                    );
 
                     results.push({
                         index: i,
@@ -1957,12 +1965,20 @@ class LearnerController {
             const learnerPlanRepository = AppDataSource.getRepository(LearnerPlan);
             const SessionLearnerActionRepository = AppDataSource.getRepository(SessionLearnerAction);
             const courseRepository = AppDataSource.getRepository(Course);
+            const subscriptionRepository = AppDataSource.getRepository(Subscription);
 
             // Get accessible org/centre IDs once
             const scopeContext = getScopeContext(req);
             const accessibleOrgIds = req.user ? await getAccessibleOrganisationIds(req.user, scopeContext) : null;
             const centreAdminUserIds = req.user ? await getAccessibleCentreAdminUserIds(req.user) : null;
-
+            const organisationId = req.headers['x-organisation-id'] as string || req.user.organisationId;
+            if (!organisationId) {
+                return res.status(400).json({
+                    message: "Organisation ID is required",
+                    status: false,
+                    data: null
+                });
+            }
             // Helper functions for applying filters
             const applyOrgFilterOnUserAlias = (qb: any, userAlias: string) => {
                 if (accessibleOrgIds !== null) {
@@ -2602,6 +2618,27 @@ class LearnerController {
                         data: sampling_plan_overdue,
                     });
                 }
+                else if (type === "total_licenses") {
+                    const totalLicensesQb = subscriptionRepository
+                        .createQueryBuilder("subscription")
+                        .select("COALESCE(SUM(subscription.total_licenses), 0)", "total_licenses");
+                    if (accessibleOrgIds !== null) {
+                        if (accessibleOrgIds.length === 0) {
+                            return res.status(200).json({
+                                message: "Total licenses fetched successfully",
+                                status: true,
+                                data: 0,
+                            });
+                        }
+                        totalLicensesQb.where("subscription.organisation_id IN (:...orgIds)", { orgIds: accessibleOrgIds });
+                    }
+                    const totalLicensesRaw = await totalLicensesQb.getRawOne();
+                    return res.status(200).json({
+                        message: "Total licenses fetched successfully",
+                        status: true,
+                        data: Number(totalLicensesRaw?.total_licenses ?? 0),
+                    });
+                }
             }
 
 
@@ -2630,6 +2667,7 @@ class LearnerController {
                         sampleDueInMonth_count: 0,
                         samplingPlanOverdue_count: 0,
                         totalCourses: 0,
+                        totalLicenses: 0,
                     }
                 });
             }
@@ -2646,7 +2684,15 @@ class LearnerController {
                     .where("course.organisation_id IN (:...orgIds)", { orgIds: accessibleOrgIds })
                     .getCount();
             }
-
+            const totalLicensesQb = subscriptionRepository
+                .createQueryBuilder("subscription")
+                .select("COALESCE(SUM(subscription.total_licenses), 0)", "total_licenses");
+            if (accessibleOrgIds !== null) {
+                totalLicensesQb.where("subscription.organisation_id IN (:...orgIds)", { orgIds: accessibleOrgIds });
+            }
+            const totalLicensesRaw = await totalLicensesQb.getRawOne();
+            const totalLicenses = Number(totalLicensesRaw?.total_licenses ?? 0);
+            const totalLicensesUsed = await countLicenceEligibleLearners(Number(organisationId));
             const activeLearnersQb = learnerRepository
                 .createQueryBuilder("learner")
                 .leftJoin("learner.user_id", "user_id")
@@ -2913,7 +2959,10 @@ class LearnerController {
                 sessionDueIn7Days_count: Number(sessionDueIn7DaysCountRaw?.count || 0),
                 sampleDueInMonth_count: Number(sampleDueInMonthCountRaw?.count || 0),
                 samplingPlanOverdue_count: Number(samplingPlanOverdueCountRaw?.count || 0),
-                totalCourses: totalCourses
+                totalCourses: totalCourses,
+                totalLicenses: totalLicenses,
+                totalLicenseRemaining: totalLicenses - totalLicensesUsed,
+                totalLicenseUsed: totalLicensesUsed
             }
 
             return res.status(200).json({
