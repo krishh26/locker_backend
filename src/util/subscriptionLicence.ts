@@ -1,8 +1,12 @@
 import { AppDataSource } from "../data-source";
+import { Organisation } from "../entity/Organisation.entity";
 import { Plan } from "../entity/Plan.entity";
 import { Subscription } from "../entity/Subscription.entity";
+import { User } from "../entity/User.entity";
 import { UserCourse } from "../entity/UserCourse.entity";
+import { sendSimpleEmailAsync } from "./nodemailer";
 import { CourseStatus } from "./constants";
+import { UserRole } from "./constants";
 
 export type SubscriptionWarningStatus = "none" | "near_limit" | "exceeded";
 
@@ -22,6 +26,8 @@ const LICENCE_COUNT_STATUSES: CourseStatus[] = [
 ];
 
 const DEFAULT_TOLERANCE = 5;
+const LICENCE_EXCEEDED_EMAIL_COOLDOWN_MS = 12 * 60 * 60 * 1000;
+const licenceExceededEmailSentAt = new Map<number, number>();
 
 function pctFieldOrNull(
     raw: number | string | null | undefined
@@ -197,4 +203,102 @@ export async function countLicenceEligibleLearnersByOrganisationIds(
         );
     }
     return map;
+}
+
+export async function notifyMasterAdminsIfLicenceExceeded(
+    organisationId: number,
+    usedLicencesBeforeChange?: number
+): Promise<void> {
+    if (!organisationId) return;
+
+    const now = Date.now();
+    const lastSentAt = licenceExceededEmailSentAt.get(organisationId) ?? 0;
+    if (now - lastSentAt < LICENCE_EXCEEDED_EMAIL_COOLDOWN_MS) return;
+
+    const subscriptionRepository = AppDataSource.getRepository(Subscription);
+    const organisationRepository = AppDataSource.getRepository(Organisation);
+    const userRepository = AppDataSource.getRepository(User);
+
+    const [subscription, organisation] = await Promise.all([
+        subscriptionRepository.findOne({
+            where: { organisation_id: organisationId, deleted_at: null as any },
+        }),
+        organisationRepository.findOne({
+            where: { id: organisationId, deleted_at: null as any },
+        }),
+    ]);
+
+    if (!subscription || subscription.total_licenses === null) return;
+
+    const used = await countLicenceEligibleLearners(organisationId);
+    const licence = buildLicencePayload({
+        total_licenses: subscription.total_licenses,
+        tolerance_percentage: subscription.tolerance_percentage,
+        warning_threshold_percentage: subscription.warning_threshold_percentage,
+        used_licenses: used,
+    });
+    const beforeUsed =
+        typeof usedLicencesBeforeChange === "number" &&
+        Number.isFinite(usedLicencesBeforeChange)
+            ? Math.max(0, usedLicencesBeforeChange)
+            : null;
+    if (beforeUsed === null) {
+        if (licence.warning_status !== "exceeded") return;
+    } else {
+        const beforeLicence = buildLicencePayload({
+            total_licenses: subscription.total_licenses,
+            tolerance_percentage: subscription.tolerance_percentage,
+            warning_threshold_percentage: subscription.warning_threshold_percentage,
+            used_licenses: beforeUsed,
+        });
+        const crossedNow =
+            beforeLicence.warning_status !== "exceeded" &&
+            licence.warning_status === "exceeded";
+        if (!crossedNow) return;
+    }
+
+    const masterAdmins = await userRepository
+        .createQueryBuilder("u")
+        .where("u.deleted_at IS NULL")
+        .andWhere(":role = ANY(u.roles)", { role: UserRole.MasterAdmin })
+        .getMany();
+
+    const recipients = masterAdmins
+        .map((u) => u.email)
+        .filter((email): email is string => Boolean(email));
+    if (!recipients.length) return;
+
+    const subject = `Licence limit exceeded - ${organisation?.name ?? `Organisation #${organisationId}`}`;
+    const overBy = Math.max(
+        0,
+        (licence.used_licenses ?? 0) - (licence.max_allowed_licenses ?? 0)
+    );
+    const html = `
+<p>Hello Master Admin,</p>
+<p>An organisation has exceeded its licence allowance.</p>
+<p><strong>Organisation details:</strong><br/>
+Organisation ID: ${organisationId}<br/>
+Organisation Name: ${organisation?.name ?? "N/A"}<br/>
+Organisation Email: ${organisation?.email ?? "N/A"}</p>
+<p><strong>Licence details:</strong><br/>
+Total Licences: ${licence.total_licenses ?? "N/A"}<br/>
+Used Licences: ${licence.used_licenses}<br/>
+Tolerance (%): ${licence.tolerance_percentage ?? "N/A"}<br/>
+Max Allowed Licences: ${licence.max_allowed_licenses ?? "N/A"}<br/>
+Exceeded By: ${overBy}</p>
+<p>Please review and update the subscription if required.</p>
+`.trim();
+
+    await Promise.all(
+        recipients.map((email) =>
+            sendSimpleEmailAsync(email, subject, html).catch((err) => {
+                console.error(
+                    `Licence exceeded mail failed for ${email} (org ${organisationId}):`,
+                    err
+                );
+            })
+        )
+    );
+
+    licenceExceededEmailSentAt.set(organisationId, now);
 }
