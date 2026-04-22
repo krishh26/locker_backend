@@ -251,9 +251,7 @@ export async function notifyMasterAdminsIfLicenceExceeded(
             warning_threshold_percentage: subscription.warning_threshold_percentage,
             used_licenses: beforeUsed,
         });
-        const crossedNow =
-            beforeLicence.warning_status !== "exceeded" &&
-            licence.warning_status === "exceeded";
+        const crossedNow = beforeLicence.warning_status !== "exceeded" && licence.warning_status === "exceeded";
         if (!crossedNow) return;
     }
 
@@ -267,7 +265,7 @@ export async function notifyMasterAdminsIfLicenceExceeded(
         .map((u) => u.email)
         .filter((email): email is string => Boolean(email));
     if (!recipients.length) return;
-
+    console.log(recipients,">>>")
     const subject = `Licence limit exceeded - ${organisation?.name ?? `Organisation #${organisationId}`}`;
     const overBy = Math.max(
         0,
