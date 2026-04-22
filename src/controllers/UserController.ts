@@ -740,9 +740,6 @@ class UserController {
                 if (req.query.keyword) {
                     qb.andWhere("(user.email ILIKE :keyword OR user.user_name ILIKE :keyword OR user.first_name ILIKE :keyword OR user.last_name ILIKE :keyword)", { keyword: `%${req.query.keyword}%` });
                 }
-                if (req.query.role === UserRole.Employer) {
-                    qb.leftJoinAndSelect('user.employer', 'employer')
-                }
             } else if (req.query.keyword) {
                 qb.andWhere("((user.email ILIKE :keyword OR user.user_name ILIKE :keyword OR user.first_name ILIKE :keyword OR user.last_name ILIKE :keyword) AND (ARRAY_LENGTH(user.roles, 1) != 1 OR 'Learner' <> ANY(user.roles)))", { keyword: `%${req.query.keyword}%` });
             }
