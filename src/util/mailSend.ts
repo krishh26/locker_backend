@@ -59,7 +59,7 @@ export const sendPasswordByEmail = async (email: string, password: any): Promise
         </head>
         <body>
             <div class="container">
-                <img class="logo" src="https://jeel1.s3.ap-south-1.amazonaws.com/logo/logo.svg" alt="Locker Logo">
+                <img class="logo" src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg" alt="Locker Logo">
         
                 <div class="title">Password reset</div>
                 <div class="message">
@@ -152,7 +152,7 @@ export const resetPasswordByEmail = async (email: string, resetLink: string): Pr
         </head>
         <body>
             <div class="container">
-                <img class="logo" src="https://jeel1.s3.ap-south-1.amazonaws.com/logo/logo.svg" alt="Locker Logo">
+                <img class="logo" src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg" alt="Locker Logo">
 
                 <div class="title">Reset Your Password</div>
                 <div class="message">
@@ -245,7 +245,7 @@ export const sendOtpByEmail = async (email: string): Promise<any> => {
     </head>
     <body>
         <div class="container">
-        <img class="adapt-img" src="https://jeel1.s3.ap-south-1.amazonaws.com/logo/logo.svg" alt style="display: block;" width="180">
+        <img class="logo" src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg" alt="Locker Logo">
             <div class="title">One-Time Password</div>
             <div class="message">
                 <p>You are receiving this email because a request has been made to reset the password for your Locker account.</p>
@@ -354,7 +354,7 @@ export const sendAdminAssignmentEmail = async (email: string, data: { type: "org
         </head>
         <body>
             <div class="container">
-                <img class="logo" src="https://jeel1.s3.ap-south-1.amazonaws.com/logo/logo.svg" alt="Locker Logo">
+                <img class="logo" src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg" alt="Locker Logo">
                 <div class="title">${title}</div>
                 <div class="text">
                     <p>Your account permissions have been updated in Locker.</p>
