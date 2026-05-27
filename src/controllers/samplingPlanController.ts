@@ -290,6 +290,7 @@ export class SamplingPlanController {
             unit_code: u.id,
             code: u.code,
             unit_name: u.title || "Unnamed",
+            unit_ref: u.unit_ref ? u.unit_ref : "",
             status,
             type: u.type ? u.type : "",
             sample_history: learnerDetails
