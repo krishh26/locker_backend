@@ -200,6 +200,7 @@ Session Type: ${sessionType}</p>
 <p>Hi ${trainerName},</p>
 <p>This is a friendly reminder that you have a training session scheduled in ${daysBefore} day${daysBefore === 1 ? "" : "s"}.</p>
 <p><strong>Session Details:</strong><br/>
+Learner: ${learners.map((l) => `${l.first_name ?? ""} ${l.last_name ?? ""}`.trim() || "Learner").join(", ")}<br/>
 Date: ${dateText}<br/>
 Time: ${startTimeText} - ${endTimeText}<br/>
 Session Type: ${sessionType}</p>

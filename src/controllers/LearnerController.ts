@@ -92,7 +92,7 @@ class LearnerController {
                 })
             }
 
-            if (password !== confirmPassword ) {
+            if (password !== confirmPassword) {
                 return res.status(400).json({
                     message: "Password and confrim password not match",
                     status: false
@@ -2135,7 +2135,9 @@ class LearnerController {
                         await applyLearnerScope(qb, req.user, "learner", { scopeContext: getScopeContext(req) });
                     }
 
-                    qb.orderBy("a.created_at", "DESC");
+                    qb.orderBy("a.assignment_id", "ASC")
+                        .addOrderBy("a.created_at", "DESC")
+                        .distinctOn(["a.assignment_id"]);
 
                     const rows = await qb.getMany();
 
@@ -2736,10 +2738,14 @@ class LearnerController {
             if (req.user) {
                 unmappedAssignmentsQb
                     .leftJoin(Learner, "learner", "learner.user_id = assignmentUser.user_id");
+
+                applyCentreLearnerTrainerFilter(unmappedAssignmentsQb, "learner");
+
                 await applyLearnerScope(unmappedAssignmentsQb, req.user, "learner", { scopeContext });
             }
+            unmappedAssignmentsQb.distinct(true);
             const unmappedAssignmentsCountRaw = await unmappedAssignmentsQb
-                .select("COUNT(DISTINCT am.mapping_id)", "count")
+                .select("COUNT(DISTINCT a.assignment_id)", "count")
                 .getRawOne();
 
             const learnersOverDueQb = userCourseRepository
@@ -2943,7 +2949,7 @@ class LearnerController {
             const data = {
                 active_learners_count: Number(activeLearnersCountRaw?.count || 0),
                 learners_suspended_count: Number(suspendedCountRaw?.count || 0),
-                assignmentsWithoutMapped_count: Number(assignmentsWithoutMappedCountRaw?.count || 0),
+                assignmentsWithoutMapped_count: Number(unmappedAssignmentsCountRaw?.count || 0),
                 learnersOverDue_count: Number(learnersOverDueCountRaw?.count || 0),
                 learnerPlanDue_count: Number(learnerPlanDueCountRaw?.count || 0),
                 learnerPlanDueInNext7Days_count: Number(learnerPlanDueInNext7DaysCountRaw?.count || 0),
