@@ -303,7 +303,7 @@ class UserController {
 
     public async UpdateUser(req: any, res: Response) {
         try {
-            const { user_name, first_name, last_name, sso_id, mobile, phone, roles, time_zone, email, status } = req.body;
+            const { user_name, first_name, last_name, sso_id, mobile, phone, roles, time_zone, email, status, line_manager_id } = req.body;
             const userId: number = parseInt(req.params.id);
 
             if (!user_name && !first_name && !last_name && !sso_id && !mobile && !phone && !roles && !time_zone && !email && !status) {
@@ -367,6 +367,26 @@ class UserController {
                 await userEmployerRepo.save(mappings);
             }
 
+            if (line_manager_id) {
+                const lineManager = await userRepository.findOne({
+                    where: { user_id: line_manager_id }
+                });
+                console.log(lineManager)
+                if (!lineManager) {
+                    return res.status(400).json({
+                        message: "Line manager not found",
+                        status: false
+                    });
+                }
+                console.log(lineManager.roles.includes(UserRole.LineManager))
+                if (!lineManager.roles.includes(UserRole.LineManager)) {
+                    return res.status(400).json({
+                        message: "Selected user is not a line manager",
+                        status: false
+                    });
+                }
+                user.line_manager = line_manager_id ? line_manager_id : null
+            }
             // Handle organisation_ids assignment (one organisation per user)
             if (Array.isArray(req.body.organisation_ids)) {
                 if (req.body.organisation_ids.length > 1) {
@@ -1284,7 +1304,7 @@ class UserController {
 
             const scopeContext = getScopeContext(req);
             const accessibleOrgIds = req.user ? await getAccessibleOrganisationIds(req.user, scopeContext) : null;
-
+            console.log("????", accessibleOrgIds);
             // Pagination setup
             const pageNumber = parseInt(page as string) || 1;
             const pageSize = parseInt(limit as string) || 10;
@@ -1337,12 +1357,17 @@ class UserController {
                     managedUsers = await userRepository
                         .createQueryBuilder('u')
                         .leftJoin('u.userOrganisations', 'uo')
+                        .leftJoinAndSelect('u.userEmployers', 'ue')
+                        .leftJoinAndSelect('ue.employer', 'employer')
                         .where('u.line_manager_id = :lmId', { lmId: lineManager.user_id })
                         .andWhere('u.deleted_at IS NULL')
                         .andWhere('uo.organisation_id IN (:...orgIds)', { orgIds: accessibleOrgIds })
                         .select([
                             'u.user_id', 'u.user_name', 'u.first_name', 'u.last_name',
-                            'u.email', 'u.mobile', 'u.roles', 'u.status', 'u.created_at'
+                            'u.email', 'u.mobile', 'u.roles', 'u.status', 'u.created_at',
+                            'ue.id',
+                            'employer.employer_id',
+                            'employer.employer_name'
                         ])
                         .getMany();
                 } else {
@@ -1350,6 +1375,11 @@ class UserController {
                         where: {
                             line_manager: { user_id: lineManager.user_id },
                             deleted_at: null
+                        },
+                        relations: {
+                            userEmployers: {
+                                employer: true
+                            }
                         },
                         select: [
                             'user_id', 'user_name', 'first_name', 'last_name',
@@ -1380,7 +1410,11 @@ class UserController {
                             select: ['employer_id']
                         });
 
-                        const employerIds = employers.map(emp => emp.employer_id);
+                        const employerIds = employersAndTrainers
+                            .flatMap((user: any) =>
+                                user.userEmployers?.map((ue: any) => ue.employer?.employer_id) || []
+                            )
+                            .filter(Boolean);
 
                         if (employerIds.length > 0) {
                             // Get all learners under these employers (optionally scoped by org)

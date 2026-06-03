@@ -144,6 +144,7 @@ export function formatSubscriptionApiPayload(
         id: subscription.id,
         organisationId: subscription.organisation_id,
         plan: subscription.plan?.name || "",
+        price: subscription.plan?.price || "",
         status: subscription.status,
         startDate: subscription.start_date,
         endDate: subscription.end_date,
