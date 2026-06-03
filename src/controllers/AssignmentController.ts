@@ -669,7 +669,7 @@ class AssignmentController {
 
             const results: AssignmentSignature[] = [];
 
-            for (const mapping of mappings) {
+                const mapping = mappings[0];
                 const courseId = mapping.course?.course_id;
 
                 /* 2️⃣ Get course users */
@@ -724,7 +724,6 @@ class AssignmentController {
                     const saved = await signatureRepo.save(sig);
                     results.push(saved);
                 }
-            }
 
             return res.status(200).json({
                 message: "Signature request(s) processed",
