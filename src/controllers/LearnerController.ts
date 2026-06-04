@@ -2028,6 +2028,7 @@ class LearnerController {
                     const active_learners = await qb.getMany();
                     const learnerIds = active_learners.map((l: any) => l.learner_id);
                     const overdueByLearner = new Set<number>();
+                    let userCoursesByLearner = new Map<number, any[]>();
                     if (learnerIds.length > 0) {
                         const overdueCourses = await userCourseRepository
                             .createQueryBuilder("uc")
@@ -2035,11 +2036,27 @@ class LearnerController {
                             .where("uc.learner_id IN (:...learnerIds)", { learnerIds })
                             .andWhere("uc.end_date < :now", { now: new Date() })
                             .getRawMany();
-                        overdueCourses.forEach((r: any) => overdueByLearner.add(r.uc_learner_id));
+                        overdueCourses.forEach((r: any) => overdueByLearner.add(r.learner_id));
+
+                        const userCourses = await userCourseRepository.find({
+                            where: { learner_id: In(learnerIds) } as any,
+                            relations: ["learner_id"],
+                            order: { start_date: "DESC" },
+                        });
+
+                        userCourses.forEach((course: any) => {
+                            const id = course.learner_id?.learner_id || course.learner_id;
+                            if (!userCoursesByLearner.has(id)) {
+                                userCoursesByLearner.set(id, []);
+                            }
+                            userCoursesByLearner.get(id)!.push(course);
+                        });
                     }
+
                     const dataWithOverdue = active_learners.map((l: any) => ({
                         ...l,
                         course_date_overdue: overdueByLearner.has(l.learner_id) ? "Yes" : "No",
+                        user_courses: userCoursesByLearner.get(l.learner_id) || [],
                     }));
 
                     return res.status(200).json({
