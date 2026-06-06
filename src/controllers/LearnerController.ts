@@ -14,6 +14,7 @@ import { FundingBand } from "../entity/FundingBand.entity";
 import { LearnerPlan, LearnerPlanType } from "../entity/LearnerPlan.entity";
 import { SessionLearnerAction } from "../entity/SessionLearnerAction.entity";
 import { Course } from "../entity/Course.entity";
+import { TimeLogType } from "../util/constants";
 import { getUnitCompletionStatus, unitCompletionStatus } from '../util/unitCompletion';
 import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
 import { DefaultReviewSetting } from "../entity/DefaultReviewSetting.entity";
@@ -1961,6 +1962,7 @@ class LearnerController {
             const learnerRepository = AppDataSource.getRepository(Learner);
             const userCourseRepository = AppDataSource.getRepository(UserCourse);
             const assignmentRepository = AppDataSource.getRepository(Assignment);
+            const timeLogRepository = AppDataSource.getRepository(TimeLog);
             const assignmentMappingRepository = AppDataSource.getRepository(AssignmentMapping);
             const learnerPlanRepository = AppDataSource.getRepository(LearnerPlan);
             const SessionLearnerActionRepository = AppDataSource.getRepository(SessionLearnerAction);
@@ -2023,12 +2025,21 @@ class LearnerController {
                     const qb = learnerRepository
                         .createQueryBuilder("learner")
                         .leftJoinAndSelect("learner.user_id", "user_id")
+                        .leftJoinAndSelect("learner.employer_id", "employer")
                         .where("user_id.status = 'Active'");
                     if (req.user) await applyLearnerScope(qb, req.user, "learner", { scopeContext });
                     const active_learners = await qb.getMany();
                     const learnerIds = active_learners.map((l: any) => l.learner_id);
+                    const learnerUserIds = active_learners
+                        .map((l: any) => l.user_id?.user_id)
+                        .filter((id: number | undefined): id is number => typeof id === 'number');
+
                     const overdueByLearner = new Set<number>();
-                    let userCoursesByLearner = new Map<number, any[]>();
+                    const mainCourseByLearner = new Map<number, any>();
+                    const lastVisitByLearner = new Map<number, { type: string; date: Date }>();
+                    const nextVisitByLearner = new Map<number, { type: string; date: Date }>();
+                    const otjLogsByLearner = new Map<number, any[]>();
+
                     if (learnerIds.length > 0) {
                         const overdueCourses = await userCourseRepository
                             .createQueryBuilder("uc")
@@ -2037,32 +2048,168 @@ class LearnerController {
                             .andWhere("uc.end_date < :now", { now: new Date() })
                             .getRawMany();
                         overdueCourses.forEach((r: any) => overdueByLearner.add(r.learner_id));
+                        // add units in response - units from course entity
+                        const mainCourses = await userCourseRepository
+                            .createQueryBuilder("uc")
+                            .leftJoinAndSelect("uc.learner_id", "learner")
+                            .where("uc.learner_id IN (:...learnerIds)", { learnerIds })
+                            .andWhere("uc.is_main_course = true")
+                            .getMany();
 
-                        const userCourses = await userCourseRepository.find({
-                            where: { learner_id: In(learnerIds) } as any,
-                            relations: ["learner_id"],
-                            order: { start_date: "DESC" },
+                        mainCourses.forEach((course: any) => {
+                            const id = course.learner_id?.learner_id || course.learner_id;
+                            const sanitizedCourse = { ...course };
+                            sanitizedCourse.learner_id = id;
+                            mainCourseByLearner.set(id, sanitizedCourse);
                         });
 
-                        userCourses.forEach((course: any) => {
-                            const id = course.learner_id?.learner_id || course.learner_id;
-                            if (!userCoursesByLearner.has(id)) {
-                                userCoursesByLearner.set(id, []);
+                        if (learnerIds.length > 0) {
+                            const lastVisitRows = await learnerPlanRepository
+                                .createQueryBuilder("lp")
+                                .leftJoin("lp.learners", "learner")
+                                .select([
+                                    "learner.learner_id AS learner_id",
+                                    "lp.type AS type",
+                                    "lp.startDate AS startDate",
+                                ])
+                                .where("learner.learner_id IN (:...learnerIds)", { learnerIds })
+                                .andWhere("lp.startDate <= :now", { now: new Date() })
+                                .orderBy("learner.learner_id", "ASC")
+                                .addOrderBy("lp.startDate", "DESC")
+                                .distinctOn(["learner.learner_id"])
+                                .getRawMany();
+
+                            lastVisitRows.forEach((row: any) => {
+                                lastVisitByLearner.set(row.learner_id, {
+                                    type: row.type,
+                                    date: row.startDate,
+                                });
+                            });
+
+                            const nextVisitRows = await learnerPlanRepository
+                                .createQueryBuilder("lp")
+                                .leftJoin("lp.learners", "learner")
+                                .select([
+                                    "learner.learner_id AS learner_id",
+                                    "lp.type AS type",
+                                    "lp.startDate AS startDate",
+                                ])
+                                .where("learner.learner_id IN (:...learnerIds)", { learnerIds })
+                                .andWhere("lp.startDate > :now", { now: new Date() })
+                                .orderBy("learner.learner_id", "ASC")
+                                .addOrderBy("lp.startDate", "ASC")
+                                .distinctOn(["learner.learner_id"])
+                                .getRawMany();
+
+                            nextVisitRows.forEach((row: any) => {
+                                nextVisitByLearner.set(row.learner_id, {
+                                    type: row.type,
+                                    date: row.startDate,
+                                });
+                            });
+                        }
+                    }
+
+                    if (learnerUserIds.length > 0) {
+                        const otjLogs = await timeLogRepository
+                            .createQueryBuilder("timelog")
+                            .leftJoin("timelog.user_id", "user_id")
+                            .leftJoin("timelog.trainer_id", "trainer_id")
+                            .leftJoin("timelog.course_id", "course_id")
+                            .select([
+                                "timelog.id AS id",
+                                "timelog.activity_date AS activity_date",
+                                "timelog.activity_type AS activity_type",
+                                "timelog.unit AS unit",
+                                "timelog.type AS type",
+                                "timelog.spend_time AS spend_time",
+                                "timelog.start_time AS start_time",
+                                "timelog.end_time AS end_time",
+                                "timelog.impact_on_learner AS impact_on_learner",
+                                "timelog.evidence_link AS evidence_link",
+                                "timelog.verified AS verified",
+                                "user_id.user_id AS user_id",
+                                "course_id.course_id AS course_id",
+                                "trainer_id.user_id AS trainer_id"
+                            ])
+                            .where("user_id.user_id IN (:...userIds)", { userIds: learnerUserIds })
+                            .andWhere("timelog.type = :type", { type: TimeLogType.OffTheJob })
+                            .orderBy("timelog.activity_date", "DESC")
+                            .getRawMany();
+
+                        otjLogs.forEach((log: any) => {
+                            const uid = log.user_id;
+                            if (!otjLogsByLearner.has(uid)) {
+                                otjLogsByLearner.set(uid, []);
                             }
-                            userCoursesByLearner.get(id)!.push(course);
+                            otjLogsByLearner.get(uid)!.push({
+                                id: log.id,
+                                activity_date: log.activity_date,
+                                activity_type: log.activity_type,
+                                unit: log.unit,
+                                type: log.type,
+                                spend_time: log.spend_time,
+                                start_time: log.start_time,
+                                end_time: log.end_time,
+                                impact_on_learner: log.impact_on_learner,
+                                evidence_link: log.evidence_link,
+                                verified: log.verified,
+                                course_id: log.course_id,
+                                trainer_id: log.trainer_id,
+                            });
                         });
                     }
 
-                    const dataWithOverdue = active_learners.map((l: any) => ({
-                        ...l,
-                        course_date_overdue: overdueByLearner.has(l.learner_id) ? "Yes" : "No",
-                        user_courses: userCoursesByLearner.get(l.learner_id) || [],
-                    }));
+                    const dataWithDetails = active_learners.map((l: any) => {
+                        const learnerId = l.learner_id;
+                        const userId = l.user_id?.user_id;
+                        const lastVisit = lastVisitByLearner.get(learnerId) || null;
+                        const nextVisit = nextVisitByLearner.get(learnerId) || null;
+                        // add units to the course
+                        const rawCourse: any = mainCourseByLearner.get(learnerId) || null;
+                        
+                        const sanitizedCourse = rawCourse
+                            ? {
+                                  user_course_id: rawCourse.user_course_id,
+                                  course: rawCourse.course
+                                      ? {
+                                            course_id: rawCourse.course.course_id,
+                                            course_name: rawCourse.course.course_name,
+                                            course_code: rawCourse.course.course_code,
+                                        }
+                                      : null,
+                                  start_date: rawCourse.start_date,
+                                  end_date: rawCourse.end_date,
+                                  predicted_grade: rawCourse.predicted_grade,
+                                  final_grade: rawCourse.final_grade,
+                                  course_status: rawCourse.course_status,
+                                  bil_return_date: rawCourse.bil_return_date,
+                                  bil_return_reminder_sent_at: rawCourse.bil_return_reminder_sent_at,
+                                  is_main_course: rawCourse.is_main_course
+                              }
+                            : null;
+
+                        const employer = l.employer_id;
+                        const { employer_id, ...learnerFields } = l;
+
+                        return {
+                            ...learnerFields,
+                            course_date_overdue: overdueByLearner.has(learnerId) ? "Yes" : "No",
+                            user_course: sanitizedCourse,
+                            last_visit_type: lastVisit?.type || null,
+                            last_visit_date: lastVisit?.date || null,
+                            next_visit_type: nextVisit?.type || null,
+                            next_visit_date: nextVisit?.date || null,
+                            otj_details: userId ? otjLogsByLearner.get(userId) || [] : [],
+                            learner_employer_id: employer ? employer.employer_id : null,
+                            learner_employer_name: employer ? employer.employer_name : null,
+                        };
+                    });
 
                     return res.status(200).json({
                         message: "Active learners fetched successfully",
                         status: true,
-                        data: dataWithOverdue,
+                        data: dataWithDetails,
                     });
                 }
 
