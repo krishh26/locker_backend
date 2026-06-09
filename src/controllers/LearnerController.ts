@@ -2039,6 +2039,8 @@ class LearnerController {
                     const lastVisitByLearner = new Map<number, { type: string; date: Date }>();
                     const nextVisitByLearner = new Map<number, { type: string; date: Date }>();
                     const otjLogsByLearner = new Map<number, any[]>();
+                    const lastEvidenceByLearner = new Map<number, Date>();
+                    const lastFeedbackByLearner = new Map<number, Date>();
 
                     if (learnerIds.length > 0) {
                         const overdueCourses = await userCourseRepository
@@ -2158,6 +2160,31 @@ class LearnerController {
                                 trainer_id: log.trainer_id,
                             });
                         });
+
+                        const lastEvidenceRows = await assignmentRepository
+                            .createQueryBuilder("assignment")
+                            .leftJoin("assignment.user", "user")
+                            .select(["user.user_id AS user_id", "MAX(assignment.created_at) AS last_uploaded_at"])
+                            .where("user.user_id IN (:...userIds)", { userIds: learnerUserIds })
+                            .groupBy("user.user_id")
+                            .getRawMany();
+
+                        lastEvidenceRows.forEach((row: any) => {
+                            lastEvidenceByLearner.set(row.user_id, new Date(row.last_uploaded_at));
+                        });
+
+                        const lastFeedbackRows = await assignmentRepository
+                            .createQueryBuilder("assignment")
+                            .leftJoin("assignment.user", "user")
+                            .select(["user.user_id AS user_id", "MAX(assignment.updated_at) AS last_feedback_at"])
+                            .where("user.user_id IN (:...userIds)", { userIds: learnerUserIds })
+                            .andWhere("(assignment.trainer_feedback IS NOT NULL OR assignment.external_feedback IS NOT NULL)")
+                            .groupBy("user.user_id")
+                            .getRawMany();
+
+                        lastFeedbackRows.forEach((row: any) => {
+                            lastFeedbackByLearner.set(row.user_id, new Date(row.last_feedback_at));
+                        });
                     }
 
                     const dataWithDetails = active_learners.map((l: any) => {
@@ -2195,6 +2222,8 @@ class LearnerController {
                         return {
                             ...learnerFields,
                             course_date_overdue: overdueByLearner.has(learnerId) ? "Yes" : "No",
+                            evidence_last_uploaded: userId ? lastEvidenceByLearner.get(userId) || null : null,
+                            last_feedback: userId ? lastFeedbackByLearner.get(userId) || null : null,
                             user_course: sanitizedCourse,
                             last_visit_type: lastVisit?.type || null,
                             last_visit_date: lastVisit?.date || null,
@@ -2203,6 +2232,26 @@ class LearnerController {
                             otj_details: userId ? otjLogsByLearner.get(userId) || [] : [],
                             learner_employer_id: employer ? employer.employer_id : null,
                             learner_employer_name: employer ? employer.employer_name : null,
+                            fSkillICTStatus: null,
+                            fSkillsEngStatus: null,
+                            fSkillsMathsStatus: null,
+                            techCert: null,
+                            techCertGreen: null,
+                            techCertOrange: null,
+                            techCertStatus: null,
+                            err: null,
+                            errGreen: null,
+                            errOrange: null,
+                            errStatus: null,
+                            plts: null,
+                            pltsGreen: null,
+                            pltsOrange: null,
+                            pltsStatus: null,
+                            fs_ict: null,
+                            fs_ict_green_progress: null,
+                            fs_ict_orange_progress: null,
+                            fs_english: null,
+                            fs_maths: null
                         };
                     });
 
