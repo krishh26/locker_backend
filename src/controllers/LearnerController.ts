@@ -2247,6 +2247,11 @@ class LearnerController {
                             pltsGreen: null,
                             pltsOrange: null,
                             pltsStatus: null,
+                            fs_ict: null,
+                            fs_ict_green_progress: null,
+                            fs_ict_orange_progress: null,
+                            fs_english: null,
+                            fs_maths: null
                         };
                     });
 
