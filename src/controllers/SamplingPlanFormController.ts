@@ -46,7 +46,8 @@ export class SamplingPlanFormController {
       const saved = await repo.save(newLink);
       return res.status(201).json({ message: "Form allocated successfully", status: true, data: saved });
     } catch (error) {
-      return res.status(500).json({ message: "Internal Server Error", error: error.message, status: false });
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return res.status(500).json({ message: "Internal Server Error", error: errorMessage, status: false });
     }
   }
 
@@ -61,7 +62,7 @@ export class SamplingPlanFormController {
         .leftJoinAndSelect("spf.form", "form")
         .leftJoin("plan_detail.samplingPlan", "plan")
         .leftJoin("plan.course", "course")
-        .innerJoin(UserCourse, "uc", "uc.course ->> 'course_id' = CAST(course.course_id AS text)")
+        .innerJoin(UserCourse, "uc", "CAST(uc.course ->> 'course_id' AS text) = CAST(course.course_id AS text)")
         .innerJoin(Learner, "learner", "learner.learner_id = uc.learner_id")
         .where("plan_detail.id = :plan_detail_id", { plan_detail_id: parseInt(plan_detail_id) });
 
@@ -73,7 +74,8 @@ export class SamplingPlanFormController {
 
       return res.status(200).json({ message: "Forms fetched successfully", status: true, data: forms });
     } catch (error) {
-      return res.status(500).json({ message: "Internal Server Error", error: error.message, status: false });
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return res.status(500).json({ message: "Internal Server Error", error: errorMessage, status: false });
     }
   }
 
@@ -89,7 +91,8 @@ export class SamplingPlanFormController {
       await repo.remove(form);
       return res.status(200).json({ message: "Form unlinked successfully", status: true });
     } catch (error) {
-      return res.status(500).json({ message: "Internal Server Error", error: error.message, status: false });
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return res.status(500).json({ message: "Internal Server Error", error: errorMessage, status: false });
     }
   }
 
@@ -106,7 +109,8 @@ export class SamplingPlanFormController {
 
       return res.status(200).json({ message: "Form marked as completed", status: true, data: updated });
     } catch (error) {
-      return res.status(500).json({ message: "Internal Server Error", error: error.message, status: false });
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return res.status(500).json({ message: "Internal Server Error", error: errorMessage, status: false });
     }
   }
 }
