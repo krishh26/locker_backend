@@ -138,6 +138,27 @@ export async function getAccessibleOrganisationIds(user: any, scopeContext?: Sco
         return [];
     }
 
+    if (role === UserRole.Employer) {
+        const employerRepository = AppDataSource.getRepository(Employer);
+        const userOrganisationRepository = AppDataSource.getRepository(UserOrganisation);
+
+        const employer = await employerRepository.findOne({
+            where: { user: { user_id: user.user_id } },
+            select: ['organisation_id']
+        });
+
+        const userOrganisations = await userOrganisationRepository.find({
+            where: { user_id: user.user_id }
+        });
+
+        const orgIds = [
+            ...(employer && employer.organisation_id != null ? [employer.organisation_id] : []),
+            ...userOrganisations.map(uo => uo.organisation_id)
+        ];
+
+        return [...new Set(orgIds)];
+    }
+
     if (role === UserRole.OrganisationAdmin) {
         // OrganisationAdmin: get their organisation_id from UserOrganisation (should be single org)
         const userOrganisationRepository = AppDataSource.getRepository(UserOrganisation);
@@ -703,6 +724,22 @@ export async function applyLearnerScope(
                 { trainerUserId: user.user_id }
             );
         }
+        return;
+    }
+
+    if (role === UserRole.Employer) {
+        const employerRepository = AppDataSource.getRepository(Employer);
+        const employer = await employerRepository.findOne({
+            where: { user: { user_id: user.user_id } },
+            select: ['employer_id']
+        });
+
+        if (!employer) {
+            qb.andWhere('1 = 0');
+            return;
+        }
+
+        qb.andWhere(`${learnerAlias}.employer_id = :employerId`, { employerId: employer.employer_id });
         return;
     }
 
