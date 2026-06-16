@@ -6,56 +6,111 @@ export const sendPasswordByEmail = async (email: string, password: any): Promise
         const html = `<!DOCTYPE html>
         <html lang="en">
         <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5; color: #333; line-height: 1.6; }
-                .wrapper { width: 100%; background-color: #f5f5f5; padding: 20px 0; }
-                .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); overflow: hidden; }
-                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px 20px; text-align: center; }
-                .logo { max-width: 140px; height: auto; margin-bottom: 15px; display: inline-block; }
-                .header-title { color: #ffffff; font-size: 24px; font-weight: 700; margin: 10px 0 0 0; }
-                .content { padding: 30px; }
-                .password-box { background-color: #f0f4ff; border-left: 4px solid #667eea; padding: 20px; border-radius: 4px; margin: 20px 0; text-align: center; }
-                .password-label { font-size: 13px; color: #666; font-weight: 600; margin-bottom: 10px; }
-                .password-value { font-size: 24px; font-weight: 700; color: #667eea; font-family: 'Courier New', monospace; letter-spacing: 2px; }
-                .message { font-size: 14px; color: #555; line-height: 1.8; margin: 20px 0; }
-                .footer { background-color: #f8f9fa; padding: 20px; text-align: center; font-size: 12px; color: #888; border-top: 1px solid #e0e0e0; }
-                .footer-text { margin: 5px 0; }
-                .footer-link { color: #667eea; text-decoration: none; }
-                @media (max-width: 600px) { .container { border-radius: 0; } .content { padding: 20px; } .header-title { font-size: 20px; } }
-            </style>
+        <meta charset="UTF-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Welcome to Locker</title>
         </head>
-        <body>
-            <div class="wrapper">
-                <div class="container">
-                    <div class="header">
-                        <img class="logo" src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg" alt="Locker Logo">
-                        <div class="header-title">🎉 Welcome to Locker</div>
-                    </div>
-                    <div class="content">
-                        <div class="message">
-                            <p>Congratulations! Your account has been successfully created.</p>
-                            <p style="margin-top: 15px;">Your login credentials are ready. You can now access the Locker platform using the password below:</p>
-                        </div>
-                        <div class="password-box">
-                            <div class="password-label">Your Temporary Password</div>
-                            <div class="password-value">${password}</div>
-                        </div>
-                        <div class="message">
-                            <p style="color: #e74c3c; font-weight: 600;">⚠️ Important:</p>
-                            <p>Please keep this password secure and change it after your first login for security purposes.</p>
-                        </div>
-                    </div>
-                    <div class="footer">
-                        <div class="footer-text">This is an automated message from the Locker system.</div>
-                        <div class="footer-text" style="margin-top: 10px;">© 2026 Locker. All rights reserved.</div>
-                    </div>
-                </div>
-            </div>
+        <body style="margin:0;padding:0;background-color:#f5f5f5;">
+        
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f5f5f5;">
+        <tr>
+        <td align="center" style="padding:20px 10px;">
+        
+        
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+        <td>
+        
+        
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:600px;background-color:#ffffff;">
+        
+        
+        <tr>
+        <td align="center" bgcolor="#667eea" style="padding:30px 20px;">
+        <img
+        src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg"
+        alt="Locker Logo"
+        width="140"
+        border="0"
+        style="display:block;width:140px;max-width:140px;height:auto;"
+        >
+        
+        <div style="font-family:Arial, Helvetica, sans-serif;font-size:24px;line-height:32px;font-weight:bold;color:#ffffff;padding-top:15px;">
+        🎉 Welcome to Locker
+        </div>
+        </td>
+        </tr>
+        
+        <!-- Content -->
+        <tr>
+        <td style="padding:30px;font-family:Arial, Helvetica, sans-serif;color:#555555;font-size:14px;line-height:24px;">
+        
+        <p style="margin:0 0 15px 0;">
+        Congratulations! Your account has been successfully created.
+        </p>
+        
+        <p style="margin:0 0 20px 0;">
+        Your login credentials are ready. You can now access the Locker platform using the password below:
+        </p>
+        
+        <!-- Password Box -->
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f0f4ff;margin:20px 0;">
+        <tr>
+        <td width="4" bgcolor="#667eea" style="font-size:0;line-height:0;">&nbsp;</td>
+        <td align="center" style="padding:20px;">
+        
+        <div style="font-family:Arial, Helvetica, sans-serif;font-size:13px;font-weight:bold;color:#666666;margin-bottom:10px;">
+        Your Temporary Password
+        </div>
+        
+        <div style="font-family:'Courier New', Courier, monospace;font-size:24px;font-weight:bold;color:#667eea;letter-spacing:2px;">
+        ${password}
+        </div>
+        
+        </td>
+        </tr>
+        </table>
+        
+        <p style="margin:20px 0 10px 0;color:#e74c3c;font-weight:bold;">
+        
+        </p>
+        
+        <p style="margin:0;">
+        Please keep this password secure and change it after your first login for security purposes.
+        </p>
+        
+        </td>
+        </tr>
+        
+        <!-- Footer -->
+        <tr>
+        <td style="background-color:#f8f9fa;padding:20px;border-top:1px solid #e0e0e0;text-align:center;font-family:Arial, Helvetica, sans-serif;font-size:12px;line-height:20px;color:#888888;">
+        <div>
+        This is an automated message from the Locker system.
+        </div>
+        
+        <div style="padding-top:10px;">
+        © 2026 Locker. All rights reserved.
+        </div>
+        </td>
+        </tr>
+        
+        </table>
+        
+        <!--[if mso]>
+        </td>
+        </tr>
+        </table>
+        <![endif]-->
+        
+        </td>
+        </tr>
+        </table>
+        
         </body>
         </html>`;
+
         const responce = await SendEmailTemplet(email, "Welcome to Locker", null, html)
         return true
     } catch (error) {
@@ -69,55 +124,122 @@ export const resetPasswordByEmail = async (email: string, resetLink: string): Pr
         const html = `<!DOCTYPE html>
         <html lang="en">
         <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5; color: #333; line-height: 1.6; }
-                .wrapper { width: 100%; background-color: #f5f5f5; padding: 20px 0; }
-                .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); overflow: hidden; }
-                .header { background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); padding: 30px 20px; text-align: center; }
-                .logo { max-width: 140px; height: auto; margin-bottom: 15px; display: inline-block; }
-                .header-title { color: #ffffff; font-size: 24px; font-weight: 700; margin: 10px 0 0 0; }
-                .content { padding: 30px; }
-                .message { font-size: 14px; color: #555; line-height: 1.8; margin: 15px 0; }
-                .action-button { display: inline-block; background-color: #667eea; color: #ffffff !important; padding: 12px 30px; text-decoration: none; border-radius: 6px; font-weight: 600; margin-top: 20px; }
-                .action-button:hover { background-color: #764ba2; }
-                .warning-box { background-color: #fef5e7; border-left: 4px solid #f39c12; padding: 15px; border-radius: 4px; margin: 20px 0; font-size: 13px; color: #666; }
-                .footer { background-color: #f8f9fa; padding: 20px; text-align: center; font-size: 12px; color: #888; border-top: 1px solid #e0e0e0; }
-                .footer-text { margin: 5px 0; }
-                @media (max-width: 600px) { .container { border-radius: 0; } .content { padding: 20px; } .header-title { font-size: 20px; } }
-            </style>
+        <meta charset="UTF-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Reset Your Password</title>
         </head>
-        <body>
-            <div class="wrapper">
-                <div class="container">
-                    <div class="header">
-                        <img class="logo" src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg" alt="Locker Logo">
-                        <div class="header-title">🔐 Reset Your Password</div>
-                    </div>
-                    <div class="content">
-                        <div class="message">
-                            <p>We received a request to reset your password. Click the button below to proceed with resetting your password.</p>
-                        </div>
-                        <div style="text-align: center;">
-                            <a href="${resetLink}" class="action-button">Reset Password</a>
-                        </div>
-                        <div class="warning-box">
-                            <strong>⏱️ Link Expiration:</strong> This reset link will expire in 24 hours for security purposes.
-                        </div>
-                        <div class="message" style="margin-top: 20px;">
-                            <p><strong>Didn't request this?</strong> If you did not request a password reset, you can safely ignore this email. Your password will remain unchanged.</p>
-                        </div>
-                    </div>
-                    <div class="footer">
-                        <div class="footer-text">This is an automated message from the Locker system.</div>
-                        <div class="footer-text" style="margin-top: 10px;">© 2026 Locker. All rights reserved.</div>
-                    </div>
-                </div>
-            </div>
+        <body style="margin:0;padding:0;background-color:#f5f5f5;">
+
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f5f5f5;">
+        <tr>
+        <td align="center" style="padding:20px 10px;">
+        
+        <!--[if mso]>
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+        <td>
+        <![endif]-->
+        
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;background-color:#ffffff;">
+        
+        
+        <!-- Header -->
+        <tr>
+        <td align="center" bgcolor="#e74c3c" style="padding:30px 20px;">
+        <img
+        src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg"
+        alt="Locker Logo"
+        width="140"
+        border="0"
+        style="display:block;width:140px;max-width:140px;height:auto;"
+        >
+        
+        <div style="font-family:Arial, Helvetica, sans-serif;font-size:24px;line-height:32px;font-weight:bold;color:#ffffff;padding-top:15px;">
+        🔐 Reset Your Password
+        </div>
+        </td>
+        </tr>
+        
+        <!-- Content -->
+        <tr>
+        <td style="padding:30px;font-family:Arial, Helvetica, sans-serif;font-size:14px;line-height:24px;color:#555555;">
+        
+        <p style="margin:0 0 20px 0;">
+        We received a request to reset your password. Click the button below to proceed with resetting your password.
+        </p>
+        
+        <!-- Button -->
+        <table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:20px auto;">
+        <tr>
+        <td bgcolor="#667eea" align="center" style="padding:12px 30px;">
+        
+        <!--[if mso]>
+        <a href="${resetLink}" style="color:#ffffff;text-decoration:none;font-family:Arial,sans-serif;font-size:14px;font-weight:bold;">
+        Reset Password
+        </a>
+        <![endif]-->
+        
+        <!--[if !mso]><!-->
+        <a
+        href="${resetLink}"
+        style="font-family:Arial, Helvetica, sans-serif;font-size:14px;font-weight:bold;color:#ffffff;text-decoration:none;display:inline-block;"
+        >
+        Reset Password
+        </a>
+        <!--<![endif]-->
+        
+        </td>
+        </tr>
+        </table>
+        
+        <!-- Warning Box -->
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#fef5e7;margin:20px 0;">
+        <tr>
+        <td width="4" bgcolor="#f39c12" style="font-size:0;line-height:0;">&nbsp;</td>
+        <td style="padding:15px;font-family:Arial, Helvetica, sans-serif;font-size:13px;line-height:22px;color:#666666;">
+        <strong>⏱️ Link Expiration:</strong>
+        This reset link will expire in 24 hours for security purposes.
+        </td>
+        </tr>
+        </table>
+        
+        <p style="margin:20px 0 0 0;">
+        <strong>Didn't request this?</strong>
+        If you did not request a password reset, you can safely ignore this email. Your password will remain unchanged.
+        </p>
+        
+        </td>
+        </tr>
+        
+        <!-- Footer -->
+        <tr>
+        <td style="background-color:#f8f9fa;padding:20px;border-top:1px solid #e0e0e0;text-align:center;font-family:Arial, Helvetica, sans-serif;font-size:12px;line-height:20px;color:#888888;">
+        <div>
+        This is an automated message from the Locker system.
+        </div>
+        
+        <div style="padding-top:10px;">
+        © 2026 Locker. All rights reserved.
+        </div>
+        </td>
+        </tr>
+        
+        </table>
+        
+        <!--[if mso]>
+        </td>
+        </tr>
+        </table>
+        <![endif]-->
+        
+        </td>
+        </tr>
+        </table>
+        
         </body>
         </html>`;
+
         const response = await SendEmailTemplet(email, "Reset Your Locker Password", null, html);
         return true;
     } catch (error) {
@@ -141,57 +263,104 @@ export const sendOtpByEmail = async (email: string): Promise<any> => {
     const html = `<!DOCTYPE html>
     <html lang="en">
     <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5; color: #333; line-height: 1.6; }
-            .wrapper { width: 100%; background-color: #f5f5f5; padding: 20px 0; }
-            .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); overflow: hidden; }
-            .header { background: linear-gradient(135deg, #27ae60 0%, #229954 100%); padding: 30px 20px; text-align: center; }
-            .logo { max-width: 140px; height: auto; margin-bottom: 15px; display: inline-block; }
-            .header-title { color: #ffffff; font-size: 24px; font-weight: 700; margin: 10px 0 0 0; }
-            .content { padding: 30px; }
-            .message { font-size: 14px; color: #555; line-height: 1.8; margin: 15px 0; }
-           .otp-box { background-color: #f0f4ff; border-left: 4px solid #38de7d; padding: 20px; border-radius: 4px; margin: 20px 0; text-align: center; }
-            .otp-label { color: rgba(54, 188, 92, 0.9); font-size: 13px; font-weight: 600; margin-bottom: 10px; }
-            .otp-value { font-size: 42px; font-weight: 700; color: #38de7d; font-family: 'Courier New', monospace; letter-spacing: 3px; }
-            .warning-box { background-color: #fef5e7; border-left: 4px solid #f39c12; padding: 15px; border-radius: 4px; margin: 15px 0; font-size: 13px; color: #666; }
-            .footer { background-color: #f8f9fa; padding: 20px; text-align: center; font-size: 12px; color: #888; border-top: 1px solid #e0e0e0; }
-            .footer-text { margin: 5px 0; }
-            @media (max-width: 600px) { .container { border-radius: 0; } .content { padding: 20px; } .header-title { font-size: 20px; } .otp-value { font-size: 36px; } }
-        </style>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Your One-Time Password</title>
     </head>
-    <body>
-        <div class="wrapper">
-            <div class="container">
-                <div class="header">
-                    <img class="logo" src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg" alt="Locker Logo">
-                    <div class="header-title">🔐 Your One-Time Password</div>
-                </div>
-                <div class="content">
-                    <div class="message">
-                        <p>A request has been made to verify your identity for your Locker account. Use the code below to proceed:</p>
+    <body style="margin:0;padding:0;background-color:#f5f5f5;">
+    
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f5f5f5;">
+    <tr>
+    <td align="center" style="padding:20px 10px;">
+    
+    <!--[if mso]>
+    <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0">
+    <tr>
+    <td>
+    <![endif]-->
+    
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;background-color:#ffffff;">
+    
+    
+    <!-- Header -->
+    <tr>
+    <td align="center" bgcolor="#27ae60" style="padding:30px 20px;">
+    <img
+    src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg"
+    alt="Locker Logo"
+    width="140"
+    border="0"
+    style="display:block;width:140px;max-width:140px;height:auto;"
+    >
+    
+    <div style="font-family:Arial, Helvetica, sans-serif;font-size:24px;line-height:32px;font-weight:bold;color:#ffffff;padding-top:15px;">
+    🔐 Your One-Time Password
+    </div>
+    </td>
+    </tr>
+    
+    <!-- Content -->
+    <tr>
+    <td style="padding:30px;font-family:Arial, Helvetica, sans-serif;font-size:14px;line-height:24px;color:#555555;">
+    
+    <p style="margin:0 0 20px 0;">
+    A request has been made to verify your identity for your Locker account. Use the code below to proceed:
+    </p>
+    
+    <!-- OTP Box -->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f0f4ff;margin:20px 0;">
+    <tr>
+    <td width="4" bgcolor="#38de7d" style="font-size:0;line-height:0;">&nbsp;</td>
+    <td align="center" style="padding:20px;">
+
+                    <div style="font-family:Arial, Helvetica, sans-serif;font-size:13px;font-weight:bold;color:rgba(54,188,92,0.9);margin-bottom:10px;">
+                        Enter this code:
                     </div>
-                    <div class="otp-box">
-                        <div class="otp-label">Enter this code:</div>
-                        <div class="otp-value">${otp}</div>
+
+                    <div style="font-family:'Courier New', Courier, monospace;font-size:42px;font-weight:bold;color:#38de7d;letter-spacing:3px;line-height:48px;">
+                    ${otp}
                     </div>
-                    <div class="warning-box">
-                        <strong>⏱️ Valid for 10 minutes:</strong> This code will expire in 10 minutes for security. Do not share this code with anyone.
-                    </div>
-                    <div class="message" style="margin-top: 20px;">
-                        <p><strong>Didn't request this?</strong> If you did not request this code, please ignore this email or contact support immediately.</p>
-                    </div>
-                </div>
-                <div class="footer">
-                    <div class="footer-text">This is an automated message from the Locker system.</div>
-                    <div class="footer-text" style="margin-top: 10px;">© 2026 Locker. All rights reserved.</div>
-                </div>
+
+                </td>
+            </tr>
+            </table>
+            
+            <p style="margin:20px 0 0 0;">
+            <strong>Didn't request this?</strong>
+            If you did not request this code, please ignore this email or contact support immediately.
+            </p>
+            
+            </td>
+            </tr>
+
+            <!-- Footer -->
+            <tr>
+            <td style="background-color:#f8f9fa;padding:20px;border-top:1px solid #e0e0e0;text-align:center;font-family:Arial, Helvetica, sans-serif;font-size:12px;line-height:20px;color:#888888;">
+            <div>
+            This is an automated message from the Locker system.
             </div>
-        </div>
-    </body>
-    </html> `;
+            
+            <div style="padding-top:10px;">
+            © 2026 Locker. All rights reserved.
+            </div>
+            </td>
+            </tr>
+            
+            </table>
+            
+            <!--[if mso]>
+            </td>
+            </tr>
+            </table>
+            <![endif]-->
+            
+            </td>
+            </tr>
+            </table>
+            
+            </body>
+            </html>`;
 
     const response = await SendEmailTemplet(email, "Locker - One-Time Password for Your Account", null, html);
 
@@ -202,52 +371,120 @@ export const sendUserEmail = async (email: string, data: any): Promise<any> => {
     const html = `<!DOCTYPE html>
     <html lang="en">
     <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5; color: #333; line-height: 1.6; }
-            .wrapper { width: 100%; background-color: #f5f5f5; padding: 20px 0; }
-            .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); overflow: hidden; }
-            .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px 20px; text-align: center; }
-            .logo { max-width: 140px; height: auto; margin-bottom: 15px; display: inline-block; }
-            .header-title { color: #ffffff; font-size: 24px; font-weight: 700; margin: 10px 0 0 0; }
-            .content { padding: 30px; }
-            .subject-box { background-color: #f8f9fa; border-left: 4px solid #667eea; padding: 15px; border-radius: 4px; margin: 20px 0; }
-            .subject-title { font-size: 16px; font-weight: 700; color: #2c3e50; margin-bottom: 8px; }
-            .message-content { font-size: 14px; color: #555; line-height: 1.8; margin: 20px 0; white-space: pre-wrap; word-break: break-word; }
-            .divider { border: none; border-top: 1px solid #e0e0e0; margin: 20px 0; }
-            .action-button { display: inline-block; background-color: #667eea; color: #ffffff !important; padding: 10px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; margin-top: 15px; }
-            .footer { background-color: #f8f9fa; padding: 20px; text-align: center; font-size: 12px; color: #888; border-top: 1px solid #e0e0e0; }
-            .footer-text { margin: 5px 0; }
-            .footer-link { color: #667eea; text-decoration: none; }
-            @media (max-width: 600px) { .container { border-radius: 0; } .content { padding: 20px; } .header-title { font-size: 20px; } }
-        </style>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Message for You</title>
     </head>
-    <body>
-        <div class="wrapper">
-            <div class="container">
-                <div class="header">
-                    <img class="logo" src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg" alt="Locker Logo">
-                    <div class="header-title">📧 Message for You</div>
-                </div>
-                <div class="content">
-                    <div class="subject-box">
-                        <div class="subject-title">${data.subject || 'New Message'}</div>
-                    </div>
-                    <div class="message-content">${data.message}</div>
-                    <hr class="divider">
-                    <div style="text-align: center;">
-                        <a href="${process.env.FRONTEND}" class="action-button">View in Locker</a>
-                    </div>
-                </div>
-                <div class="footer">
-                    <div class="footer-text">From: <strong>${data.adminName || 'Locker Administrator'}</strong></div>
-                    <div class="footer-text" style="margin-top: 10px; font-size: 11px;">This is an automated message from the Locker system. Please do not reply to this email.</div>
-                    <div class="footer-text" style="margin-top: 8px; color: #999;">© 2026 Locker. All rights reserved.</div>
-                </div>
-            </div>
-        </div>
+    <body style="margin:0;padding:0;background-color:#f5f5f5;">
+    
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f5f5f5;">
+    <tr>
+    <td align="center" style="padding:20px 10px;">
+    
+    <!--[if mso]>
+    <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0">
+    <tr>
+    <td>
+    <![endif]-->
+    
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;background-color:#ffffff;">
+    
+    <!-- Header -->
+    <tr>
+    <td align="center" bgcolor="#667eea" style="padding:30px 20px;">
+    <img
+    src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg"
+    alt="Locker Logo"
+    width="140"
+    border="0"
+    style="display:block;width:140px;max-width:140px;height:auto;"
+    >
+    
+    <div style="font-family:Arial, Helvetica, sans-serif;font-size:24px;line-height:32px;font-weight:bold;color:#ffffff;padding-top:15px;">
+    📧 Message for You
+    </div>
+    </td>
+    </tr>
+    
+    <!-- Content -->
+    <tr>
+    <td style="padding:30px;font-family:Arial, Helvetica, sans-serif;color:#555555;">
+    
+    <!-- Subject Box -->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f8f9fa;margin-bottom:20px;">
+    <tr>
+    <td width="4" bgcolor="#667eea" style="font-size:0;line-height:0;">&nbsp;</td>
+    <td style="padding:15px;">
+    <div style="font-size:16px;font-weight:bold;color:#2c3e50;line-height:24px;">
+    ${data.subject || 'New Message'}
+    </div>
+    </td>
+    </tr>
+    </table>
+    
+    <!-- Message Content -->
+    <div style="font-size:14px;line-height:24px;color:#555555;white-space:pre-wrap;word-break:break-word;">
+    ${data.message}
+    </div>
+    
+    <!-- Divider -->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tr>
+    <td style="padding-top:20px;padding-bottom:20px;">
+    <div style="border-top:1px solid #e0e0e0;font-size:0;line-height:0;">&nbsp;</div>
+    </td>
+    </tr>
+    </table>
+    
+    <!-- Button -->
+    <table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0">
+    <tr>
+    <td bgcolor="#667eea" align="center" style="padding:10px 24px;">
+    <a
+    href="${process.env.FRONTEND}"
+    style="font-family:Arial, Helvetica, sans-serif;font-size:14px;font-weight:bold;color:#ffffff;text-decoration:none;display:inline-block;"
+    >
+    View in Locker
+    </a>
+    </td>
+    </tr>
+    </table>
+    
+    </td>
+    </tr>
+    
+    <!-- Footer -->
+    <tr>
+    <td style="background-color:#f8f9fa;padding:20px;border-top:1px solid #e0e0e0;text-align:center;font-family:Arial, Helvetica, sans-serif;color:#888888;">
+    
+    <div style="font-size:12px;line-height:20px;">
+    From: <strong>${data.adminName || 'Locker Administrator'}</strong>
+    </div>
+    
+    <div style="font-size:11px;line-height:18px;padding-top:10px;">
+    This is an automated message from the Locker system. Please do not reply to this email.
+    </div>
+    
+    <div style="font-size:12px;line-height:20px;padding-top:8px;color:#999999;">
+    © 2026 Locker. All rights reserved.
+    </div>
+    
+    </td>
+    </tr>
+    
+    </table>
+    
+    <!--[if mso]>
+    </td>
+    </tr>
+    </table>
+    <![endif]-->
+    
+    </td>
+    </tr>
+    </table>
+    
     </body>
     </html>`;
 
@@ -267,57 +504,136 @@ export const sendAdminAssignmentEmail = async (email: string, data: { type: "org
         const html = `<!DOCTYPE html>
         <html lang="en">
         <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; background-color: #f5f8fb; color: #33475b; }
-                .wrapper { width: 100%; padding: 30px 0; background-color: #f5f8fb; }
-                .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 14px; overflow: hidden; box-shadow: 0 18px 60px rgba(29, 43, 64, 0.12); }
-                .header { background: linear-gradient(135deg, #16a085 0%, #1abc9c 100%); padding: 34px 24px; text-align: center; }
-                .header-icon { font-size: 38px; display: block; margin-bottom: 14px; }
-                .header-title { color: #ffffff; font-size: 24px; font-weight: 700; line-height: 1.2; }
-                .content { padding: 32px 28px 24px; }
-                .intro { font-size: 16px; color: #49535f; line-height: 1.8; margin-bottom: 22px; }
-                .meta-info { background-color: #effaf6; border-left: 4px solid #16a085; border-radius: 10px; padding: 18px 20px; margin: 20px 0; }
-                .meta-row { font-size: 14px; color: #2f4858; margin-bottom: 10px; }
-                .meta-label { font-weight: 700; color: #1c363f; }
-                .scope-box { background: linear-gradient(135deg, #16a085 0%, #1abc9c 100%); color: #ffffff; padding: 22px 18px; border-radius: 12px; text-align: center; margin: 24px 0; }
-                .scope-label { font-size: 13px; opacity: 0.88; letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 8px; display: block; }
-                .scope-value { font-size: 20px; font-weight: 700; }
-                .action-button { display: inline-block; background-color: #16a085; color: #ffffff !important; text-decoration: none; border-radius: 10px; padding: 14px 28px; font-size: 15px; font-weight: 700; margin-top: 16px; }
-                .footer { background-color: #f3f7f9; padding: 18px 24px; text-align: center; font-size: 13px; color: #7a8692; border-top: 1px solid #e8eff2; }
-                .footer a { color: #16a085; text-decoration: none; }
-                .logo { max-width: 140px; height: auto; display: inline-block; }
-                @media (max-width: 620px) { .container { border-radius: 0; } .content { padding: 24px 18px 20px; } .header { padding: 28px 20px; } }
-            </style>
+        <meta charset="UTF-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${title}</title>
         </head>
-        <body>
-            <div class="wrapper">
-                <div class="container">
-                    <div class="header">
-                        <div class="header-icon"> <img class="logo" src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg" alt="Locker Logo"></div>
-                        <div class="header-title">${title}</div>
-                    </div>
-                    <div class="content">
-                        <div class="intro">Congratulations! You have been granted admin access to ${scopeLabel.toLowerCase()} level permissions within Locker.</div>
-                        <div class="meta-info">
-                            ${assignedByLine}
-                            ${scopeValue ? `<div class="meta-row"><span class="meta-label">${scopeLabel}:</span> ${scopeValue}</div>` : ""}
-                        </div>
-                        <div class="scope-box">
-                            <span class="scope-label">Assigned Scope</span>
-                            <div class="scope-value">${scopeValue || `New ${scopeLabel}`}</div>
-                        </div>
-                        ${loginUrl ? `<div style="text-align:center;"><a href="${loginUrl}" class="action-button">Login to Locker</a></div>` : ""}
-                        <p class="intro">If you have any questions about your access or need assistance, please reach out to your administrator.</p>
-                    </div>
-                    <div class="footer">This message was sent automatically by Locker. Please do not reply to this email.</div>
-                    <div class="footer-text" style="margin-top: 8px; color: #999;">© 2026 Locker. All rights reserved.</div>
-                </div>
+        <body style="margin:0;padding:0;background-color:#f5f8fb;">
+        
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f5f8fb;">
+        <tr>
+        <td align="center" style="padding:30px 10px;">
+        
+        <!--[if mso]>
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+        <td>
+        <![endif]-->
+        
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;background-color:#ffffff;">
+        
+        <!-- Header -->
+        <tr>
+        <td align="center" bgcolor="#16a085" style="padding:34px 24px;">
+        
+        <img
+        src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg"
+        alt="Locker Logo"
+        width="140"
+        border="0"
+        style="display:block;width:140px;max-width:140px;height:auto;"
+        >
+        
+        <div style="font-family:Arial, Helvetica, sans-serif;font-size:24px;line-height:32px;font-weight:bold;color:#ffffff;padding-top:14px;">
+        ${title}
+        </div>
+        
+        </td>
+        </tr>
+        
+        <!-- Content -->
+        <tr>
+        <td style="padding:32px 28px 24px 28px;font-family:Arial, Helvetica, sans-serif;">
+        
+        <div style="font-size:16px;line-height:28px;color:#49535f;margin-bottom:22px;">
+        Congratulations! You have been granted admin access to ${scopeLabel.toLowerCase()} level permissions within Locker.
+        </div>
+        
+        <!-- Meta Information -->
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#effaf6;margin:20px 0;">
+        <tr>
+        <td width="4" bgcolor="#16a085" style="font-size:0;line-height:0;">&nbsp;</td>
+        <td style="padding:18px 20px;font-family:Arial, Helvetica, sans-serif;font-size:14px;line-height:24px;color:#2f4858;">
+        
+        ${assignedByLine}
+        
+        ${scopeValue ? `
+            <div style="margin-top:10px;">
+            <strong style="color:#1c363f;">${scopeLabel}:</strong>
+            ${scopeValue}
             </div>
-        </body>
-        </html>`;
+            ` : ""}
+            
+            </td>
+            </tr>
+            </table>
+            
+            <!-- Scope Box -->
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#16a085" style="margin:24px 0;">
+            <tr>
+            <td align="center" style="padding:22px 18px;font-family:Arial, Helvetica, sans-serif;color:#ffffff;">
+            
+            <div style="font-size:13px;line-height:20px;text-transform:uppercase;letter-spacing:1px;opacity:0.9;">
+            Assigned Scope
+            </div>
+            
+            <div style="font-size:20px;line-height:28px;font-weight:bold;padding-top:8px;">
+            ${scopeValue || `New ${scopeLabel}`}
+            </div>
+            
+            </td>
+            </tr>
+            </table>
+            
+            ${loginUrl ? `
+                <table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" style="margin-top:16px;">
+                <tr>
+                <td bgcolor="#16a085" align="center" style="padding:14px 28px;">
+                <a
+                href="${loginUrl}"
+                style="font-family:Arial, Helvetica, sans-serif;font-size:15px;font-weight:bold;color:#ffffff;text-decoration:none;display:inline-block;"
+                >
+                Login to Locker
+                </a>
+                </td>
+                </tr>
+                </table>
+                ` : ""}
+                
+                <div style="font-size:16px;line-height:28px;color:#49535f;margin-top:24px;">
+                If you have any questions about your access or need assistance, please reach out to your administrator.
+                </div>
+                
+                </td>
+                </tr>
+                
+                <!-- Footer -->
+                <tr>
+                <td style="background-color:#f3f7f9;padding:18px 24px;border-top:1px solid #e8eff2;text-align:center;font-family:Arial, Helvetica, sans-serif;font-size:13px;line-height:22px;color:#7a8692;">
+                This message was sent automatically by Locker. Please do not reply to this email.
+                </td>
+                </tr>
+                
+                <tr>
+                <td style="background-color:#f3f7f9;text-align:center;font-family:Arial, Helvetica, sans-serif;font-size:12px;line-height:20px;color:#999999;padding:0 24px 18px;">
+                © 2026 Locker. All rights reserved.
+                </td>
+                </tr>
+                </table>
+                
+                <!--[if mso]>
+                </td>
+                </tr>
+                </table>
+                <![endif]-->
+                
+                </td>
+                </tr>
+                </table>
+                
+                </body>
+                </html>`;
 
         await SendEmailTemplet(email, `Locker - ${title}`, null, html);
         return true;
@@ -459,57 +775,118 @@ export const generateSurveyAllocationEmailHTML = (surveyName: string, surveyLink
     return `<!DOCTYPE html>
     <html lang="en">
     <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; background-color: #eef6fc; color: #2c3e50; }
-            .wrapper { width: 100%; padding: 28px 0; background-color: #eef6fc; }
-            .container { max-width: 640px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.08); }
-            .header { background: linear-gradient(135deg, #2980b9 0%, #3498db 100%); padding: 36px 24px; text-align: center; }
-            .header-icon { font-size: 34px; margin-bottom: 12px; }
-            .header-title { color: #ffffff; font-size: 24px; font-weight: 700; line-height: 1.2; }
-            .content { padding: 32px 28px; }
-            .greeting { color: #33475b; font-size: 16px; margin-bottom: 20px; line-height: 1.8; }
-            .survey-box { background: linear-gradient(135deg, #2980b9 0%, #3498db 100%); border-radius: 12px; color: #ffffff; padding: 24px 20px; text-align: center; margin: 24px 0; }
-            .survey-label { font-size: 13px; text-transform: uppercase; opacity: 0.88; letter-spacing: 0.08em; margin-bottom: 8px; display: block; }
-            .survey-name-display { font-size: 22px; font-weight: 700; line-height: 1.3; }
-            .description { font-size: 15px; color: #546e8e; line-height: 1.8; margin-bottom: 28px; }
-            .action-button { display: inline-block; background-color: #2980b9; color: #ffffff !important; text-decoration: none; padding: 14px 30px; border-radius: 10px; font-size: 15px; font-weight: 700; }
-            .info-box { background-color: #eff5fb; border-left: 4px solid #2980b9; border-radius: 10px; padding: 18px 20px; margin-top: 26px; color: #3b5978; font-size: 14px; line-height: 1.7; }
-            .footer { padding: 24px 28px 30px; font-size: 13px; color: #6b7f94; line-height: 1.6; }
-            .footer a { color: #2980b9; text-decoration: none; }
-             .logo { max-width: 140px; height: auto; display: inline-block; }
-            @media (max-width: 620px) { .container { border-radius: 0; } .content { padding: 24px 18px; } .header { padding: 28px 18px; } }
-        </style>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Survey Assigned</title>
     </head>
-    <body>
-        <div class="wrapper">
-            <div class="container">
-                <div class="header">
-                     <img class="logo" src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg" alt="Locker Logo">
-                    <div class="header-icon"></div>
-                    <div class="header-title">📋 Survey Assigned</div>
-                </div>
-                <div class="content">
-                    <div class="greeting">${userName ? `Hello ${userName},` : 'Hello,'} You have a new survey assignment in Locker. Please review the details below and complete the survey at your earliest convenience.</div>
-                    <div class="survey-box">
-                        <span class="survey-label">Assigned Survey</span>
-                        <div class="survey-name-display">${surveyName}</div>
-                    </div>
-                    <div class="description">Your responses will be saved automatically, so you can return to the survey at any time without losing progress.</div>
-                    <div style="text-align: center; margin-top: 20px;">
-                        <a href="${surveyLink}" class="action-button">Access Survey Now</a>
-                    </div>
-                    <div class="info-box">Note: The survey link is unique to this assignment. If you need help, please contact your administrator or log in to the Locker system.</div>
-                </div>
-                <div class="footer">
-                    <p>This is an automated message from the Locker system. Please do not reply to this email.</p>
-                   <div class="footer-text" style="margin-top: 8px; color: #999;">© 2026 Locker. All rights reserved.</div>
-                </div>
-            </div>
-        </div>
+    
+    <body style="margin:0;padding:0;background-color:#eef6fc;">
+    
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eef6fc;">
+    <tr>
+    <td align="center" style="padding:28px 10px;">
+    
+    <!--[if mso]>
+    <table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0">
+    <tr>
+    <td>
+    <![endif]-->
+    
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;background-color:#ffffff;">
+    
+    
+    <!-- Header -->
+    <tr>
+    <td align="center" bgcolor="#2980b9" style="padding:36px 24px;">
+    
+    <img src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg" alt="Locker Logo" width="140" border="0" style="display:block;width:140px;max-width:140px;height:auto;">
+    
+    <div style="font-family:Arial, Helvetica, sans-serif;font-size:24px;line-height:32px;font-weight:bold;color:#ffffff;padding-top:14px;">
+    📋 Survey Assigned
+    </div>
+    
+    </td>
+    </tr>
+    
+    <!-- Content -->
+    <tr>
+    <td style="padding:32px 28px;font-family:Arial, Helvetica, sans-serif;">
+    
+    <div style="font-size:16px;line-height:30px;color:#33475b;margin-bottom:20px;">
+    ${userName ? `Hello ${userName},` : 'Hello,'}
+    You have a new survey assignment in Locker. Please review the details below and complete the survey at your earliest convenience.
+    </div>
+    
+    <!-- Survey Box -->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#2980b9" style="margin:24px 0;">
+    <tr>
+    <td align="center" style="padding:24px 20px;font-family:Arial, Helvetica, sans-serif;color:#ffffff;">
+    
+    <div style="font-size:13px;line-height:20px;text-transform:uppercase;letter-spacing:1px;opacity:0.9;">
+    Assigned Survey
+    </div>
+    
+    <div style="font-size:22px;line-height:32px;font-weight:bold;padding-top:8px;">
+    ${surveyName}
+    </div>
+    
+    
+    </td>
+    </tr>
+    <tr>
+    
+    </tr>
+    </table>
+    
+    <!-- Info Box -->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eff5fb;margin-top:26px;">
+    <tr>
+    <td align="center" width="4" bgcolor="#2980b9" style="font-size:0;line-height:0;">&nbsp;</td>
+    
+    <td align="center" style="padding:18px 20px;font-family:Arial, Helvetica, sans-serif;font-size:14px;line-height:24px;color:#3b5978;">
+    <a href="${surveyLink}" target="_blank" style="color:#2980b9;font-weight:bold;text-decoration:underline;">
+    Open Survey
+    </a>
+    <br><br>
+    Note: The survey link is unique to this assignment. If you need help, please contact your administrator or log in to the Locker system.
+    
+    </td>
+    </tr>
+    </table>
+    
+    </td>
+    </tr>
+    
+    
+    <!-- Footer -->
+    <tr>
+    <td style="padding:24px 28px 30px;background-color:#ffffff;font-family:Arial, Helvetica, sans-serif;font-size:13px;line-height:22px;color:#6b7f94;border-top:1px solid #e6eef5;">
+    <div style="text-align:center;">
+    This is an automated message from the Locker system. Please do not reply to this email.
+    </div>
+    
+    <div style="text-align:center;font-size:12px;color:#999999;padding-top:8px;">
+    © 2026 Locker. All rights reserved.
+    </div>
+    </td>
+    </tr>
+    
+    
+    </table>
+    
+    <!--[if mso]>
+    </td>
+    </tr>
+    </table>
+    <![endif]-->
+    
+    </td>
+    </tr>
+    </table>
+    
     </body>
+    
     </html>`;
 };
 
@@ -546,211 +923,172 @@ export const sendBroadcastEmail = async (
             minute: '2-digit'
         });
 
-        const html = `<!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <style>
-                * {
-                    margin: 0;
-                    padding: 0;
-                    box-sizing: border-box;
-                }
+      const html = `<!DOCTYPE html>
+<html>
 
-                body {
-                    font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-                    background-color: #f5f5f5;
-                    color: #333;
-                    line-height: 1.6;
-                }
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>Broadcast Message</title>
+</head>
 
-                .wrapper {
-                    width: 100%;
-                    background-color: #f5f5f5;
-                    padding: 20px 0;
-                }
+<body style="margin:0;padding:0;background-color:#f5f5f5;">
 
-                .container {
-                    max-width: 600px;
-                    margin: 0 auto;
-                    background-color: #ffffff;
-                    border-radius: 8px;
-                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-                    overflow: hidden;
-                }
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f5f5f5;">
+        <tr>
+            <td align="center" style="padding:20px 10px;">
 
-                .header {
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    padding: 30px 20px;
-                    text-align: center;
-                }
+                <!--[if mso]>
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0">
+<tr>
+<td>
+<![endif]-->
 
-                .logo {
-                    max-width: 140px;
-                    height: auto;
-                    margin-bottom: 15px;
-                    display: inline-block;
-                }
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:600px;background:#ffffff;">
 
-                .header-title {
-                    color: #ffffff;
-                    font-size: 24px;
-                    font-weight: 700;
-                    margin: 10px 0 0 0;
-                }
-
-                .content {
-                    padding: 30px;
-                }
-
-                .broadcast-title {
-                    font-size: 20px;
-                    font-weight: 700;
-                    color: #2c3e50;
-                    margin-bottom: 15px;
-                    border-bottom: 3px solid #667eea;
-                    padding-bottom: 10px;
-                }
-
-                .broadcast-description {
-                    font-size: 14px;
-                    color: #555;
-                    line-height: 1.8;
-                    margin-bottom: 20px;
-                    white-space: pre-wrap;
-                    word-break: break-word;
-                }
-
-                .meta-info {
-                    background-color: #f8f9fa;
-                    border-left: 4px solid #667eea;
-                    padding: 12px 15px;
-                    margin: 20px 0;
-                    border-radius: 4px;
-                    font-size: 13px;
-                    color: #666;
-                }
-
-                .meta-row {
-                    margin: 5px 0;
-                }
-
-                .meta-label {
-                    font-weight: 600;
-                    color: #2c3e50;
-                }
-
-                .action-button {
-                    display: inline-block;
-                    background-color: #667eea;
-                    color: #ffffff !important;
-                    padding: 12px 28px;
-                    text-decoration: none;
-                    border-radius: 6px;
-                    font-weight: 600;
-                    margin-top: 15px;
-                    transition: background-color 0.3s ease;
-                }
-
-                .action-button:hover {
-                    background-color: #764ba2;
-                }
-
-                .divider {
-                    border: none;
-                    border-top: 1px solid #e0e0e0;
-                    margin: 25px 0;
-                }
-
-                .footer {
-                    background-color: #f8f9fa;
-                    padding: 20px;
-                    text-align: center;
-                    font-size: 12px;
-                    color: #888;
-                    border-top: 1px solid #e0e0e0;
-                }
-
-                .footer-text {
-                    margin: 5px 0;
-                }
-
-                .footer-link {
-                    color: #667eea;
-                    text-decoration: none;
-                }
-
-                .footer-link:hover {
-                    text-decoration: underline;
-                }
-
-                @media (max-width: 600px) {
-                    .container {
-                        border-radius: 0;
-                    }
-
-                    .content {
-                        padding: 20px;
-                    }
-
-                    .broadcast-title {
-                        font-size: 18px;
-                    }
-
-                    .header-title {
-                        font-size: 20px;
-                    }
-                }
-            </style>
-        </head>
-        <body>
-            <div class="wrapper">
-                <div class="container">
                     <!-- Header -->
-                    <div class="header">
-                        <img class="logo" src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg" alt="Locker Logo">
-                        <div class="header-title">📢 New Broadcast Message</div>
-                    </div>
+                    <tr>
+                        <td align="center" bgcolor="#667eea" style="padding:30px 20px;">
+                            <img src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg" alt="Locker Logo" width="140" style="display:block;border:0;outline:none;text-decoration:none;">
 
-                    <!-- Main Content -->
-                    <div class="content">
-                        <div class="broadcast-title">${data.title}</div>
+                            <div style="
+                    font-family:Arial,Helvetica,sans-serif;
+                    font-size:24px;
+                    line-height:32px;
+                    color:#ffffff;
+                    font-weight:bold;
+                    margin-top:15px;
+                ">
+                                📢 New Broadcast Message
+                            </div>
+                        </td>
+                    </tr>
 
-                        <div class="broadcast-description">${data.description}</div>
+                    <!-- Content -->
+                    <tr>
+                        <td style="padding:30px;">
 
-                        <!-- Meta Information -->
-                        <div class="meta-info">
-                            ${data.senderName ? `<div class="meta-row"><span class="meta-label">Sent by:</span> ${data.senderName}</div>` : ''}
-                            <div class="meta-row"><span class="meta-label">Date & Time:</span> ${sentDate}</div>
-                        </div>
+                            <div style="
+                    font-family:Arial,Helvetica,sans-serif;
+                    font-size:22px;
+                    line-height:30px;
+                    color:#2c3e50;
+                    font-weight:bold;
+                    border-bottom:3px solid #667eea;
+                    padding-bottom:10px;
+                ">
+                                ${data.title}
+                            </div>
 
-                        <hr class="divider">
+                            <div style="
+                    margin-top:20px;
+                    font-family:Arial,Helvetica,sans-serif;
+                    font-size:14px;
+                    line-height:24px;
+                    color:#555555;
+                ">
+                                ${data.description}
+                            </div>
 
-                        <!-- Call to Action -->
-                        ${loginUrl ? `<p style="text-align: center;">
-                            <a href="${loginUrl}" class="action-button">View in Locker</a>
-                        </p>` : ''}
+                            <!-- Meta Box -->
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="
+                    margin-top:20px;
+                    background:#f8f9fa;
+                    border-left:4px solid #667eea;
+                ">
+                                <tr>
+                                    <td style="
+                            padding:15px;
+                            font-family:Arial,Helvetica,sans-serif;
+                            font-size:13px;
+                            color:#666666;
+                            line-height:22px;
+                        ">
+                                        ${data.senderName ? `
+                                        <strong style="color:#2c3e50;">Sent by:</strong>
+                                        ${data.senderName}<br>
+                                        ` : ''}
 
-                        <p style="margin-top: 20px; font-size: 13px; color: #666;">
-                            You have received this broadcast message as part of your organization's communications. 
-                            Please log in to your Locker account to view more details or to respond if needed.
-                        </p>
-                    </div>
+                                        <strong style="color:#2c3e50;">
+                                            Date & Time:
+                                        </strong>
+                                        ${sentDate}
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- CTA -->
+
+                            ${loginUrl ? `
+                            <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin-top:25px;">
+                                <tr>
+                                    <td bgcolor="#667eea" style="padding:12px 28px;">
+                                        <a href="${loginUrl}" style="
+                                font-family:Arial,Helvetica,sans-serif;
+                                color:#ffffff;
+                                text-decoration:none;
+                                font-weight:bold;
+                                font-size:14px;
+                            ">
+                                            View in Locker
+                                        </a>
+                                    </td>
+                                </tr>
+                            </table>
+                            ` : ''}
+
+                            <div style="
+                    margin-top:25px;
+                    font-family:Arial,Helvetica,sans-serif;
+                    font-size:13px;
+                    line-height:22px;
+                    color:#666666;
+                ">
+                                You have received this broadcast message as part of your
+                                organization's communications. Please log in to your Locker
+                                account to view more details or respond if needed.
+                            </div>
+
+                        </td>
+                    </tr>
 
                     <!-- Footer -->
-                    <div class="footer">
-                        <div class="footer-text">
-                            This is an automated message from the Locker system. Please do not reply to this email.
-                        </div>
-                        <div class="footer-text" style="margin-top: 8px; color: #999;">
+                    <tr>
+                        <td bgcolor="#f8f9fa" style="
+                padding:20px;
+                border-top:1px solid #dddddd;
+                text-align:center;
+                font-family:Arial,Helvetica,sans-serif;
+                font-size:12px;
+                color:#888888;
+                line-height:20px;
+            ">
+                            This is an automated message from the Locker system.
+                            Please do not reply to this email.
+
+                            <br><br>
+
                             © 2026 Locker. All rights reserved.
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </body>
-        </html>`;
+                        </td>
+                    </tr>
+
+                </table>
+
+                <!--[if mso]>
+</td>
+</tr>
+</table>
+<![endif]-->
+
+            </td>
+        </tr>
+    </table>
+
+</body>
+
+</html>`;
+
 
         const response = await SendEmailTemplet(email, `Locker Broadcast: ${data.title}`, null, html);
         return true;
