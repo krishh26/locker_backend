@@ -23,6 +23,8 @@ import { UserCentre } from '../entity/UserCentre.entity';
 import { UserCourse } from '../entity/UserCourse.entity';
 import { Organisation } from '../entity/Organisation.entity';
 import { User } from '../entity/User.entity';
+import { Learner } from '../entity/Learner.entity';
+import { UserEmployer } from '../entity/UserEmployers.entity';
 import { In } from 'typeorm';
 
 /**
@@ -760,6 +762,88 @@ export async function applyLearnerScope(
             { centreAdminUserIds }
         );
     }
+}
+
+/** All employer records linked to a user (primary Employer.user + user_employers). */
+export async function getEmployerIdsForUser(userId: number): Promise<number[]> {
+    const employerRepository = AppDataSource.getRepository(Employer);
+    const userEmployerRepository = AppDataSource.getRepository(UserEmployer);
+    const ids = new Set<number>();
+
+    const owned = await employerRepository
+        .createQueryBuilder('e')
+        .innerJoin('e.user', 'u')
+        .where('u.user_id = :userId', { userId })
+        .select('e.employer_id', 'employer_id')
+        .getRawMany<{ employer_id: number }>();
+    owned.forEach((row) => ids.add(Number(row.employer_id)));
+
+    const assigned = await userEmployerRepository
+        .createQueryBuilder('ue')
+        .innerJoin('ue.employer', 'e')
+        .where('ue.user_id = :userId', { userId })
+        .andWhere('ue.is_active = true')
+        .select('e.employer_id', 'employer_id')
+        .getRawMany<{ employer_id: number }>();
+    assigned.forEach((row) => ids.add(Number(row.employer_id)));
+
+    return Array.from(ids);
+}
+
+/** Whether an employer user can view a learner's portfolio (by learner user_id). */
+export async function canEmployerAccessLearnerUser(
+    employerUserId: number,
+    learnerUserId: number
+): Promise<boolean> {
+    const employerIds = await getEmployerIdsForUser(employerUserId);
+    if (!employerIds.length) return false;
+
+    const learnerRepository = AppDataSource.getRepository(Learner);
+    const linkedByEmployer = await learnerRepository
+        .createQueryBuilder('learner')
+        .innerJoin('learner.user_id', 'user')
+        .where('user.user_id = :learnerUserId', { learnerUserId })
+        .andWhere('learner.employer_id IN (:...employerIds)', { employerIds })
+        .getCount();
+    if (linkedByEmployer > 0) return true;
+
+    const userCourseRepository = AppDataSource.getRepository(UserCourse);
+    const linkedOnCourse = await userCourseRepository
+        .createQueryBuilder('uc')
+        .innerJoin('uc.learner_id', 'learner')
+        .innerJoin('learner.user_id', 'user')
+        .where('user.user_id = :learnerUserId', { learnerUserId })
+        .andWhere('uc.employer_id = :employerUserId', { employerUserId })
+        .getCount();
+
+    return linkedOnCourse > 0;
+}
+
+/** Employer access to a learner's data for a specific course enrolment. */
+export async function employerCanAccessCourseForLearner(
+    employerUserId: number,
+    learnerUserId: number,
+    courseId: number | string
+): Promise<boolean> {
+    if (!(await canEmployerAccessLearnerUser(employerUserId, learnerUserId))) {
+        return false;
+    }
+
+    const learnerRepository = AppDataSource.getRepository(Learner);
+    const learner = await learnerRepository.findOne({
+        where: { user_id: { user_id: learnerUserId } as any },
+        select: ['learner_id'],
+    });
+    if (!learner) return false;
+
+    const userCourseRepository = AppDataSource.getRepository(UserCourse);
+    const enrolled = await userCourseRepository
+        .createQueryBuilder('uc')
+        .where('uc.learner_id = :learnerId', { learnerId: learner.learner_id })
+        .andWhere(`uc.course ->> 'course_id' = :courseId`, { courseId: String(courseId) })
+        .getCount();
+
+    return enrolled > 0;
 }
 
 /**

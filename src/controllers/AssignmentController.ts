@@ -12,7 +12,7 @@ import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
 import { AssignmentPCReview } from "../entity/AssignmentPCReview.entity";
 import { AssignmentReview } from "../entity/AssignmentReview.entity";
 import { AssessmentMethod, AssessmentStatus } from "../util/constants";
-import { applyLearnerScope, canAccessOrganisation, canAccessCentre, getScopeContext } from "../util/organisationFilter";
+import { applyLearnerScope, canAccessOrganisation, canAccessCentre, getScopeContext, canEmployerAccessLearnerUser, employerCanAccessCourseForLearner } from "../util/organisationFilter";
 class AssignmentController {
     /**
      * Check if user is authorized to access an assignment
@@ -35,6 +35,10 @@ class AssignmentController {
             const userCourseRepository = AppDataSource.getRepository(UserCourse);
 
             //const courseId = assignment.course_id.course_id;
+
+            if (userRoles.includes(UserRole.Employer)) {
+                return canEmployerAccessLearnerUser(userId, assignment.user.user_id);
+            }
 
             const userCourseInvolvement = await userCourseRepository.createQueryBuilder('user_course')
                 .leftJoin('user_course.learner_id', 'learner')
@@ -382,36 +386,80 @@ class AssignmentController {
             const requestingUserRoles = req.user.roles || [req.user.role];
 
             /* ================= AUTH CHECK ================= */
-            if (
-                course_id &&
-                !requestingUserRoles.includes(UserRole.Admin) &&
-                !requestingUserRoles.includes(UserRole.Learner)
-            ) {
-                const userCourseInvolvement = await userCourseRepo
-                    .createQueryBuilder("uc")
-                    .leftJoin("uc.learner_id", "learner")
-                    .leftJoin("learner.user_id", "learner_user")
-                    .leftJoin("uc.trainer_id", "trainer")
-                    .leftJoin("uc.IQA_id", "IQA")
-                    .leftJoin("uc.LIQA_id", "LIQA")
-                    .leftJoin("uc.EQA_id", "EQA")
-                    .leftJoin("uc.employer_id", "employer")
-                    .where(
-                        `(learner_user.user_id = :uid
-            OR trainer.user_id = :uid
-            OR IQA.user_id = :uid
-            OR LIQA.user_id = :uid
-            OR EQA.user_id = :uid
-            OR employer.user_id = :uid)`,
-                        { uid: requestingUserId }
-                    )
-                    .getOne();
+            const privilegedRoles = [
+                UserRole.Admin,
+                UserRole.MasterAdmin,
+                UserRole.OrganisationAdmin,
+                UserRole.CentreAdmin,
+                UserRole.PhoenixTeam,
+            ];
+            const isPrivileged = privilegedRoles.some((role) => requestingUserRoles.includes(role));
+            const isLearnerViewingSelf =
+                requestingUserRoles.includes(UserRole.Learner) &&
+                (!user_id || Number(user_id) === requestingUserId);
 
-                if (!userCourseInvolvement) {
-                    return res.status(403).json({
-                        status: false,
-                        message: "You are not authorized to view assignments for this course",
-                    });
+            if (!isPrivileged && !isLearnerViewingSelf) {
+                if (requestingUserRoles.includes(UserRole.Employer)) {
+                    if (!user_id) {
+                        return res.status(400).json({
+                            status: false,
+                            message: "user_id is required to view learner assignments",
+                        });
+                    }
+
+                    const allowed = course_id
+                        ? await employerCanAccessCourseForLearner(
+                            requestingUserId,
+                            Number(user_id),
+                            course_id
+                        )
+                        : await canEmployerAccessLearnerUser(requestingUserId, Number(user_id));
+
+                    if (!allowed) {
+                        return res.status(403).json({
+                            status: false,
+                            message: "You are not authorized to view assignments for this course",
+                        });
+                    }
+                } else if (course_id) {
+                    const directInvolvement = await userCourseRepo
+                        .createQueryBuilder("uc")
+                        .leftJoin("uc.learner_id", "learner")
+                        .leftJoin("learner.user_id", "learner_user")
+                        .leftJoin("uc.trainer_id", "trainer")
+                        .leftJoin("uc.IQA_id", "IQA")
+                        .leftJoin("uc.LIQA_id", "LIQA")
+                        .leftJoin("uc.EQA_id", "EQA")
+                        .leftJoin("uc.employer_id", "employer")
+                        .where(
+                            user_id
+                                ? `learner_user.user_id = :targetUserId AND (
+                            trainer.user_id = :uid
+                            OR IQA.user_id = :uid
+                            OR LIQA.user_id = :uid
+                            OR EQA.user_id = :uid
+                            OR employer.user_id = :uid)`
+                                : `(learner_user.user_id = :uid
+                            OR trainer.user_id = :uid
+                            OR IQA.user_id = :uid
+                            OR LIQA.user_id = :uid
+                            OR EQA.user_id = :uid
+                            OR employer.user_id = :uid)`,
+                            user_id
+                                ? { uid: requestingUserId, targetUserId: Number(user_id) }
+                                : { uid: requestingUserId }
+                        )
+                        .andWhere(`uc.course ->> 'course_id' = :courseId`, {
+                            courseId: String(course_id),
+                        })
+                        .getOne();
+
+                    if (!directInvolvement) {
+                        return res.status(403).json({
+                            status: false,
+                            message: "You are not authorized to view assignments for this course",
+                        });
+                    }
                 }
             }
 
