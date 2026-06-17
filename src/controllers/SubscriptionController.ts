@@ -406,6 +406,8 @@ class SubscriptionController {
                 totalLicenses,
                 tolerancePercentage,
                 warningThresholdPercentage,
+                end_date,
+                start_date
             } = req.body;
 
             if (!organisationId || !planId) {
@@ -458,7 +460,8 @@ class SubscriptionController {
                 organisation_id: organisationId,
                 plan_id: planId,
                 status: SubscriptionStatus.Active,
-                start_date: new Date(),
+                start_date: start_date,
+                end_date: end_date,
                 total_licenses:
                     totalLicenses !== undefined && totalLicenses !== null
                         ? Number(totalLicenses)
@@ -506,7 +509,7 @@ class SubscriptionController {
                 });
             }
 
-            const { organisationId, planId } = req.body;
+            const { organisationId, planId, start_date, end_date } = req.body;
 
             if (!organisationId || !planId) {
                 return res.status(400).json({
@@ -550,6 +553,8 @@ class SubscriptionController {
             }
 
             subscription.plan_id = planId;
+            subscription.start_date = start_date;
+            subscription.end_date = end_date;
             await subscriptionRepository.save(subscription);
 
             return res.status(200).json({
