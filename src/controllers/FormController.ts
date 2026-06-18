@@ -943,15 +943,11 @@ class FormController {
                 // Send to users based on form's email roles configuration
                 const roleMapping = {
                     [FormAccessRole.MasterAdmin]: [UserRole.Admin],
-                    [FormAccessRole.BasicAdmin]: [UserRole.Admin],
-                    [FormAccessRole.Assessor]: [UserRole.Trainer],
+                    [FormAccessRole.Admin]: [UserRole.Admin],
+                    [FormAccessRole.Trainer]: [UserRole.Trainer],
                     [FormAccessRole.IQA]: [UserRole.IQA],
                     [FormAccessRole.EQA]: [UserRole.EQA],
-                    [FormAccessRole.CurriculumManager]: [UserRole.Admin],
-                    [FormAccessRole.EmployerOverview]: [UserRole.Employer],
-                    [FormAccessRole.EmployerManager]: [UserRole.Employer],
-                    [FormAccessRole.Partner]: [UserRole.Admin],
-                    [FormAccessRole.CustomManager]: [UserRole.Admin],
+                    [FormAccessRole.Employer]: [UserRole.Employer],
                     [FormAccessRole.Learner]: [UserRole.Learner]
                 };
 

@@ -146,7 +146,7 @@ export async function getAccessibleOrganisationIds(user: any, scopeContext?: Sco
 
         const employer = await employerRepository.findOne({
             where: { user: { user_id: user.user_id } },
-            select: ['organisation_id']
+            select: ['employer_id', 'organisation_id']
         });
 
         const userOrganisations = await userOrganisationRepository.find({
@@ -733,7 +733,7 @@ export async function applyLearnerScope(
         const employerRepository = AppDataSource.getRepository(Employer);
         const employer = await employerRepository.findOne({
             where: { user: { user_id: user.user_id } },
-            select: ['employer_id']
+            select: ['employer_id', 'organisation_id']
         });
 
         if (!employer) {

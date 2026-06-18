@@ -13,15 +13,11 @@ export enum FormType {
 
 export enum FormAccessRole {
     MasterAdmin = "Master Admin",
-    BasicAdmin = "Basic Admin",
-    Assessor = "Assessor",
+    Admin = "Admin",
+    Trainer = "Trainer",
     IQA = "IQA",
     EQA = "EQA",
-    CurriculumManager = "Curriculum Manager",
-    EmployerOverview = "Employer Overview",
-    EmployerManager = "Employer Manager",
-    Partner = "Partner",
-    CustomManager = "Custom Manager",
+    Employer = "Employer",
     Learner = "Learner"
 }
 

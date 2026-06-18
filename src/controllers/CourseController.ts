@@ -340,6 +340,49 @@ class CourseController {
         }
     }
 
+    public async addFromGlobalToOrganisation(req: CustomRequest, res: Response): Promise<Response> {
+        try {
+            const { course_id, organisation_id } = req.body;
+
+            const courseRepository = AppDataSource.getRepository(Course);
+            const course = await courseRepository.findOne({ where: { course_id } });
+            if (!course) {
+                return res.status(404).json({ message: 'Course not found', status: false });
+            }
+            
+            if (course.organisation_id) {
+                return res.status(400).json({
+                    message: 'Only global courses can be added',
+                    status: false
+                });
+            }
+            
+            const existing = await courseRepository.findOne({ where: { organisation_id, parent_course_id: course_id } });
+            if (existing) {
+                return res.status(400).json({
+                    message: 'Course already added to organisation',
+                    status: false
+                });
+            }
+            
+            const { course_id: _, created_at, updated_at, ...courseData } = course;
+            const newCourse = courseRepository.create({
+                ...courseData,
+                organisation_id,
+                parent_course_id: course.course_id
+            });
+            await courseRepository.save(newCourse);
+
+            return res.status(200).json({ message: 'Course added to organisation successfully', status: true });
+        } catch (error) {
+            console.log(error);
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                error: error.message,
+                status: false
+            });
+        }
+    };
     public async courseEnrollment(req: CustomRequest, res: Response): Promise<Response> {
         try {
             const { learner_id, course_id, trainer_id, IQA_id, LIQA_id, EQA_id, employer_id, start_date, end_date, is_main_course } = req.body
