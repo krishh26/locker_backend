@@ -7,6 +7,7 @@ import { UserCourse } from '../entity/UserCourse.entity';
 import { getUnitCompletionStatus } from '../util/unitCompletion';
 import { CustomRequest } from '../util/Interface/expressInterface';
 import { applyLearnerScope, getScopeContext } from '../util/organisationFilter';
+import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
 
 class LearnerUnitController {
     public async saveSelectedUnits(req: CustomRequest, res: Response) {
@@ -170,6 +171,139 @@ class LearnerUnitController {
 
             const courseData: any = userCourse?.course || course;
             const courseUnits: any[] = Array.isArray(courseData?.units) ? courseData.units : [];
+
+            const assignmentMappingRepository = AppDataSource.getRepository(AssignmentMapping);
+
+            const learnerRecord: any = await learnerRepo.findOne({
+                where: { learner_id: learnerIdNum },
+                relations: ["user_id"]
+            });
+
+            const mappings = learnerRecord?.user_id?.user_id
+                ? await assignmentMappingRepository
+                    .createQueryBuilder("mapping")
+                    .leftJoinAndSelect("mapping.assignment", "assignment")
+                    .leftJoinAndSelect("mapping.course", "course")
+                    .leftJoin("assignment.user", "assignment_user")
+                    .where("course.course_id = :course_id", {
+                        course_id: Number(course_id)
+                    })
+                    .andWhere("assignment_user.user_id = :user_id", {
+                        user_id: learnerRecord.user_id.user_id
+                    })
+                    .select(["mapping", "assignment", "course.course_id"])
+                    .getMany()
+                : [];
+
+            mappings.forEach((mapping: any) => {
+                const unitIndex = courseUnits.findIndex(
+                    (u: any) =>
+                        String(u.id) === String(mapping.unit_code) ||
+                        String(u.unit_ref) === String(mapping.unit_code)
+                );
+
+                if (unitIndex === -1) return;
+
+                const unit = courseUnits[unitIndex];
+
+                if (!mapping.sub_unit_id && !mapping.topic_id) {
+                    unit.evidenceBoxes = unit.evidenceBoxes || [];
+
+                    unit.evidenceBoxes.push({
+                        mapping_id: mapping.mapping_id,
+                        assignment_id: mapping.assignment.assignment_id,
+                        learnerMap: mapping.learnerMap,
+                        trainerMap: mapping.trainerMap,
+                        sub_unit_id: null,
+                        topic_id: null,
+                    });
+                }
+
+                else if (mapping.sub_unit_id && !mapping.topic_id) {
+                    unit.subUnit = unit.subUnit || [];
+
+                    const subIndex = unit.subUnit.findIndex(
+                        (s: any) => String(s.id) === String(mapping.sub_unit_id)
+                    );
+
+                    if (subIndex === -1) return;
+
+                    const sub = unit.subUnit[subIndex];
+
+                    sub.evidenceBoxes = sub.evidenceBoxes || [];
+
+                    sub.evidenceBoxes.push({
+                        mapping_id: mapping.mapping_id,
+                        assignment_id: mapping.assignment.assignment_id,
+                        learnerMap: mapping.learnerMap,
+                        trainerMap: mapping.trainerMap,
+                        sub_unit_id: mapping.sub_unit_id,
+                        topic_id: null,
+                    });
+
+                    const hasLearner = sub.evidenceBoxes.some(
+                        (e: any) => e.learnerMap
+                    );
+
+                    const hasTrainer = sub.evidenceBoxes.some(
+                        (e: any) => e.trainerMap
+                    );
+
+                    sub.learnerMap = hasLearner;
+                    sub.trainerMap = hasTrainer;
+
+                    unit.subUnit[subIndex] = sub;
+                }
+
+                else if (mapping.sub_unit_id && mapping.topic_id) {
+                    unit.subUnit = unit.subUnit || [];
+
+                    const subIndex = unit.subUnit.findIndex(
+                        (s: any) => String(s.id) === String(mapping.sub_unit_id)
+                    );
+
+                    if (subIndex === -1) return;
+
+                    const sub = unit.subUnit[subIndex];
+                    sub.evidenceBoxes = sub.evidenceBoxes || [];
+
+                    if (sub.topics && Array.isArray(sub.topics)) {
+                        const topicIndex = sub.topics.findIndex(
+                            (t: any) => String(t.id) === String(mapping.topic_id)
+                        );
+
+                        if (topicIndex !== -1) {
+                            const topic = sub.topics[topicIndex];
+
+                            topic.evidenceBoxes = topic.evidenceBoxes || [];
+
+                            topic.evidenceBoxes.push({
+                                mapping_id: mapping.mapping_id,
+                                assignment_id: mapping.assignment.assignment_id,
+                                learnerMap: mapping.learnerMap,
+                                trainerMap: mapping.trainerMap,
+                                sub_unit_id: mapping.sub_unit_id,
+                                topic_id: mapping.topic_id,
+                            });
+
+                            sub.topics[topicIndex] = topic;
+                        }
+                    } else {
+                        sub.evidenceBoxes.push({
+                            mapping_id: mapping.mapping_id,
+                            assignment_id: mapping.assignment.assignment_id,
+                            learnerMap: mapping.learnerMap,
+                            trainerMap: mapping.trainerMap,
+                            sub_unit_id: mapping.sub_unit_id,
+                            topic_id: mapping.topic_id,
+                        });
+                    }
+
+                    unit.subUnit[subIndex] = sub;
+                }
+
+                courseUnits[unitIndex] = unit;
+            });
 
             const computeUnitProgressPercent = (unit: any) => {
                 let total = 0;
