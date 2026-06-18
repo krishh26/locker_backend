@@ -113,6 +113,9 @@ export class Course {
     @Column({ type: 'varchar', nullable: true })
     two_page_standard_link: string;
 
+    @Column({ nullable: true })
+    parent_course_id: number;
+
     @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
     created_at: Date;
 

@@ -16,6 +16,7 @@ CourseRoutes.patch('/update/:id', authorizeRoles(), Controller.updateCourse);
 CourseRoutes.post('/enrollment', authorizeRoles(), Controller.courseEnrollment);
 CourseRoutes.get('/get/:id', authorizeRoles(), Controller.getCourse);
 CourseRoutes.get('/list', authorizeRoles(), paginationMiddleware, Controller.getAllCourse);
+CourseRoutes.post('/add-from-library', authorizeRoles(), Controller.addFromGlobalToOrganisation);
 
 CourseRoutes.post('/exclusion', authorizeRoles(), Controller.upsertCourseExclusion.bind(Controller));
 CourseRoutes.get('/exclusion', authorizeRoles(), Controller.getCourseExclusions.bind(Controller));
