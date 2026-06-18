@@ -1775,6 +1775,7 @@ const data = Object.values(grouped);
                       title: t.title,
                       learnerMapped: tMap?.learnerMapped || false,
                       trainerMapped: tMap?.trainerMapped || false,
+                      code: t.code
                     };
                   })
                   : [],
