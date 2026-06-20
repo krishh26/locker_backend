@@ -165,20 +165,115 @@ export async function runSessionReminders(): Promise<void> {
                     const learnerName = `${learner.first_name ?? ""} ${learner.last_name ?? ""}`.trim() || "Learner";
                     const subject = `Upcoming: Your training session is in ${daysBefore} day${daysBefore === 1 ? "" : "s"}!`;
                     const html = `
-<p>Hi ${learnerName},</p>
-<p>This is a friendly reminder that you have a training session scheduled in ${daysBefore} day${daysBefore === 1 ? "" : "s"}. Now is a great time to check your schedule and make sure you're all set to join your Trainer.</p>
-<p><strong>Session Details:</strong><br/>
-Trainer: ${trainerName}<br/>
-Date: ${dateText}<br/>
-Time: ${startTimeText} - ${endTimeText}<br/>
-Session Type: ${sessionType}</p>
-<p><strong>Preparation Checklist:</strong><br/>
-- Check Locker: Log in to your Locker Dashboard to download any handouts or reading materials.<br/>
-- Tech Check: If the session is online, ensure your audio and camera are working.<br/>
-- Questions: Have a few questions ready for your Trainer to get the most out of the session!</p>
-<p>We look forward to seeing you there.</p>
-<p>Best regards,<br/>The Locker Team</p>
-            `.trim();
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+            <meta charset="UTF-8">
+            <meta http-equiv="X-UA-Compatible" content="IE=edge">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Learner Reminder</title>
+            </head>
+            
+            <body style="margin:0;padding:0;background-color:#eef6fc;">
+            
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eef6fc;">
+            <tr>
+            <td align="center" style="padding:28px 10px;">
+            
+            <!--[if mso]>
+            <table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0">
+            <tr>
+            <td>
+            <![endif]-->
+            
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;background-color:#ffffff;">
+            
+            <!-- Header -->
+            <tr>
+            <td align="center" bgcolor="#2980b9" style="padding:36px 24px;">
+            
+            <img
+            src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg"
+                alt="Locker Logo"
+                width="140"
+                border="0"
+                style="display:block;width:140px;max-width:140px;height:auto;"
+            >
+
+            <div style="font-family:Arial, Helvetica, sans-serif;font-size:24px;line-height:32px;font-weight:bold;color:#ffffff;padding-top:14px;">
+                ⏰ Learner Reminder
+            </div>
+
+        </td>
+    </tr>
+
+    <!-- Content -->
+    <tr>
+        <td style="padding:32px 28px;font-family:Arial, Helvetica, sans-serif;">
+
+            <div style="font-size:16px;line-height:30px;color:#33475b;margin-bottom:20px;">
+                Hello ${learnerName},
+            </div>
+
+            <div style="font-size:15px;line-height:28px;color:#546e8e;margin-bottom:20px;">
+                This is a friendly reminder that you have a training session scheduled in ${daysBefore} day${daysBefore === 1 ? "" : "s"}.
+            </div>
+
+            <!-- Session Details -->
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eff5fb;margin-top:20px;">
+                <tr>
+                    <td width="4" bgcolor="#2980b9" style="font-size:0;line-height:0;">&nbsp;</td>
+                    <td style="padding:18px 20px;font-family:Arial, Helvetica, sans-serif;font-size:14px;line-height:24px;color:#3b5978;">
+                        <strong>Trainer: </strong>
+                        ${trainerName}
+                        <br>
+
+                        <strong>Date:</strong> ${dateText}<br>
+                        <strong>Time:</strong> ${startTimeText} - ${endTimeText}<br>
+                        <strong>Session Type:</strong> ${sessionType}
+                    </td>
+                </tr>
+            </table>
+
+            <div style="font-size:15px;line-height:28px;color:#33475b;margin-top:24px;">
+                Please ensure you are prepared and ready for the session.
+            </div>
+
+            <div style="font-size:15px;line-height:28px;color:#33475b;margin-top:24px;">
+                Best regards,<br>
+                The Locker Team
+            </div>
+
+        </td>
+    </tr>
+
+    <!-- Footer -->
+    <tr>
+        <td style="padding:24px 28px 30px;background-color:#ffffff;font-family:Arial, Helvetica, sans-serif;font-size:13px;line-height:22px;color:#6b7f94;border-top:1px solid #e6eef5;">
+            <div style="text-align:center;">
+                This is an automated message from the Locker system. Please do not reply to this email.
+            </div>
+
+            <div style="text-align:center;font-size:12px;color:#999999;padding-top:8px;">
+                © 2026 Locker. All rights reserved.
+            </div>
+        </td>
+    </tr>
+
+</table>
+
+<!--[if mso]>
+</td>
+</tr>
+</table>
+<![endif]-->
+
+</td>
+</tr>
+</table>
+
+</body>
+</html> `;
                     try {
                         console.log("email", email);
                         await sendSimpleEmailAsync(email, subject, html);
@@ -196,16 +291,117 @@ Session Type: ${sessionType}</p>
             if (trainerSetting) {
                 const daysBefore = Number(trainerSetting.days_before);
                 const subject = `Reminder: training session is in ${daysBefore} day${daysBefore === 1 ? "" : "s"} 🔒`;
-                const html = `
-<p>Hi ${trainerName},</p>
-<p>This is a friendly reminder that you have a training session scheduled in ${daysBefore} day${daysBefore === 1 ? "" : "s"}.</p>
-<p><strong>Session Details:</strong><br/>
-Learner: ${learners.map((l) => `${l.first_name ?? ""} ${l.last_name ?? ""}`.trim() || "Learner").join(", ")}<br/>
-Date: ${dateText}<br/>
-Time: ${startTimeText} - ${endTimeText}<br/>
-Session Type: ${sessionType}</p>
-<p>Best regards,<br/>The Locker Team</p>
-                `.trim();
+                const html = `<!DOCTYPE html>
+                <html lang="en">
+                <head>
+                <meta charset="UTF-8">
+                <meta http-equiv="X-UA-Compatible" content="IE=edge">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Trainer Reminder</title>
+                </head>
+                
+                <body style="margin:0;padding:0;background-color:#eef6fc;">
+                
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eef6fc;">
+                <tr>
+                <td align="center" style="padding:28px 10px;">
+                
+                <!--[if mso]>
+                <table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                <td>
+                <![endif]-->
+                
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;background-color:#ffffff;">
+                
+                <!-- Header -->
+                <tr>
+                <td align="center" bgcolor="#2980b9" style="padding:36px 24px;">
+                
+                <img
+                src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg"
+                alt="Locker Logo"
+                width="140"
+                border="0"
+                style="display:block;width:140px;max-width:140px;height:auto;"
+                >
+                
+                <div style="font-family:Arial, Helvetica, sans-serif;font-size:24px;line-height:32px;font-weight:bold;color:#ffffff;padding-top:14px;">
+                ⏰ Trainer Reminder
+                </div>
+                
+                </td>
+                </tr>
+                
+                <!-- Content -->
+                <tr>
+                <td style="padding:32px 28px;font-family:Arial, Helvetica, sans-serif;">
+                
+                <div style="font-size:16px;line-height:30px;color:#33475b;margin-bottom:20px;">
+                Hello ${trainerName},
+                </div>
+                
+                <div style="font-size:15px;line-height:28px;color:#546e8e;margin-bottom:20px;">
+                This is a friendly reminder that you have a training session scheduled in ${daysBefore} day${daysBefore === 1 ? "" : "s"}.
+                </div>
+                
+                <!-- Session Details -->
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eff5fb;margin-top:20px;">
+                <tr>
+                <td width="4" bgcolor="#2980b9" style="font-size:0;line-height:0;">&nbsp;</td>
+                <td style="padding:18px 20px;font-family:Arial, Helvetica, sans-serif;font-size:14px;line-height:24px;color:#3b5978;">
+                <strong>Learner:</strong>
+                ${learners.map((l) =>
+                    `${l.first_name ?? ""} ${l.last_name ?? ""}`.trim() || "Learner"
+                ).join(", ")}
+                <br>
+                
+                <strong>Date:</strong> ${dateText}<br>
+                <strong>Time:</strong> ${startTimeText} - ${endTimeText}<br>
+                <strong>Session Type:</strong> ${sessionType}
+                </td>
+                </tr>
+                </table>
+                
+                <div style="font-size:15px;line-height:28px;color:#33475b;margin-top:24px;">
+                Please ensure you are prepared and ready for the session.
+                </div>
+                
+                <div style="font-size:15px;line-height:28px;color:#33475b;margin-top:24px;">
+                Best regards,<br>
+                The Locker Team
+                </div>
+                
+                </td>
+                </tr>
+                
+                <!-- Footer -->
+                <tr>
+                <td style="padding:24px 28px 30px;background-color:#ffffff;font-family:Arial, Helvetica, sans-serif;font-size:13px;line-height:22px;color:#6b7f94;border-top:1px solid #e6eef5;">
+                <div style="text-align:center;">
+                This is an automated message from the Locker system. Please do not reply to this email.
+                </div>
+                
+                <div style="text-align:center;font-size:12px;color:#999999;padding-top:8px;">
+                © 2026 Locker. All rights reserved.
+                </div>
+                </td>
+                </tr>
+                
+                </table>
+                
+                <!--[if mso]>
+                </td>
+                </tr>
+                </table>
+                <![endif]-->
+                
+                </td>
+                </tr>
+                </table>
+                
+                </body>
+                </html>`;    
                 try {
                     console.log("trainerEmail", trainerEmail);
                     await sendSimpleEmailAsync(trainerEmail, subject, html);
@@ -287,14 +483,112 @@ export async function runBilReturnReminders(): Promise<void> {
         const trainerUser = uc.trainer_id as { first_name?: string; last_name?: string; user_name?: string } | null | undefined;
         const trainerName =
             `${trainerUser?.first_name ?? ""} ${trainerUser?.last_name ?? ""}`.trim() || trainerUser?.user_name || "—";
-        const html = `
-<p>Hello ${name},</p>
-<p>This is a reminder that your expected return date from Break in Learning is <strong>${returnLabel}</strong>.</p>
-<p>Course Name: ${courseName}</p>
-<p>Trainer Name: ${trainerName}</p>
-<p>Return Date: ${returnLabel}</p>
-<p>Best regards,<br/>The Locker Team</p>
-`.trim();
+        const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Break in Learning Return Reminder</title>
+</head>
+
+<body style="margin:0;padding:0;background-color:#eef6fc;">
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eef6fc;">
+<tr>
+<td align="center" style="padding:28px 10px;">
+
+<!--[if mso]>
+<table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0">
+<tr>
+<td>
+<![endif]-->
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;background-color:#ffffff;">
+
+    <!-- Header -->
+    <tr>
+        <td align="center" bgcolor="#2980b9" style="padding:36px 24px;">
+
+            <img
+                src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg"
+                alt="Locker Logo"
+                width="140"
+                border="0"
+                style="display:block;width:140px;max-width:140px;height:auto;"
+            >
+
+            <div style="font-family:Arial, Helvetica, sans-serif;font-size:24px;line-height:32px;font-weight:bold;color:#ffffff;padding-top:14px;">
+                📌 Break in Learning Return Reminder
+            </div>
+
+        </td>
+    </tr>
+
+    <!-- Content -->
+    <tr>
+        <td style="padding:32px 28px;font-family:Arial, Helvetica, sans-serif;">
+
+            <div style="font-size:16px;line-height:30px;color:#33475b;margin-bottom:20px;">
+                Hello ${name},
+            </div>
+
+            <div style="font-size:15px;line-height:28px;color:#546e8e;margin-bottom:20px;">
+                This is a reminder that your expected return date from Break in Learning is
+                <strong>${returnLabel}</strong>.
+            </div>
+
+            <!-- Return Details -->
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eff5fb;margin-top:20px;">
+                <tr>
+                    <td width="4" bgcolor="#2980b9" style="font-size:0;line-height:0;">&nbsp;</td>
+                    <td style="padding:18px 20px;font-family:Arial, Helvetica, sans-serif;font-size:14px;line-height:24px;color:#3b5978;">
+                        <strong>Course Name:</strong> ${courseName}<br>
+                        <strong>Trainer Name:</strong> ${trainerName}<br>
+                        <strong>Return Date:</strong> ${returnLabel}
+                    </td>
+                </tr>
+            </table>
+
+            <div style="font-size:15px;line-height:28px;color:#33475b;margin-top:24px;">
+                Please ensure all necessary arrangements are in place for the learner's return and continuation of training.
+            </div>
+
+            <div style="font-size:15px;line-height:28px;color:#33475b;margin-top:24px;">
+                Best regards,<br>
+                The Locker Team
+            </div>
+
+        </td>
+    </tr>
+
+    <!-- Footer -->
+    <tr>
+        <td style="padding:24px 28px 30px;background-color:#ffffff;font-family:Arial, Helvetica, sans-serif;font-size:13px;line-height:22px;color:#6b7f94;border-top:1px solid #e6eef5;">
+            <div style="text-align:center;">
+                This is an automated message from the Locker system. Please do not reply to this email.
+            </div>
+
+            <div style="text-align:center;font-size:12px;color:#999999;padding-top:8px;">
+                © 2026 Locker. All rights reserved.
+            </div>
+        </td>
+    </tr>
+
+</table>
+
+<!--[if mso]>
+</td>
+</tr>
+</table>
+<![endif]-->
+
+</td>
+</tr>
+</table>
+
+</body>
+</html>`;
 
         try {
             console.log("email", email);

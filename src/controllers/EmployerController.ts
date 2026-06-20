@@ -142,7 +142,7 @@ class EmployerController {
             employer = await employerRepository.save(employer);
 
 
-            const sendResult = await sendPasswordByEmail(email, password)
+            const sendResult = await sendPasswordByEmail(employer_name, email, password)
             if (!sendResult) {
                 return res.status(500).json({
                     message: "Failed to send the email",
@@ -388,7 +388,7 @@ class EmployerController {
                     employer.user = user;
                     employer = await employerRepository.save(employer);
 
-                    const sent = await sendPasswordByEmail(email, plainPassword);
+                    const sent = await sendPasswordByEmail(employer_name, email, plainPassword);
                     if (!sent) {
                         errors.push({ index: i, email, error: "Employer created but failed to send email", employer_id: employer.employer_id, user_id: user.user_id });
                     }

@@ -307,7 +307,7 @@ class TimeLogController {
 
                 totalMinutes += logMinutes;
 
-                const activityDate = new Date(log.created_at);
+                const activityDate = new Date(log.activity_date);
                 if (activityDate >= startOfWeek) {
                     weeklyMinutes += logMinutes;
                 }

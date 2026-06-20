@@ -263,7 +263,7 @@ class UserController {
                 data: users
             })
 
-            sendPasswordByEmail(users.email, req.body.confirmPassword)
+            sendPasswordByEmail(user_name, users.email, req.body.confirmPassword)
 
         } catch (error) {
             return res.status(500).json({
