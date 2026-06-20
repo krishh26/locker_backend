@@ -1,115 +1,128 @@
 import { SendEmailTemplet, SendCalendarInvite } from "./nodemailer";
 const ical = require('ical-toolkit');
 
-export const sendPasswordByEmail = async (email: string, password: any): Promise<boolean> => {
+export const sendPasswordByEmail = async (userName: string, email: string, password: any): Promise<boolean> => {
     try {
         const html = `<!DOCTYPE html>
-        <html lang="en">
-        <head>
-        <meta charset="UTF-8">
-        <meta http-equiv="X-UA-Compatible" content="IE=edge">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Welcome to Locker</title>
-        </head>
-        <body style="margin:0;padding:0;background-color:#f5f5f5;">
-        
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f5f5f5;">
-        <tr>
-        <td align="center" style="padding:20px 10px;">
-        
-        
-        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0">
-        <tr>
-        <td>
-        
-        
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:600px;background-color:#ffffff;">
-        
-        
-        <tr>
-        <td align="center" bgcolor="#667eea" style="padding:30px 20px;">
-        <img
-        src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg"
-        alt="Locker Logo"
-        width="140"
-        border="0"
-        style="display:block;width:140px;max-width:140px;height:auto;"
-        >
-        
-        <div style="font-family:Arial, Helvetica, sans-serif;font-size:24px;line-height:32px;font-weight:bold;color:#ffffff;padding-top:15px;">
-        🎉 Welcome to Locker
-        </div>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Welcome to Locker</title>
+</head>
+
+<body style="margin:0;padding:0;background-color:#eef6fc;">
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eef6fc;">
+<tr>
+<td align="center" style="padding:28px 10px;">
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;background-color:#ffffff;">
+
+    <!-- Header -->
+    <tr>
+        <td align="center" bgcolor="#2980b9" style="padding:36px 24px;">
+
+            <img
+                src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg"
+                alt="Locker Logo"
+                width="140"
+                border="0"
+                style="display:block;width:140px;max-width:140px;height:auto;"
+            >
+
+            <div style="font-family:Arial, Helvetica, sans-serif;font-size:24px;line-height:32px;font-weight:bold;color:#ffffff;padding-top:14px;">
+                🎉 Welcome to Locker
+            </div>
+
         </td>
-        </tr>
-        
-        <!-- Content -->
-        <tr>
-        <td style="padding:30px;font-family:Arial, Helvetica, sans-serif;color:#555555;font-size:14px;line-height:24px;">
-        
-        <p style="margin:0 0 15px 0;">
-        Congratulations! Your account has been successfully created.
-        </p>
-        
-        <p style="margin:0 0 20px 0;">
-        Your login credentials are ready. You can now access the Locker platform using the password below:
-        </p>
-        
-        <!-- Password Box -->
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f0f4ff;margin:20px 0;">
-        <tr>
-        <td width="4" bgcolor="#667eea" style="font-size:0;line-height:0;">&nbsp;</td>
-        <td align="center" style="padding:20px;">
-        
-        <div style="font-family:Arial, Helvetica, sans-serif;font-size:13px;font-weight:bold;color:#666666;margin-bottom:10px;">
-        Your Temporary Password
-        </div>
-        
-        <div style="font-family:'Courier New', Courier, monospace;font-size:24px;font-weight:bold;color:#667eea;letter-spacing:2px;">
-        ${password}
-        </div>
-        
+    </tr>
+
+    <!-- Content -->
+    <tr>
+        <td style="padding:32px 28px;font-family:Arial, Helvetica, sans-serif;">
+
+            <div style="font-size:16px;line-height:30px;color:#33475b;margin-bottom:20px;">
+                Hello ${userName},
+            </div>
+
+            <div style="font-size:15px;line-height:28px;color:#546e8e;margin-bottom:20px;">
+                Welcome to Locker! Your account has been successfully created and you now have access to your training dashboard, resources and communication tools.
+            </div>
+
+            <!-- Login Details -->
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eff5fb;margin-top:20px;">
+                <tr>
+                    <td width="4" bgcolor="#2980b9" style="font-size:0;line-height:0;">&nbsp;</td>
+                    <td style="padding:18px 20px;font-family:Arial, Helvetica, sans-serif;font-size:14px;line-height:24px;color:#3b5978;">
+                        <strong>Login URL:</strong> ${process.env.FRONTEND}<br>
+                        <strong>Username:</strong> ${userName}<br>
+                        <strong>Temporary Password:</strong> ${password}
+                    </td>
+                </tr>
+            </table>
+
+            <!-- Security Notice -->
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eff5fb;margin-top:24px;">
+                <tr>
+                    <td width="4" bgcolor="#2980b9" style="font-size:0;line-height:0;">&nbsp;</td>
+                    <td style="padding:18px 20px;font-family:Arial, Helvetica, sans-serif;font-size:14px;line-height:24px;color:#3b5978;">
+                        <strong>Important Security Step</strong><br><br>
+                        You will be prompted to create a new password the first time you log in. Please keep your login details secure and do not share them with anyone.
+                    </td>
+                </tr>
+            </table>
+
+            <!-- Features -->
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eff5fb;margin-top:24px;">
+                <tr>
+                    <td width="4" bgcolor="#2980b9" style="font-size:0;line-height:0;">&nbsp;</td>
+                    <td style="padding:18px 20px;font-family:Arial, Helvetica, sans-serif;font-size:14px;line-height:24px;color:#3b5978;">
+                        <strong>What can you do in Locker?</strong><br><br>
+
+                        📅 View & Book Sessions<br>
+                        📂 Access Learning Resources<br>
+                        📤 Upload Evidence & Coursework<br>
+                        💬 Receive Feedback & Updates<br>
+                        📊 Track Your Progress
+                </td>
+                </tr>
+            </table>
+
+            <div style="font-size:15px;line-height:28px;color:#33475b;margin-top:24px;">
+                We're excited to have you on board and wish you success on your learning journey.
+            </div>
+
+            <div style="font-size:15px;line-height:28px;color:#33475b;margin-top:24px;">
+                Best regards,<br>
+                The Locker Team
+            </div>
+
         </td>
-        </tr>
-        </table>
-        
-        <p style="margin:20px 0 10px 0;color:#e74c3c;font-weight:bold;">
-        
-        </p>
-        
-        <p style="margin:0;">
-        Please keep this password secure and change it after your first login for security purposes.
-        </p>
-        
+    </tr>
+
+    <!-- Footer -->
+    <tr>
+        <td style="padding:24px 28px 30px;background-color:#ffffff;font-family:Arial, Helvetica, sans-serif;font-size:13px;line-height:22px;color:#6b7f94;border-top:1px solid #e6eef5;">
+            <div style="text-align:center;">
+                This is an automated message from the Locker system. Please do not reply to this email.
+            </div>
+
+            <div style="text-align:center;font-size:12px;color:#999999;padding-top:8px;">
+                © 2026 Locker. All rights reserved.
+            </div>
         </td>
-        </tr>
-        
-        <!-- Footer -->
-        <tr>
-        <td style="background-color:#f8f9fa;padding:20px;border-top:1px solid #e0e0e0;text-align:center;font-family:Arial, Helvetica, sans-serif;font-size:12px;line-height:20px;color:#888888;">
-        <div>
-        This is an automated message from the Locker system.
-        </div>
-        
-        <div style="padding-top:10px;">
-        © 2026 Locker. All rights reserved.
-        </div>
-        </td>
-        </tr>
-        
-        </table>
-        
-        <!--[if mso]>
-        </td>
-        </tr>
-        </table>
-        <![endif]-->
-        
-        </td>
-        </tr>
-        </table>
-        
-        </body>
-        </html>`;
+    </tr>
+
+</table>
+
+</td>
+</tr>
+</table>
+
+</body>
+</html>`;
 
         const responce = await SendEmailTemplet(email, "Welcome to Locker", null, html)
         return true

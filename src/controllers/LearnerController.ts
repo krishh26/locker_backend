@@ -120,7 +120,7 @@ class LearnerController {
                 })
             );
 
-            const sendResult = await sendPasswordByEmail(email, password)
+            const sendResult = await sendPasswordByEmail(user_name, email, password)
             if (!sendResult) {
                 return res.status(500).json({
                     message: "Failed to send the email",
@@ -226,7 +226,7 @@ class LearnerController {
                     }
 
                     // Send password email
-                    const sendResult = await sendPasswordByEmail(email, password);
+                    const sendResult = await sendPasswordByEmail(user_name, email, password);
                     if (!sendResult) {
                         errors.push({
                             index: i,
@@ -1842,7 +1842,7 @@ class LearnerController {
                     );
 
                     // Parity with single-create flow: send generated password by email
-                    const sendResult = await sendPasswordByEmail(normalizedEmail, password);
+                    const sendResult = await sendPasswordByEmail(user_name, normalizedEmail, password);
                     if (!sendResult) {
                         errors.push({
                             index: i,

@@ -195,33 +195,26 @@ export async function getOTJSummary(
         qb.andWhere('log.verified = true');
     }
 
-    // filter by chosen course
-    let chosenCourseIdNum: number | null = null;
-    try {
-        chosenCourseIdNum = (chosenUC.course as any)?.course_id
-            ? Number((chosenUC.course as any).course_id)
-            : null;
-    } catch { chosenCourseIdNum = null; }
-
-    if (chosenCourseIdNum) {
-        qb.andWhere('course.course_id = :cid', { cid: chosenCourseIdNum });
-    } else {
-        warnings.push('Could not determine course_id; logs will not be course-filtered.');
+    if (courseId) {
+        qb.andWhere('course.course_id = :cid', {
+            cid: Number(courseId)
+        });
     }
-
     const logs = await qb.getMany();
 
     // filter logs by date and exclude_from_otj
     const validLogs = logs.filter(l => {
         if (!l.activity_date) return false;
-        const ad = new Date(l.activity_date);
 
-        if (startDate && endDate) {
-            if (ad < startDate || ad > endDate) return false;
+        if (l.course_id && (l.course_id as any).exclude_from_otj) {
+            return false;
         }
-
-        if (l.course_id && (l.course_id as any).exclude_from_otj) return false;
-
+        console.log(
+            logs.map(l => ({
+                id: l.id,
+                courseId: (l.course_id as any)?.course_id
+            }))
+        );
         return true;
     });
 

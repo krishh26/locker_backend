@@ -45,36 +45,130 @@ class LearnerPlanController {
                 if (!to) return;
                 const learnerName = `${learner?.first_name ?? ''} ${learner?.last_name ?? ''}`.trim() || 'Learner';
 
-                const subject = isUpdate
-                    ? 'Updated: Your training session is ready in Locker 🔒'
-                    : 'Confirmed: Your training session is ready in Locker 🔒';
+                const subject = isUpdate ? '✏️ Training Session Updated is ready in Locker' : '📅 Training Session Scheduled is ready in Locker';
 
-                const html = isUpdate
+                const html = `<!DOCTYPE html>
+                <html lang="en">
+                <head>
+                ...
+                </head>
+                
+                <body style="margin:0;padding:0;background-color:#eef6fc;">
+                
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eef6fc;">
+                <tr>
+                <td align="center" style="padding:28px 10px;">
+                
+                <!--[if mso]>
+                <table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                <td>
+                <![endif]-->
+                
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;background-color:#ffffff;">
+                
+                <tr>
+                <td align="center" bgcolor="#2980b9" style="padding:36px 24px;">
+                
+                <img
+                src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg"
+                alt="Locker Logo"
+                width="140"
+                border="0"
+                style="display:block;width:140px;max-width:140px;height:auto;"
+                >
+                
+                <div style="font-family:Arial, Helvetica, sans-serif;font-size:24px;line-height:32px;font-weight:bold;color:#ffffff;padding-top:14px;">
+                ${isUpdate ? '✏️ Training Session Updated' : '📅 Training Session Scheduled'}
+                </div>
+                
+                </td>
+                </tr>
+                
+                <tr>
+                <td style="padding:32px 28px;font-family:Arial, Helvetica, sans-serif;">
+                
+                <div style="font-size:16px;line-height:30px;color:#33475b;margin-bottom:20px;">
+                Hello ${learnerName},
+                </div>
+                
+                <div style="font-size:15px;line-height:28px;color:#546e8e;margin-bottom:20px;">
+                ${isUpdate
+                    ? 'Please note that your upcoming training session has been updated. Your Locker dashboard has been refreshed with the latest details below.'
+                    : 'Great news! A new training session has been scheduled and added to your Locker dashboard. Here are the details for your upcoming session.'
+                }
+                </div>
+                
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eff5fb;margin-top:20px;">
+                <tr>
+                <td width="4" bgcolor="#2980b9" style="font-size:0;line-height:0;">&nbsp;</td>
+                <td style="padding:18px 20px;font-family:Arial, Helvetica, sans-serif;font-size:14px;line-height:24px;color:#3b5978;">
+                <strong>Trainer:</strong> ${trainerName}<br>
+                <strong>${isUpdate ? 'Updated Date' : 'Date'}:</strong> ${dateText}<br>
+                <strong>${isUpdate ? 'Updated Time' : 'Time'}:</strong> ${startTimeText} - ${endTimeText}<br>
+                <strong>Session Type:</strong> ${sessionType}
+                </td>
+                </tr>
+                </table>
+                
+                ${isUpdate
                     ? `
-<p>Hi ${learnerName},</p>
-<p>Please note that your upcoming training session has been updated. Your Locker dashboard has been refreshed with the following new details:</p>
-<p><strong>Session Overview</strong><br/>
-Trainer: ${trainerName}<br/>
-New Date: ${dateText}<br/>
-New Time: ${startTimeText} - ${endTimeText}<br/>
-Session Type: ${sessionType}</p>
-<p><strong>What do I need to do?</strong> Please check your calendar to ensure you’re still available. You can view the updated details directly in your Locker.</p>
-<p>Best regards,<br/>The Locker Team</p>
-                    `.trim()
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eff5fb;margin-top:24px;">
+                    <tr>
+                    <td width="4" bgcolor="#2980b9" style="font-size:0;line-height:0;">&nbsp;</td>
+                    <td style="padding:18px 20px;font-family:Arial, Helvetica, sans-serif;font-size:14px;line-height:24px;color:#3b5978;">
+                    <strong>What do I need to do?</strong><br><br>
+                    Please check your calendar to ensure you are still available. You can view the updated details directly in Locker.
+                    </td>
+                    </tr>
+                    </table>
+                    `
                     : `
-<p>Hi ${learnerName},</p>
-<p>Great news! A new training session has been scheduled and added to your Locker dashboard. Here are the details for your upcoming session:</p>
-<p><strong>Session Overview</strong><br/>
-Trainer: ${trainerName}<br/>
-Date: ${dateText}<br/>
-Time: ${startTimeText} - ${endTimeText}<br/>
-Session Type: ${sessionType}</p>
-<p><strong>Next Steps:</strong> Please log in to your Locker account to view any pre-session materials.<br/>
-If you have any questions or need to reschedule, please contact your trainer directly.</p>
-<p>See you there!</p>
-<p>Best regards,<br/>The Locker Team</p>
-                    `.trim();
-
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eff5fb;margin-top:24px;">
+                    <tr>
+                    <td width="4" bgcolor="#2980b9" style="font-size:0;line-height:0;">&nbsp;</td>
+                    <td style="padding:18px 20px;font-family:Arial, Helvetica, sans-serif;font-size:14px;line-height:24px;color:#3b5978;">
+                    <strong>Next Steps</strong><br><br>
+                    Please log in to your Locker account to view any pre-session materials.
+                    If you have any questions or need to reschedule, please contact your trainer directly.
+                    </td>
+                    </tr>
+                    </table>
+                    `
+                }
+                
+                <div style="font-size:15px;line-height:28px;color:#33475b;margin-top:24px;">
+                ${isUpdate ? 'Thank you for keeping your schedule up to date.' : 'See you there!'}
+                </div>
+                
+                <div style="font-size:15px;line-height:28px;color:#33475b;margin-top:24px;">
+                Best regards,<br>
+                The Locker Team
+                </div>
+                
+                </td>
+                </tr>
+                
+                <tr>
+                <td style="padding:24px 28px 30px;background-color:#ffffff;font-family:Arial, Helvetica, sans-serif;font-size:13px;line-height:22px;color:#6b7f94;border-top:1px solid #e6eef5;">
+                <div style="text-align:center;">
+                This is an automated message from the Locker system. Please do not reply to this email.
+                </div>
+                
+                <div style="text-align:center;font-size:12px;color:#999999;padding-top:8px;">
+                © 2026 Locker. All rights reserved.
+                </div>
+                </td>
+                </tr>
+                
+                </table>
+                
+                </td>
+                </tr>
+                </table>
+                
+                </body>
+                </html>`;    
                 await sendSimpleEmailAsync(to, subject, html);
             })
         );
@@ -98,15 +192,113 @@ If you have any questions or need to reschedule, please contact your trainer dir
                     || 'Learner';
                 const subject = `New Session Booked: ${learnerName} in Locker 🔒`;
                 const html = `
-<p>Hi ${trainerName},</p>
-<p>A new training session has been successfully scheduled and added to your Locker calendar. Here are the details for your upcoming appointment:</p>
-<p><strong>Session Details</strong><br/>
-Learner: ${learnerName}<br/>
-Date: ${dateText}<br/>
-Time: ${startTimeText} - ${endTimeText}<br/>
-Session Type: ${sessionType}</p>
-<p>Happy training!</p>
-<p>Best regards,<br/>The Locker Team</p>
+                <!DOCTYPE html>
+                <html lang="en">
+                <head>
+                <meta charset="UTF-8">
+                <meta http-equiv="X-UA-Compatible" content="IE=edge">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Training Session Scheduled</title>
+                </head>
+                
+                <body style="margin:0;padding:0;background-color:#eef6fc;">
+                
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eef6fc;">
+                <tr>
+                <td align="center" style="padding:28px 10px;">
+                
+                <!--[if mso]>
+                <table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                <td>
+                <![endif]-->
+                
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;background-color:#ffffff;">
+                
+                <!-- Header -->
+                <tr>
+                <td align="center" bgcolor="#2980b9" style="padding:36px 24px;">
+                
+                <img
+                src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg"
+                alt="Locker Logo"
+                width="140"
+                border="0"
+                style="display:block;width:140px;max-width:140px;height:auto;"
+                >
+                
+                <div style="font-family:Arial, Helvetica, sans-serif;font-size:24px;line-height:32px;font-weight:bold;color:#ffffff;padding-top:14px;">
+                📅 Training Session Scheduled
+                </div>
+                
+                </td>
+                </tr>
+                <!-- Content -->
+                <tr>
+                
+                <td style="padding:32px 28px;font-family:Arial, Helvetica, sans-serif;">
+                
+                
+                <div style="font-size:16px;line-height:30px;color:#33475b;margin-bottom:20px;">
+                Hello ${trainerName},
+                </div>
+                
+                <div style="font-size:15px;line-height:28px;color:#546e8e;margin-bottom:20px;">
+                A new training session has been successfully scheduled and added to your Locker calendar. Here are the details for your upcoming appointment:
+                </div>
+                
+                <!-- Session Details -->
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eff5fb;margin-top:20px;">
+                <tr>
+                <td width="4" bgcolor="#2980b9" style="font-size:0;line-height:0;">&nbsp;</td>
+                <td style="padding:18px 20px;font-family:Arial, Helvetica, sans-serif;font-size:14px;line-height:24px;color:#3b5978;">
+                <strong>Learner:</strong> ${learnerName}<br>
+                <strong>Date:</strong> ${dateText}<br>
+                <strong>Time:</strong> ${startTimeText} - ${endTimeText}<br>
+                <strong>Session Type:</strong> ${sessionType}
+                </td>
+                </tr>
+                </table>
+                
+                <div style="font-size:15px;line-height:28px;color:#33475b;margin-top:24px;">
+                Happy training!
+                </div>
+                
+                <div style="font-size:15px;line-height:28px;color:#33475b;margin-top:24px;">
+                Best regards,<br>
+                The Locker Team
+                </div>
+                
+                </td>
+                </tr>
+                
+                <!-- Footer -->
+                <tr>
+                <td style="padding:24px 28px 30px;background-color:#ffffff;font-family:Arial, Helvetica, sans-serif;font-size:13px;line-height:22px;color:#6b7f94;border-top:1px solid #e6eef5;">
+                <div style="text-align:center;">
+                This is an automated message from the Locker system. Please do not reply to this email.
+                </div>
+                
+                <div style="text-align:center;font-size:12px;color:#999999;padding-top:8px;">
+                © 2026 Locker. All rights reserved.
+                </div>
+                </td>
+                </tr>
+                
+                </table>
+                
+                <!--[if mso]>
+                </td>
+                </tr>
+                </table>
+                <![endif]-->
+                
+                </td>
+                </tr>
+                </table>
+                
+                </body>
+                </html>
                 `.trim();
                 await sendSimpleEmailAsync(trainerEmail, subject, html);
             })

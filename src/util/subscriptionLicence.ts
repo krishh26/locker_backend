@@ -272,21 +272,121 @@ export async function notifyMasterAdminsIfLicenceExceeded(
         0,
         (licence.used_licenses ?? 0) - (licence.max_allowed_licenses ?? 0)
     );
-    const html = `
-<p>Hello Master Admin,</p>
-<p>An organisation has exceeded its licence allowance.</p>
-<p><strong>Organisation details:</strong><br/>
-Organisation ID: ${organisationId}<br/>
-Organisation Name: ${organisation?.name ?? "N/A"}<br/>
-Organisation Email: ${organisation?.email ?? "N/A"}</p>
-<p><strong>Licence details:</strong><br/>
-Total Licences: ${licence.total_licenses ?? "N/A"}<br/>
-Used Licences: ${licence.used_licenses}<br/>
-Tolerance (%): ${licence.tolerance_percentage ?? "N/A"}<br/>
-Max Allowed Licences: ${licence.max_allowed_licenses ?? "N/A"}<br/>
-Exceeded By: ${overBy}</p>
-<p>Please review and update the subscription if required.</p>
-`.trim();
+    const html = `<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Licence Limit Exceeded</title>
+</head>
+
+<body style="margin:0;padding:0;background-color:#eef6fc;">
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eef6fc;">
+        <tr>
+            <td align="center" style="padding:28px 10px;">
+
+                <!--[if mso]>
+<table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0">
+<tr>
+<td>
+<![endif]-->
+
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;background-color:#ffffff;">
+
+                    <!-- Header -->
+                    <tr>
+                        <td align="center" bgcolor="#2980b9" style="padding:36px 24px;">
+
+                            <img src="https://lockermedia.s3.amazonaws.com/undefined/1770038121918_locker.jpeg" alt="Locker Logo" width="140" border="0" style="display:block;width:140px;max-width:140px;height:auto;">
+
+                            <div style="font-family:Arial, Helvetica, sans-serif;font-size:24px;line-height:32px;font-weight:bold;color:#ffffff;padding-top:14px;">
+                                ⚠️ Licence Limit Exceeded
+                            </div>
+
+                        </td>
+                    </tr>
+
+                    <!-- Content -->
+                    <tr>
+                        <td style="padding:32px 28px;font-family:Arial, Helvetica, sans-serif;">
+
+                            <div style="font-size:16px;line-height:30px;color:#33475b;margin-bottom:20px;">
+                                Hello Master Admin,
+                            </div>
+
+                            <div style="font-size:15px;line-height:28px;color:#546e8e;margin-bottom:20px;">
+                                An organisation has exceeded its allocated licence allowance and requires review.
+                            </div>
+
+                            <!-- Organisation Details -->
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eff5fb;margin-top:20px;">
+                                <tr>
+                                    <td width="4" bgcolor="#2980b9" style="font-size:0;line-height:0;">&nbsp;</td>
+                                    <td style="padding:18px 20px;font-family:Arial, Helvetica, sans-serif;font-size:14px;line-height:24px;color:#3b5978;">
+                                        <strong>Organisation ID:</strong> ${organisationId}<br>
+                                        <strong>Organisation Name:</strong> ${organisation?.name ?? "N/A"}<br>
+                                        <strong>Organisation Email:</strong> ${organisation?.email ?? "N/A"}
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- Licence Details -->
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eff5fb;margin-top:24px;">
+                                <tr>
+                                    <td width="4" bgcolor="#2980b9" style="font-size:0;line-height:0;">&nbsp;</td>
+                                    <td style="padding:18px 20px;font-family:Arial, Helvetica, sans-serif;font-size:14px;line-height:24px;color:#3b5978;">
+                                        <strong>Total Licences:</strong> ${licence.total_licenses ?? "N/A"}<br>
+                                        <strong>Used Licences:</strong> ${licence.used_licenses}<br>
+                                        <strong>Tolerance (%):</strong> ${licence.tolerance_percentage ?? "N/A"}<br>
+                                        <strong>Max Allowed Licences:</strong> ${licence.max_allowed_licenses ?? "N/A"}<br>
+                                        <strong>Exceeded By:</strong> ${overBy}
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <div style="font-size:15px;line-height:28px;color:#33475b;margin-top:24px;">
+                                Please review the organisation's subscription and update the licence allocation if required.
+                            </div>
+
+                            <div style="font-size:15px;line-height:28px;color:#33475b;margin-top:24px;">
+                                Best regards,<br>
+                                Locker System
+                            </div>
+
+                        </td>
+                    </tr>
+
+                    <!-- Footer -->
+                    <tr>
+                        <td style="padding:24px 28px 30px;background-color:#ffffff;font-family:Arial, Helvetica, sans-serif;font-size:13px;line-height:22px;color:#6b7f94;border-top:1px solid #e6eef5;">
+                            <div style="text-align:center;">
+                                This is an automated message from the Locker system. Please do not reply to this email.
+                            </div>
+
+                            <div style="text-align:center;font-size:12px;color:#999999;padding-top:8px;">
+                                © 2026 Locker. All rights reserved.
+                            </div>
+                        </td>
+                    </tr>
+
+                </table>
+
+                <!--[if mso]>
+</td>
+</tr>
+</table>
+<![endif]-->
+
+            </td>
+        </tr>
+    </table>
+
+</body>
+
+</html>`;
 
     await Promise.all(
         recipients.map((email) =>
