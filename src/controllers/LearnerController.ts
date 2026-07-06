@@ -28,6 +28,7 @@ import { getAccessibleOrganisationIds, getAccessibleCentreAdminUserIds, applyLea
 import { getOrganisationCourseExclusionMap } from "../util/organisationCourseExclusion";
 import { Subscription } from "../entity/Subscription.entity";
 import { countLicenceEligibleLearners, notifyMasterAdminsIfLicenceExceeded } from "../util/subscriptionLicence";
+import { RiskRating } from "../entity/RiskRating.entity";
 class LearnerController {
 
     public async CreateLearner(req: CustomRequest, res: Response) {
@@ -1968,8 +1969,7 @@ class LearnerController {
             const SessionLearnerActionRepository = AppDataSource.getRepository(SessionLearnerAction);
             const courseRepository = AppDataSource.getRepository(Course);
             const subscriptionRepository = AppDataSource.getRepository(Subscription);
-
-            // Get accessible org/centre IDs once
+            const riskRatingRepository = AppDataSource.getRepository(RiskRating);
             const scopeContext = getScopeContext(req);
             const accessibleOrgIds = req.user ? await getAccessibleOrganisationIds(req.user, scopeContext) : null;
             const centreAdminUserIds = req.user ? await getAccessibleCentreAdminUserIds(req.user) : null;
@@ -2423,7 +2423,6 @@ class LearnerController {
                         .leftJoinAndSelect("learner_id.user_id", "user_id")
                         .leftJoin("user_course.trainer_id", "trainer")
                         .where("user_course.end_date < :currentDate", { currentDate: new Date() })
-                        .distinctOn(["learner_id.learner_id"]);
                     
                     applyOrgFilterOnUserAlias(qb, "user_id");
                     applyCentreUserFilter(qb, "trainer.user_id");
@@ -2854,6 +2853,44 @@ class LearnerController {
                         data: Number(totalLicensesRaw?.total_licenses ?? 0),
                     });
                 }
+                else if (type === "risk_ratings") {
+                    if (hasNoAccess) {
+                        return res.status(200).json({
+                            message: "Risk ratings fetched successfully",
+                            status: true,
+                            data: [],
+                        });
+                    }
+
+                    const riskRatingRepository = AppDataSource.getRepository(RiskRating);
+
+                    const qb = riskRatingRepository
+                        .createQueryBuilder("risk_rating")
+                        .leftJoinAndSelect("risk_rating.trainer", "trainer")
+                        .where("risk_rating.is_active = :is_active", { is_active: true });
+
+                    if (accessibleOrgIds !== null && accessibleOrgIds.length > 0) {
+                        qb.leftJoin("trainer.userOrganisations", "uo")
+                            .andWhere("uo.organisation_id IN (:...orgIds)", {
+                                orgIds: accessibleOrgIds,
+                            });
+                    }
+
+                    if (centreAdminUserIds !== null && centreAdminUserIds.length > 0) {
+                        qb.andWhere(
+                            "trainer.user_id IN (:...centreAdminUserIds)",
+                            { centreAdminUserIds }
+                        );
+                    }
+
+                    const risk_ratings = await qb.getMany();
+
+                    return res.status(200).json({
+                        message: "Risk ratings fetched successfully",
+                        status: true,
+                        data: risk_ratings,
+                    });
+                }
             }
 
 
@@ -3128,6 +3165,18 @@ class LearnerController {
                 .select("COUNT(DISTINCT learner_plan.learner_plan_id)", "count")
                 .getRawOne();
 
+            const riskRatingQb = riskRatingRepository
+                .createQueryBuilder("risk_rating")
+                .leftJoin("risk_rating.trainer", "trainer")
+                .where("risk_rating.is_active = :is_active", { is_active: true });
+
+            applyOrgFilterOnUserAlias(riskRatingQb, "trainer");
+            applyCentreUserFilter(riskRatingQb, "trainer.user_id");
+
+            const riskRatingCountRaw = await riskRatingQb
+                .select("COUNT(DISTINCT risk_rating.id)", "count")
+                .getRawOne();
+
             const samplingPlanDetailRepository = AppDataSource.getRepository(SamplingPlanDetail);
             const sampleDueInMonthQb = samplingPlanDetailRepository
                 .createQueryBuilder("detail")
@@ -3178,6 +3227,7 @@ class LearnerController {
                 sessionDueIn7Days_count: Number(sessionDueIn7DaysCountRaw?.count || 0),
                 sampleDueInMonth_count: Number(sampleDueInMonthCountRaw?.count || 0),
                 samplingPlanOverdue_count: Number(samplingPlanOverdueCountRaw?.count || 0),
+                risk_ratings_count: Number(riskRatingCountRaw?.count || 0),
                 totalCourses: totalCourses,
                 totalLicenses: totalLicenses,
                 totalLicenseRemaining: totalLicenses - totalLicensesUsed,
