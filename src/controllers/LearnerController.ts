@@ -2891,6 +2891,33 @@ class LearnerController {
                         data: risk_ratings,
                     });
                 }
+                else if (type === "gateway_learners") {
+                    if (hasNoAccess) {
+                        return res.status(200).json({
+                            message: "Gateway learners fetched successfully",
+                            status: true,
+                            data: [],
+                        });
+                    }
+                    const qb = userCourseRepository
+                        .createQueryBuilder("user_course")
+                        .leftJoinAndSelect("user_course.learner_id", "learner_id")
+                        .leftJoinAndSelect("learner_id.user_id", "user_id")
+                        .leftJoin("user_course.trainer_id", "trainer")
+                        .where("user_course.course->>'course_core_type' = :coreType", { coreType: "Gateway" })
+                        .distinctOn(["learner_id.learner_id"]);
+
+                    applyOrgFilterOnUserAlias(qb, "user_id");
+                    applyCentreUserFilter(qb, "trainer.user_id");
+
+                    const gateway_learners = await qb.getMany();
+
+                    return res.status(200).json({
+                        message: "Gateway learners fetched successfully",
+                        status: true,
+                        data: gateway_learners,
+                    });
+                }
             }
 
 
@@ -2918,6 +2945,7 @@ class LearnerController {
                         sessionDueIn7Days_count: 0,
                         sampleDueInMonth_count: 0,
                         samplingPlanOverdue_count: 0,
+                        gateway_learners_count: 0,
                         totalCourses: 0,
                         totalLicenses: 0,
                     }
@@ -3177,6 +3205,18 @@ class LearnerController {
                 .select("COUNT(DISTINCT risk_rating.id)", "count")
                 .getRawOne();
 
+            const gatewayLearnersQb = userCourseRepository
+                .createQueryBuilder("user_course")
+                .leftJoin("user_course.learner_id", "learner_id")
+                .leftJoin("learner_id.user_id", "user_id")
+                .leftJoin("user_course.trainer_id", "trainer")
+                .where("user_course.course->>'course_core_type' = :coreType", { coreType: "Gateway" });
+            applyOrgFilterOnUserAlias(gatewayLearnersQb, "user_id");
+            applyCentreUserFilter(gatewayLearnersQb, "trainer.user_id");
+            const gatewayLearnersCountRaw = await gatewayLearnersQb
+                .select("COUNT(DISTINCT learner_id.learner_id)", "count")
+                .getRawOne();
+
             const samplingPlanDetailRepository = AppDataSource.getRepository(SamplingPlanDetail);
             const sampleDueInMonthQb = samplingPlanDetailRepository
                 .createQueryBuilder("detail")
@@ -3228,6 +3268,7 @@ class LearnerController {
                 sampleDueInMonth_count: Number(sampleDueInMonthCountRaw?.count || 0),
                 samplingPlanOverdue_count: Number(samplingPlanOverdueCountRaw?.count || 0),
                 risk_ratings_count: Number(riskRatingCountRaw?.count || 0),
+                gateway_learners_count: Number(gatewayLearnersCountRaw?.count || 0),
                 totalCourses: totalCourses,
                 totalLicenses: totalLicenses,
                 totalLicenseRemaining: totalLicenses - totalLicensesUsed,
