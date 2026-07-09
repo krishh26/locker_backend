@@ -73,6 +73,7 @@ class DashboardController {
                             totalUsers: 0,
                             totalLearners: 0,
                             totalSubscriptions: 0,
+                            totalLicenses: 0,
                             activeOrganisations: 0,
                             activeSubscriptions: 0,
                             licenceUsage: null,
@@ -129,6 +130,11 @@ class DashboardController {
                 subQuery.andWhere("sub.organisation_id IN (:...ids)", { ids: accessibleIds });
             }
             const totalSubscriptions = await subQuery.getCount();
+            const totalLicensesResult = await subQuery
+                .clone()
+                .select("SUM(sub.total_licenses)", "totalLicenses")
+                .getRawOne<{ totalLicenses: string | null }>();
+            const totalLicenses = Number(totalLicensesResult?.totalLicenses ?? 0);
             const activeSubscriptions = await subQuery
                 .clone()
                 .andWhere("sub.status = :status", { status: 'active' })
@@ -164,6 +170,7 @@ class DashboardController {
                     totalUsers,
                     totalLearners,
                     totalSubscriptions,
+                    totalLicenses,
                     activeOrganisations,
                     activeSubscriptions,
                     licenceUsage,
