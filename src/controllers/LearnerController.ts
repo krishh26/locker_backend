@@ -1636,8 +1636,6 @@ class LearnerController {
             const userRepository = AppDataSource.getRepository(User);
             const learnerRepository = AppDataSource.getRepository(Learner);
             const employerRepository = AppDataSource.getRepository(Employer);
-            const courseRepository = AppDataSource.getRepository("Course");
-            const userCourseRepository = AppDataSource.getRepository(UserCourse);
 
             // Helper to resolve user by name (for trainer, IQA, etc.)
             const resolveUserByName = async (name: string) => {
@@ -1668,18 +1666,6 @@ class LearnerController {
                     .getOne();
             };
 
-            // Helper to resolve course by name
-            const resolveCourseByName = async (course_name: string) => {
-                const trimmed = typeof course_name === "string" ? course_name.trim() : "";
-                if (!trimmed) return null;
-
-                // Case-insensitive + whitespace-tolerant match for reliable CSV matching
-                return await courseRepository
-                    .createQueryBuilder("c")
-                    .where("LOWER(TRIM(c.course_name)) = LOWER(TRIM(:name))", { name: trimmed })
-                    .getOne();
-            };
-
             const results = [];
             const errors = [];
 
@@ -1687,7 +1673,7 @@ class LearnerController {
                 const learnerData = learners[i];
                 const {
                     user_name, first_name, last_name, email, password, confirmPassword, mobile,
-                    national_ins_no, funding_body, job_title, centre_name, employer_name, courses
+                    national_ins_no, funding_body, job_title, centre_name, employer_name
                 } = learnerData;
 
                 try {
@@ -1703,16 +1689,13 @@ class LearnerController {
                         !employer_name ||
                         !centre_name ||
                         !funding_body ||
-                        !job_title ||
-                        !courses ||
-                        !Array.isArray(courses) ||
-                        courses.length === 0
+                        !job_title 
                     ) {
                         errors.push({
                             index: i,
                             email: email || 'unknown',
                             error:
-                                "All fields required (user_name, first_name, last_name, email, password, confirmPassword, mobile, employer_name, centre_name, funding_body, job_title, courses)"
+                                "All fields required (user_name, first_name, last_name, email, password, confirmPassword, mobile, employer_name, centre_name, funding_body, job_title)"
                         });
                         continue;
                     }
@@ -1852,68 +1835,6 @@ class LearnerController {
                         });
                     }
 
-                    // Assign courses
-                    for (let c = 0; c < courses.length; c++) {
-                        const courseRow = courses[c];
-                        const {
-                            course_name, start_date, end_date,
-                            trainer_name, iqa_name, liqa_name, eqa_name, employer_name: courseEmployerName
-                        } = courseRow;
-
-                        // Resolve course
-                        const course = await resolveCourseByName(course_name);
-                        if (!course) {
-                            errors.push({
-                                index: i,
-                                email,
-                                course_name,
-                                error: `Course "${course_name}" not found`
-                            });
-                            continue;
-                        }
-
-                        // Resolve employer for this course (fallback to top-level employer)
-                        let courseEmployer = employer;
-                        const topEmployerNameLower =
-                            typeof employer_name === "string" ? employer_name.trim().toLowerCase() : "";
-                        const courseEmployerNameLower =
-                            typeof courseEmployerName === "string" ? courseEmployerName.trim().toLowerCase() : "";
-                        if (courseEmployerNameLower && courseEmployerNameLower !== topEmployerNameLower) {
-                            courseEmployer = await resolveEmployerByName(courseEmployerName);
-                            if (!courseEmployer) {
-                                errors.push({
-                                    index: i,
-                                    email,
-                                    course_name,
-                                    error: `Employer "${courseEmployerName}" not found for course`
-                                });
-                                continue;
-                            }
-                        }
-
-                        // Resolve trainer, IQA, LIQA, EQA
-                        const trainer = await resolveUserByName(trainer_name);
-                        const iqa = await resolveUserByName(iqa_name);
-                        const liqa = await resolveUserByName(liqa_name);
-                        const eqa = await resolveUserByName(eqa_name);
-
-                        // Create UserCourse (fix: pass course object, not just { course_id })
-                        await userCourseRepository.save(
-                            userCourseRepository.create({
-                                course: course, // <-- pass the course object
-                                learner_id: learner, // <-- pass the learner object
-                                trainer_id: trainer ? trainer : null,
-                                IQA_id: iqa ? iqa : null,
-                                LIQA_id: liqa ? liqa : null,
-                                EQA_id: eqa ? eqa : null,
-                                // UserCourse.employer_id points to `users.user_id` (User entity),
-                                // so we must pass the related User object from Employer.user
-                                employer_id: courseEmployer ? courseEmployer.user : null,
-                                start_date,
-                                end_date
-                            })
-                        );
-                    }
                     await notifyMasterAdminsIfLicenceExceeded(
                         orgIdForLicence,
                         usedBeforeChange
@@ -2918,6 +2839,59 @@ class LearnerController {
                         data: gateway_learners,
                     });
                 }
+                else if (type === "off_track_learners" || type === "off_track") {
+                    if (hasNoAccess) {
+                        return res.status(200).json({
+                            message: "Off-track learners fetched successfully",
+                            status: true,
+                            data: [],
+                        });
+                    }
+
+                    const offTrackResults = await computeOffTrackLearners({
+                        learnerRepository,
+                        userCourseRepository,
+                        assignmentMappingRepository,
+                        req,
+                        scopeContext,
+                        applyLearnerScope,
+                        applyOrgFilterOnUserAlias,
+                        applyCentreUserFilter,
+                    });
+
+                    const off_track_learners = offTrackResults.map((item) => {
+                        const courseData: any = item.userCourse.course || null;
+                        return {
+                            learner_id: item.learner.learner_id,
+                            user_id: item.learner.user_id?.user_id || null,
+                            user_name: item.learner.user_name,
+                            first_name: item.learner.first_name,
+                            last_name: item.learner.last_name,
+                            course: courseData
+                                ? {
+                                      course_id: courseData.course_id,
+                                      course_name: courseData.course_name,
+                                      course_code: courseData.course_code,
+                                  }
+                                : null,
+                            start_date: item.userCourse.start_date,
+                            end_date: item.userCourse.end_date,
+                            durationPercent: Number(item.durationMetrics.durationPercent.toFixed(2)),
+                            daysLeft: item.durationMetrics.daysLeft,
+                            expectedProgressPercent: Number(item.durationMetrics.expectedProgressPercent.toFixed(2)),
+                            currentProgressPercent: Number(item.unitProgress.progressPercent.toFixed(2)),
+                            unitProgress: item.unitProgress,
+                            course_status: item.userCourse.course_status,
+                            is_main_course: item.userCourse.is_main_course,
+                        };
+                    });
+
+                    return res.status(200).json({
+                        message: "Off-track learners fetched successfully",
+                        status: true,
+                        data: off_track_learners,
+                    });
+                }
             }
 
 
@@ -2946,6 +2920,8 @@ class LearnerController {
                         sampleDueInMonth_count: 0,
                         samplingPlanOverdue_count: 0,
                         gateway_learners_count: 0,
+                        off_track_learners_count: 0,
+                        off_track_learners: [],
                         totalCourses: 0,
                         totalLicenses: 0,
                     }
@@ -3248,6 +3224,17 @@ class LearnerController {
             }
             const samplingPlanOverdueCountRaw = await samplingPlanOverdueQb.select("COUNT(DISTINCT detail.id)", "count").getRawOne();
 
+            const offTrackLearners = await computeOffTrackLearners({
+                learnerRepository,
+                userCourseRepository,
+                assignmentMappingRepository,
+                req,
+                scopeContext,
+                applyLearnerScope,
+                applyOrgFilterOnUserAlias,
+                applyCentreUserFilter,
+            });
+
             const data = {
                 active_learners_count: Number(activeLearnersCountRaw?.count || 0),
                 learners_suspended_count: Number(suspendedCountRaw?.count || 0),
@@ -3269,6 +3256,7 @@ class LearnerController {
                 samplingPlanOverdue_count: Number(samplingPlanOverdueCountRaw?.count || 0),
                 risk_ratings_count: Number(riskRatingCountRaw?.count || 0),
                 gateway_learners_count: Number(gatewayLearnersCountRaw?.count || 0),
+                off_track_learners_count: offTrackLearners.length,
                 totalCourses: totalCourses,
                 totalLicenses: totalLicenses,
                 totalLicenseRemaining: totalLicenses - totalLicensesUsed,
@@ -3291,6 +3279,264 @@ class LearnerController {
 }
 
 export default LearnerController;
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+interface CourseDurationMetrics {
+    durationPercent: number;
+    daysLeft: number;
+    isWithinDuration: boolean;
+    expectedProgressPercent: number;
+}
+
+interface UnitProgressStats {
+    totalUnits: number;
+    unitsFullyCompleted: number;
+    unitsPartiallyCompleted: number;
+    unitsNotStarted: number;
+    progressPercent: number;
+}
+
+const getCourseDurationMetrics = (
+    startDate: Date | string | null | undefined,
+    endDate: Date | string | null | undefined,
+    now: Date = new Date()
+): CourseDurationMetrics | null => {
+    if (!startDate || !endDate) return null;
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) return null;
+
+    const totalMs = end.getTime() - start.getTime();
+    const elapsedMs = Math.max(0, Math.min(now.getTime() - start.getTime(), totalMs));
+    const durationPercent = (elapsedMs / totalMs) * 100;
+    const daysLeft = Math.max(0, Math.ceil((end.getTime() - now.getTime()) / MS_PER_DAY));
+    const isWithinDuration = now >= start && now <= end;
+
+    return {
+        durationPercent,
+        daysLeft,
+        isWithinDuration,
+        expectedProgressPercent: durationPercent,
+    };
+};
+
+const applyMappingsToUserCourse = (userCourse: any, courseMappings: any[]) => {
+    courseMappings.forEach(mapping => {
+        const unitsArray = userCourse.course.units || [];
+        const unitIndex = unitsArray.findIndex((item: any) => String(item.id) === String(mapping.unit_code) || String(item.unit_ref) === String(mapping.unit_code));
+        if (unitIndex === -1) return;
+
+        const unit = unitsArray[unitIndex] || {};
+
+        if (!mapping.sub_unit_id && !mapping.topic_id) {
+            unit.learnerMap = unit.learnerMap || mapping.learnerMap;
+            unit.trainerMap = unit.trainerMap || mapping.trainerMap;
+        } else if (mapping.sub_unit_id && !mapping.topic_id) {
+            unit.subUnit = unit.subUnit || [];
+            const subIndex = unit.subUnit.findIndex((s: any) => String(s.id) === String(mapping.sub_unit_id));
+            if (subIndex !== -1) {
+                unit.subUnit[subIndex].learnerMap = unit.subUnit[subIndex].learnerMap || mapping.learnerMap;
+                unit.subUnit[subIndex].trainerMap = unit.subUnit[subIndex].trainerMap || mapping.trainerMap;
+            }
+        } else if (mapping.sub_unit_id && mapping.topic_id) {
+            unit.subUnit = unit.subUnit || [];
+            const subIndex = unit.subUnit.findIndex((s: any) => String(s.id) === String(mapping.sub_unit_id));
+            if (subIndex !== -1) {
+                const sub = unit.subUnit[subIndex];
+                if (sub.topics && Array.isArray(sub.topics)) {
+                    const topicIndex = sub.topics.findIndex((t: any) => String(t.id) === String(mapping.topic_id));
+                    if (topicIndex !== -1) {
+                        sub.topics[topicIndex].learnerMap = sub.topics[topicIndex].learnerMap || mapping.learnerMap;
+                        sub.topics[topicIndex].trainerMap = sub.topics[topicIndex].trainerMap || mapping.trainerMap;
+                    }
+                } else {
+                    sub.learnerMap = sub.learnerMap || mapping.learnerMap;
+                    sub.trainerMap = sub.trainerMap || mapping.trainerMap;
+                }
+                unit.subUnit[subIndex] = sub;
+            }
+        }
+
+        unitsArray[unitIndex] = unit;
+        userCourse.course.units = unitsArray;
+    });
+};
+
+const computeUnitProgressStats = (userCourse: any, courseMappings: any[]): UnitProgressStats => {
+    applyMappingsToUserCourse(userCourse, courseMappings);
+
+    const fullyCompletedUnits = new Set<any>();
+    const partiallyCompletedUnits = new Set<any>();
+    const mappedUnitIds = new Set(courseMappings.map((m: any) => String(m.unit_code)));
+console.log("courseMappings", courseMappings.length);
+
+console.log(
+    "mappedUnitIds",
+    [...mappedUnitIds]
+);
+
+console.log(
+    "course units",
+    (userCourse.course?.units || []).map((u: any) => ({
+        id: u.id,
+        unit_ref: u.unit_ref,
+        title: u.title
+    }))
+);
+    (userCourse.course?.units || []).forEach((unit: any) => {
+        console.log("checking unit", unit.id);
+        if (!mappedUnitIds.size || !mappedUnitIds.has(String(unit.id))) return;
+console.log(JSON.stringify(unit, null, 2));
+        const status = unitCompletionStatus(unit);
+         console.log("status", unit.id, status);
+        if (status.fullyCompleted) {
+            fullyCompletedUnits.add(unit.id);
+        } else if (status.partiallyCompleted) {
+            partiallyCompletedUnits.add(unit.id);
+        }
+    });
+
+    const totalUnits = userCourse.course?.units?.length || 0;
+    const unitsFullyCompleted = fullyCompletedUnits.size;
+    const unitsPartiallyCompleted = partiallyCompletedUnits.size;
+    const unitsNotStarted = totalUnits - (unitsFullyCompleted + unitsPartiallyCompleted);
+    const progressPercent = totalUnits > 0 ? (unitsFullyCompleted / totalUnits) * 100 : 0;
+
+    return {
+        totalUnits,
+        unitsFullyCompleted,
+        unitsPartiallyCompleted,
+        unitsNotStarted,
+        progressPercent,
+    };
+};
+
+const computeOffTrackLearners = async (deps: {
+    learnerRepository: ReturnType<typeof AppDataSource.getRepository<Learner>>;
+    userCourseRepository: ReturnType<typeof AppDataSource.getRepository<UserCourse>>;
+    assignmentMappingRepository: ReturnType<typeof AppDataSource.getRepository<AssignmentMapping>>;
+    req: CustomRequest;
+    scopeContext: ReturnType<typeof getScopeContext>;
+    applyLearnerScope: typeof applyLearnerScope;
+    applyOrgFilterOnUserAlias: (qb: any, userAlias: string) => void;
+    applyCentreUserFilter: (qb: any, userIdColumn: string) => void;
+}) => {
+    const {
+        learnerRepository,
+        userCourseRepository,
+        assignmentMappingRepository,
+        req,
+        scopeContext,
+        applyLearnerScope,
+        applyOrgFilterOnUserAlias,
+        applyCentreUserFilter,
+    } = deps;
+
+    const now = new Date();
+    const activeLearnersQb = learnerRepository
+        .createQueryBuilder("learner")
+        .leftJoinAndSelect("learner.user_id", "user_id")
+        .leftJoinAndSelect("learner.employer_id", "employer")
+        .where("user_id.status = 'Active'");
+    if (req.user) await applyLearnerScope(activeLearnersQb, req.user, "learner", { scopeContext });
+    const activeLearners = await activeLearnersQb.getMany();
+    if (!activeLearners.length) return [];
+
+    const learnerById = new Map(activeLearners.map((l) => [l.learner_id, l]));
+    const learnerIds = activeLearners.map((l) => l.learner_id);
+
+    const mainCoursesQb = userCourseRepository
+        .createQueryBuilder("uc")
+        .leftJoinAndSelect("uc.learner_id", "learner")
+        .leftJoinAndSelect("learner.user_id", "user_id")
+        .leftJoin("uc.trainer_id", "trainer")
+        .where("uc.learner_id IN (:...learnerIds)", { learnerIds })
+        .andWhere("uc.start_date IS NOT NULL")
+        .andWhere("uc.end_date IS NOT NULL")
+        .andWhere("uc.start_date <= :now", { now })
+        .andWhere("uc.end_date >= :now", { now })
+        .andWhere("uc.end_date > uc.start_date")
+        .andWhere("(uc.course->>'course_core_type' IS NULL OR uc.course->>'course_core_type' != :gateway)", { gateway: "Gateway" });
+
+    applyOrgFilterOnUserAlias(mainCoursesQb, "user_id");
+    applyCentreUserFilter(mainCoursesQb, "trainer.user_id");
+
+    const mainCourses = await mainCoursesQb.getMany();
+    console.log(mainCourses.length)
+    if (!mainCourses.length) return [];
+
+    const userIds = [...new Set(
+        mainCourses
+            .map((uc) => {
+                const learnerId = typeof uc.learner_id === "object" ? (uc.learner_id as Learner).learner_id : uc.learner_id;
+                return learnerById.get(learnerId)?.user_id?.user_id;
+            })
+            .filter((id): id is number => typeof id === "number")
+    )];
+    const courseIds = [...new Set(
+        mainCourses
+            .map((uc) => (uc.course as any)?.course_id)
+            .filter((id): id is number => typeof id === "number")
+    )];
+
+    const allMappings = userIds.length && courseIds.length
+        ? await assignmentMappingRepository.createQueryBuilder("mapping")
+            .leftJoinAndSelect("mapping.assignment", "assignment")
+            .leftJoinAndSelect("mapping.course", "course")
+            .leftJoinAndSelect("assignment.user", "assignment_user")
+            .where("course.course_id IN (:...courseIds)", { courseIds })
+            .andWhere("assignment_user.user_id IN (:...userIds)", { userIds })
+            .select(["mapping", "assignment", "assignment_user", "course.course_id"])
+            .getMany()
+        : [];
+
+    const results: Array<{
+        learner: Learner;
+        userCourse: UserCourse;
+        unitProgress: UnitProgressStats;
+        durationMetrics: CourseDurationMetrics;
+    }> = [];
+console.log("course", mainCourses.length)
+    for (const userCourse of mainCourses) {
+        
+        const learnerId = typeof userCourse.learner_id === "object"
+            ? (userCourse.learner_id as Learner).learner_id
+            : userCourse.learner_id;
+            console.log("userCourse learner_id =", userCourse.learner_id);
+console.log("resolved learnerId =", learnerId, typeof learnerId);
+
+console.log(
+    "map keys =",
+    [...learnerById.keys()].slice(0, 10)
+);
+        const learner = learnerById.get(learnerId);
+        console.log(learner?.learner_id)
+        if (!learner) continue;
+
+        const userId = learner.user_id?.user_id;
+        const courseId = (userCourse.course as any)?.course_id;
+        const courseMappings = allMappings.filter(
+            (m) => m.course.course_id === courseId && m.assignment?.user?.user_id === userId
+        );
+
+        const durationMetrics = getCourseDurationMetrics(userCourse.start_date, userCourse.end_date, now);
+        if (!durationMetrics?.isWithinDuration) continue;
+
+        const unitProgress = computeUnitProgressStats(
+            JSON.parse(JSON.stringify(userCourse)),
+            courseMappings
+        );
+        console.log(unitProgress.totalUnits)
+        if (unitProgress.totalUnits === 0) continue;
+
+        if (unitProgress.progressPercent >= durationMetrics.expectedProgressPercent) continue;
+
+        results.push({ learner, userCourse, unitProgress, durationMetrics });
+    }
+
+    return results;
+};
 
 /* learner_id?: number */
 const getCourseData = async (courses: any[], user_id: string) => {
@@ -3341,53 +3587,7 @@ const getCourseData = async (courses: any[], user_id: string) => {
 
             let courseMappings: any = filteredMappings.filter(mapping => mapping.course.course_id === userCourse.course.course_id);
 
-            // Apply mapping info onto course units (safe when units may be undefined)
-            courseMappings.forEach(mapping => {
-                const unitsArray = userCourse.course.units || [];
-                const unitIndex = unitsArray.findIndex((item: any) => String(item.id) === String(mapping.unit_code) || String(item.unit_ref) === String(mapping.unit_code));
-                if (unitIndex === -1) return;
-
-                const unit = unitsArray[unitIndex] || {};
-
-                // UNIT LEVEL (no sub-unit, no topic)
-                if (!mapping.sub_unit_id && !mapping.topic_id) {
-                    unit.learnerMap = unit.learnerMap || mapping.learnerMap;
-                    unit.trainerMap = unit.trainerMap || mapping.trainerMap;
-                }
-                // SUB-UNIT LEVEL (sub-unit but no topic)
-                else if (mapping.sub_unit_id && !mapping.topic_id) {
-                    unit.subUnit = unit.subUnit || [];
-                    const subIndex = unit.subUnit.findIndex((s: any) => String(s.id) === String(mapping.sub_unit_id));
-                    if (subIndex !== -1) {
-                        unit.subUnit[subIndex].learnerMap = unit.subUnit[subIndex].learnerMap || mapping.learnerMap;
-                        unit.subUnit[subIndex].trainerMap = unit.subUnit[subIndex].trainerMap || mapping.trainerMap;
-                    }
-                }
-                // TOPIC LEVEL (sub-unit + topic for qualification courses)
-                else if (mapping.sub_unit_id && mapping.topic_id) {
-                    unit.subUnit = unit.subUnit || [];
-                    const subIndex = unit.subUnit.findIndex((s: any) => String(s.id) === String(mapping.sub_unit_id));
-                    if (subIndex !== -1) {
-                        const sub = unit.subUnit[subIndex];
-                        // For qualification courses, we need to handle topic-level mappings
-                        if (sub.topics && Array.isArray(sub.topics)) {
-                            const topicIndex = sub.topics.findIndex((t: any) => String(t.id) === String(mapping.topic_id));
-                            if (topicIndex !== -1) {
-                                sub.topics[topicIndex].learnerMap = sub.topics[topicIndex].learnerMap || mapping.learnerMap;
-                                sub.topics[topicIndex].trainerMap = sub.topics[topicIndex].trainerMap || mapping.trainerMap;
-                            }
-                        } else {
-                            // Fallback: no topics array, keep sub-unit-level mapping behaviour
-                            sub.learnerMap = sub.learnerMap || mapping.learnerMap;
-                            sub.trainerMap = sub.trainerMap || mapping.trainerMap;
-                        }
-                        unit.subUnit[subIndex] = sub;
-                    }
-                }
-
-                unitsArray[unitIndex] = unit;
-                userCourse.course.units = unitsArray;
-            });
+            applyMappingsToUserCourse(userCourse, courseMappings);
 
             // Compute completion only for units that have mapping
             const mappedUnitIds = new Set(courseMappings.map((m: any) => String(m.unit_code)));
