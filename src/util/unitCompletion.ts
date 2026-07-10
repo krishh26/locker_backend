@@ -41,6 +41,20 @@ const getSubUnitStatus = (sub: any): UnitCompletionStatus => {
     return { learnerDone, trainerDone, fullyCompleted, partiallyCompleted };
   }
 
+  if (
+    typeof sub?.learnerMap === "boolean" ||
+    typeof sub?.trainerMap === "boolean"
+) {
+    const learnerDone = Boolean(sub.learnerMap);
+    const trainerDone = Boolean(sub.trainerMap);
+
+    return {
+        learnerDone,
+        trainerDone,
+        fullyCompleted: learnerDone && trainerDone,
+        partiallyCompleted: learnerDone || trainerDone,
+    };
+}
   // Non-qualification / fallback: sub-unit completion from sub-unit evidence.
   const status = getEvidenceFlags(Array.isArray(sub?.evidenceBoxes) ? sub.evidenceBoxes : []);
   sub.learnerMap = status.learnerDone;
