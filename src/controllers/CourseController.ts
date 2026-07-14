@@ -10,6 +10,14 @@ import { SendNotification } from "../util/socket/notification";
 import { UserCourse } from "../entity/UserCourse.entity";
 import { RiskRating } from "../entity/RiskRating.entity";
 import { SamplingPlan } from "../entity/samplingPlan.entity";
+import { Assignment } from "../entity/Assignment.entity";
+import { AssignmentMapping } from "../entity/AssignmentMapping.entity";
+import { AssignmentReview } from "../entity/AssignmentReview.entity";
+import { AssignmentPCReview } from "../entity/AssignmentPCReview.entity";
+import { AssignmentSignature } from "../entity/AssignmentSignature.entity";
+import { LearnerPlan } from "../entity/LearnerPlan.entity";
+import { SamplingPlanDetail } from "../entity/SamplingPlanDetail.entity";
+import { SessionLearnerAction } from "../entity/SessionLearnerAction.entity";
 import { OrganisationCourseExclusion } from "../entity/OrganisationCourseExclusion.entity";
 import {
     getOrganisationCourseExclusion,
@@ -18,7 +26,7 @@ import {
 import { NotificationType, SocketDomain, UserRole, CourseType, CourseStatus } from "../util/constants";
 import { convertDataToJson } from "../util/convertDataToJson";
 import { EnhancedUnit, LearningOutcome, AssessmentCriterion } from "../types/courseBuilder.types";
-import { In, Raw } from 'typeorm';
+import { In, Raw, EntityManager } from 'typeorm';
 import { canAccessOrganisation, getAccessibleOrganisationIds, getScopeContext, resolveUserRole } from "../util/organisationFilter";
 import { countLicenceEligibleLearners, notifyMasterAdminsIfLicenceExceeded } from "../util/subscriptionLicence";
 
@@ -39,6 +47,160 @@ const enhanceCourseData = (course: any) => {
     };
 };
 
+const cleanupRelatedLearnerCourseData = async (manager: EntityManager, learnerId: number, courseId: number) => {
+    const learnerRepository = manager.getRepository(Learner);
+    const learner = await learnerRepository.findOne({
+        where: { learner_id: learnerId },
+        relations: ['user_id'],
+    });
+
+    if (!learner?.user_id?.user_id) {
+        return;
+    }
+
+    const learnerUserId = learner.user_id.user_id;
+    const assignmentMappingRepository = manager.getRepository(AssignmentMapping);
+    const assignmentRepository = manager.getRepository(Assignment);
+    const samplingPlanDetailRepository = manager.getRepository(SamplingPlanDetail);
+    const learnerPlanRepository = manager.getRepository(LearnerPlan);
+    const sessionLearnerActionRepository = manager.getRepository(SessionLearnerAction);
+    const relevantMappings = await assignmentMappingRepository
+        .createQueryBuilder('mapping')
+        .leftJoinAndSelect('mapping.assignment', 'assignment')
+        .leftJoinAndSelect('assignment.user', 'assignmentUser')
+        .leftJoinAndSelect('mapping.course', 'course')
+        .where('course.course_id = :courseId', { courseId })
+        .andWhere('assignmentUser.user_id = :learnerUserId', { learnerUserId })
+        .getMany();
+
+    const assignmentIds = [
+        ...new Set(
+            relevantMappings
+                .map((m) => m.assignment?.assignment_id)
+                .filter(Boolean)
+        ),
+    ];
+
+    const assignmentMappingCounts = new Map<number, number>();
+
+    if (assignmentIds.length) {
+        const counts = await assignmentMappingRepository
+            .createQueryBuilder('mapping')
+            .select('mapping.assignment_id', 'assignment_id')
+            .addSelect('COUNT(*)', 'count')
+            .where('mapping.assignment_id IN (:...assignmentIds)', {
+                assignmentIds,
+            })
+            .groupBy('mapping.assignment_id')
+            .getRawMany();
+
+        counts.forEach((row) => {
+            assignmentMappingCounts.set(
+                Number(row.assignment_id),
+                Number(row.count)
+            );
+        });
+    }
+
+    const assignmentsToDelete = new Map<number, Assignment>();
+
+    for (const mapping of relevantMappings) {
+        const assignment = mapping.assignment;
+
+        await assignmentMappingRepository.remove(mapping);
+
+        if (
+            assignment?.assignment_id &&
+            assignmentMappingCounts.get(assignment.assignment_id) === 1
+        ) {
+            assignmentsToDelete.set(
+                assignment.assignment_id,
+                assignment
+            );
+        }
+    }
+
+    if (assignmentsToDelete.size) {
+        await assignmentRepository.remove(
+            [...assignmentsToDelete.values()]
+        );
+    }
+    const relevantSamplingDetails = await samplingPlanDetailRepository
+        .createQueryBuilder('detail')
+        .leftJoinAndSelect('detail.samplingPlan', 'plan')
+        .leftJoinAndSelect('plan.course', 'course')
+        .leftJoinAndSelect('detail.learner', 'learner')
+        .where('learner.learner_id = :learnerId', { learnerId })
+        .andWhere('course.course_id = :courseId', { courseId })
+        .getMany();
+
+    if (relevantSamplingDetails.length) {
+        await samplingPlanDetailRepository.remove(relevantSamplingDetails);
+    }
+
+    const learnerPlans = await learnerPlanRepository
+        .createQueryBuilder('plan')
+        .leftJoinAndSelect('plan.learners', 'learners')
+        .leftJoinAndSelect('plan.courses', 'courses')
+        .where('learners.learner_id = :learnerId', { learnerId })
+        .andWhere('courses.course_id = :courseId', { courseId })
+        .getMany();
+
+    for (const plan of learnerPlans) {
+        const updatedMapping = (plan.participant_course_mapping || [])
+            .map((entry: any) => {
+                if (Number(entry.learner_id) !== learnerId) {
+                    return entry;
+                }
+
+                return {
+                    ...entry,
+                    courses: (entry.courses || []).filter(
+                        (courseIdEntry: any) => Number(courseIdEntry) !== courseId
+                    ),
+                };
+            })
+            .filter((entry: any) => (entry.courses || []).length > 0);
+
+        const remainingLearnerIds = [
+            ...new Set(updatedMapping.map((m: any) => Number(m.learner_id))),
+        ];
+
+        const remainingCourseIds = [
+            ...new Set(
+                updatedMapping.flatMap((m: any) =>
+                    (m.courses || []).map((c: any) => Number(c))
+                )
+            ),
+        ];
+        plan.learners = (plan.learners || []).filter((l) =>
+            remainingLearnerIds.includes(l.learner_id)
+        );
+
+        plan.courses = (plan.courses || []).filter((c) =>
+            remainingCourseIds.includes(c.course_id)
+        );
+        plan.participant_course_mapping = updatedMapping;
+
+        if (
+            plan.participant_course_mapping.length === 0 ||
+            plan.learners.length === 0 ||
+            plan.courses.length === 0
+        ) {
+            const relatedActions = await sessionLearnerActionRepository.find({
+                where: { learner_plan: { learner_plan_id: plan.learner_plan_id } },
+            });
+
+            if (relatedActions.length) {
+                await sessionLearnerActionRepository.remove(relatedActions);
+            }
+
+            await learnerPlanRepository.remove(plan);
+        } else {
+            await learnerPlanRepository.save(plan);
+        }
+    }
+}
 class CourseController {
 
     public async CreateCourse(req: CustomRequest, res: Response) {
@@ -349,14 +511,14 @@ class CourseController {
             if (!course) {
                 return res.status(404).json({ message: 'Course not found', status: false });
             }
-            
+
             if (course.organisation_id) {
                 return res.status(400).json({
                     message: 'Only global courses can be added',
                     status: false
                 });
             }
-            
+
             const existing = await courseRepository.findOne({ where: { organisation_id, parent_course_id: course_id } });
             if (existing) {
                 return res.status(400).json({
@@ -364,7 +526,7 @@ class CourseController {
                     status: false
                 });
             }
-            
+
             const { course_id: _, created_at, updated_at, ...courseData } = course;
             const newCourse = courseRepository.create({
                 ...courseData,
@@ -599,9 +761,9 @@ class CourseController {
 
             const qb = courseRepository.createQueryBuilder("course");
             if (scope === 'global') {
-              qb.andWhere('course.organisation_id IS NULL');
+                qb.andWhere('course.organisation_id IS NULL');
             } else if (scope === 'organisation') {
-              qb.andWhere('course.organisation_id IS NOT NULL');
+                qb.andWhere('course.organisation_id IS NOT NULL');
             }
 
             if (req.user) {
@@ -644,9 +806,9 @@ class CourseController {
             const exclusionMap =
                 organisationIdForExclusion && courses.length
                     ? await getOrganisationCourseExclusionMap(
-                          organisationIdForExclusion,
-                          courses.map((c) => c.course_id)
-                      )
+                        organisationIdForExclusion,
+                        courses.map((c) => c.course_id)
+                    )
                     : new Map<number, boolean>();
 
             // enhance + add assigned_standards_details for Gateway
@@ -834,6 +996,81 @@ class CourseController {
                 data: { affected: result.affected ?? 0 },
             });
         } catch (error) {
+            return res.status(500).json({
+                message: 'Internal Server Error',
+                error: error.message,
+                status: false,
+            });
+        }
+    }
+
+    public async deleteUserCourse(req: CustomRequest, res: Response): Promise<Response> {
+        try {
+            let user_course_id = parseInt(req.params.id, 10);
+            const learnerIdFromQuery = req.query.learner_id ? parseInt(req.query.learner_id as string, 10) : NaN;
+            const courseIdFromQuery = req.query.course_id ? parseInt(req.query.course_id as string, 10) : NaN;
+
+            if (req.params.id && Number.isNaN(user_course_id)) {
+                return res.status(400).json({
+                    message: 'Invalid user course ID',
+                    status: false,
+                });
+            }
+
+            const userCourseRepository = AppDataSource.getRepository(UserCourse);
+            let existing: UserCourse | null = null;
+
+            if (!Number.isNaN(user_course_id)) {
+                existing = await userCourseRepository.findOne({
+                    where: { user_course_id },
+                    relations: ['learner_id'],
+                });
+            }
+
+            if (!existing && !Number.isNaN(learnerIdFromQuery) && !Number.isNaN(courseIdFromQuery)) {
+                existing = await userCourseRepository
+                    .createQueryBuilder('user_course')
+                    .leftJoinAndSelect('user_course.learner_id', 'learner')
+                    .where('learner.learner_id = :learnerId', { learnerId: learnerIdFromQuery })
+                    .andWhere("user_course.course ->> 'course_id' = :courseId", { courseId: String(courseIdFromQuery) })
+                    .getOne();
+            }
+
+            if (!existing) {
+                return res.status(404).json({
+                    message: 'User Course not found',
+                    status: false,
+                });
+            }
+
+            const organisationId = existing.learner_id?.organisation_id;
+            if (
+                req.user &&
+                organisationId != null &&
+                !(await canAccessOrganisation(req.user, Number(organisationId), getScopeContext(req)))
+            ) {
+                return res.status(403).json({
+                    message: 'You do not have access to unassign this course',
+                    status: false,
+                });
+            }
+
+            const learnerId = existing.learner_id?.learner_id;
+            const courseData = existing.course as any;
+            const courseId = courseData?.course_id ? Number(courseData.course_id) : NaN;
+            await AppDataSource.transaction(async (manager) => {
+                if (!Number.isNaN(learnerId) && !Number.isNaN(courseId)) {
+                    await cleanupRelatedLearnerCourseData(manager, learnerId, courseId);
+                }
+
+                await manager.getRepository(UserCourse).remove(existing);
+
+            });
+            return res.status(200).json({
+                message: 'Course unassigned from learner successfully',
+                status: true,
+            });
+        } catch (error: any) {
             return res.status(500).json({
                 message: 'Internal Server Error',
                 error: error.message,
@@ -1261,7 +1498,7 @@ class CourseController {
         try {
             const courseId = parseInt(req.params.courseId);
             const { learner_id, responses } = req.body;
-            
+
             if (!learner_id || !Array.isArray(responses)) {
                 return res.status(400).json({ message: 'Missing learner_id or responses', status: false });
             }
