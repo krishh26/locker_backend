@@ -24,6 +24,7 @@ CourseRoutes.delete('/exclusion', authorizeRoles(), Controller.deleteCourseExclu
 
 //user Course routes
 CourseRoutes.get('/user/get', authorizeRoles(), Controller.getUserCourse);
+CourseRoutes.delete('/user/delete/:id?', authorizeRoles(), Controller.deleteUserCourse);
 CourseRoutes.patch('/user/update/:id', authorizeRoles(), Controller.updateUserCourse);
 CourseRoutes.post('/user/assign-eqa', authorizeRoles(), Controller.updateEqaLearners);
 CourseRoutes.get('/eqa/:eqa_id/assigned-learners', authorizeRoles(), Controller.getAssignedLearnersForEqa);
