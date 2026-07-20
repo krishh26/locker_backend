@@ -29,6 +29,13 @@ import { getOrganisationCourseExclusionMap } from "../util/organisationCourseExc
 import { Subscription } from "../entity/Subscription.entity";
 import { countLicenceEligibleLearners, notifyMasterAdminsIfLicenceExceeded } from "../util/subscriptionLicence";
 import { RiskRating } from "../entity/RiskRating.entity";
+import { CourseStatus } from "../util/constants";
+
+const LICENCE_COUNT_STATUSES: CourseStatus[] = [
+    CourseStatus.AwaitingInduction,
+    CourseStatus.InTraining,
+];
+
 class LearnerController {
 
     public async CreateLearner(req: CustomRequest, res: Response) {
@@ -374,17 +381,14 @@ class LearnerController {
             } else if (status.length) {
                 qbUserCourse.andWhere("user_course.course_status IN (:...status)", { status });
             }
-            console.log(trainer_id)
             if (trainer_id) {
                 // Filter learners by trainer_id
                 usercourses = await qbUserCourse
                     .andWhere('user_course.trainer_id = :trainer_id', { trainer_id: parseInt(trainer_id) })
                     .getMany();
-                    console.log(usercourses.length)
                 learnerIdsArray = usercourses
                     .map(userCourse => userCourse?.learner_id?.learner_id)
                     .filter((id: any) => id != null);
-                    console.log(learnerIdsArray)
             } else if (user_id && role) {
                 const obj: any = {
                     EQA: "EQA_id",
@@ -1229,7 +1233,6 @@ class LearnerController {
         try {
             const { custom_funding_amount, course_id } = req.body;
             const user_id = req.user?.user_id;
-            console.log(typeof user_id);
             if (!custom_funding_amount || custom_funding_amount <= 0) {
                 return res.status(400).json({
                     message: 'Valid custom funding amount is required',
@@ -1947,7 +1950,15 @@ class LearnerController {
                         .createQueryBuilder("learner")
                         .leftJoinAndSelect("learner.user_id", "user_id")
                         .leftJoinAndSelect("learner.employer_id", "employer")
-                        .where("user_id.status = 'Active'");
+                        .leftJoin(
+                            UserCourse,
+                            "user_course",
+                            "user_course.learner_id = learner.learner_id"
+                        )
+                        .where("user_id.status = :status", { status: "Active" })
+                        .andWhere("user_course.course_status IN (:...statuses)", {
+                            statuses: LICENCE_COUNT_STATUSES,
+                        });
                     if (req.user) await applyLearnerScope(qb, req.user, "learner", { scopeContext });
                     const active_learners = await qb.getMany();
                     const learnerIds = active_learners.map((l: any) => l.learner_id);
@@ -2952,7 +2963,11 @@ class LearnerController {
             const activeLearnersQb = learnerRepository
                 .createQueryBuilder("learner")
                 .leftJoin("learner.user_id", "user_id")
-                .where("user_id.status = 'Active'");
+                .leftJoin(UserCourse, "user_course", "user_course.learner_id = learner.learner_id")
+                .where("user_id.status = 'Active'")
+                .andWhere("user_course.course_status IN (:...statuses)", {
+                    statuses: LICENCE_COUNT_STATUSES,
+                });
             if (req.user) await applyLearnerScope(activeLearnersQb, req.user, "learner", { scopeContext: getScopeContext(req) });
             const activeLearnersCountRaw = await activeLearnersQb
                 .select("COUNT(DISTINCT learner.learner_id)", "count")
@@ -3369,27 +3384,13 @@ const computeUnitProgressStats = (userCourse: any, courseMappings: any[]): UnitP
     const fullyCompletedUnits = new Set<any>();
     const partiallyCompletedUnits = new Set<any>();
     const mappedUnitIds = new Set(courseMappings.map((m: any) => String(m.unit_code)));
-console.log("courseMappings", courseMappings.length);
 
-console.log(
-    "mappedUnitIds",
-    [...mappedUnitIds]
-);
-
-console.log(
-    "course units",
-    (userCourse.course?.units || []).map((u: any) => ({
-        id: u.id,
-        unit_ref: u.unit_ref,
-        title: u.title
-    }))
-);
     (userCourse.course?.units || []).forEach((unit: any) => {
-        console.log("checking unit", unit.id);
+
         if (!mappedUnitIds.size || !mappedUnitIds.has(String(unit.id))) return;
-console.log(JSON.stringify(unit, null, 2));
+
         const status = unitCompletionStatus(unit);
-         console.log("status", unit.id, status);
+
         if (status.fullyCompleted) {
             fullyCompletedUnits.add(unit.id);
         } else if (status.partiallyCompleted) {
@@ -3463,7 +3464,6 @@ const computeOffTrackLearners = async (deps: {
     applyCentreUserFilter(mainCoursesQb, "trainer.user_id");
 
     const mainCourses = await mainCoursesQb.getMany();
-    console.log(mainCourses.length)
     if (!mainCourses.length) return [];
 
     const userIds = [...new Set(
@@ -3497,19 +3497,12 @@ const computeOffTrackLearners = async (deps: {
         unitProgress: UnitProgressStats;
         durationMetrics: CourseDurationMetrics;
     }> = [];
-console.log("course", mainCourses.length)
     for (const userCourse of mainCourses) {
         
         const learnerId = typeof userCourse.learner_id === "object"
             ? (userCourse.learner_id as Learner).learner_id
             : userCourse.learner_id;
-            console.log("userCourse learner_id =", userCourse.learner_id);
-console.log("resolved learnerId =", learnerId, typeof learnerId);
 
-console.log(
-    "map keys =",
-    [...learnerById.keys()].slice(0, 10)
-);
         const learner = learnerById.get(learnerId);
         console.log(learner?.learner_id)
         if (!learner) continue;
@@ -3527,7 +3520,6 @@ console.log(
             JSON.parse(JSON.stringify(userCourse)),
             courseMappings
         );
-        console.log(unitProgress.totalUnits)
         if (unitProgress.totalUnits === 0) continue;
 
         if (unitProgress.progressPercent >= durationMetrics.expectedProgressPercent) continue;
