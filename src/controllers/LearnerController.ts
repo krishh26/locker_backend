@@ -30,6 +30,10 @@ import { Subscription } from "../entity/Subscription.entity";
 import { countLicenceEligibleLearners, notifyMasterAdminsIfLicenceExceeded } from "../util/subscriptionLicence";
 import { RiskRating } from "../entity/RiskRating.entity";
 import { CourseStatus } from "../util/constants";
+import {
+    enrichReportRowsWithCommonFields,
+    resolveLearnerIdByUserId,
+} from "../util/learnerReportEnrichment";
 
 const LICENCE_COUNT_STATUSES: CourseStatus[] = [
     CourseStatus.AwaitingInduction,
@@ -2187,10 +2191,12 @@ class LearnerController {
                         };
                     });
 
+                    const enrichedActiveLearners = await enrichReportRowsWithCommonFields(dataWithDetails);
+
                     return res.status(200).json({
                         message: "Active learners fetched successfully",
                         status: true,
-                        data: dataWithDetails,
+                        data: enrichedActiveLearners,
                     });
                 }
 
@@ -2335,10 +2341,22 @@ class LearnerController {
                         };
                     });
 
+                    const userIds = data
+                        .map((row: any) => row.learner?.id)
+                        .filter((id: number | undefined): id is number => typeof id === "number");
+                    const userIdToLearnerId = await resolveLearnerIdByUserId(userIds);
+                    const enrichedUnmappedEvidence = await enrichReportRowsWithCommonFields(
+                        data,
+                        (row: any) => {
+                            const userId = row.learner?.id;
+                            return userId ? userIdToLearnerId.get(userId) || null : null;
+                        }
+                    );
+
                     return res.status(200).json({
                         message: "Unmapped evidence fetched successfully",
                         status: true,
-                        data,
+                        data: enrichedUnmappedEvidence,
                     });
                 }
                 else if (type === "learners_over_due") {
@@ -2359,7 +2377,7 @@ class LearnerController {
                     applyOrgFilterOnUserAlias(qb, "user_id");
                     applyCentreUserFilter(qb, "trainer.user_id");
                     
-                    const learners_over_due = await qb.getMany();
+                    const learners_over_due = await enrichReportRowsWithCommonFields(await qb.getMany());
 
                     return res.status(200).json({
                         message: "Learners over due fetched successfully",
@@ -2385,7 +2403,7 @@ class LearnerController {
                     applyOrgFilterOnUserAlias(qb, "user_id");
                     applyCentreLearnerTrainerFilter(qb, "learner");
                     
-                    const learner_plan_due = await qb.getMany();
+                    const learner_plan_due = await enrichReportRowsWithCommonFields(await qb.getMany());
 
                     return res.status(200).json({
                         message: "Learner plan due fetched successfully",
@@ -2519,7 +2537,7 @@ class LearnerController {
                     applyOrgFilterOnUserAlias(qb, "user_id");
                     applyCentreUserFilter(qb, "trainer.user_id");
                     
-                    const learners_course_due_in_next_30_days = await qb.getMany();
+                    const learners_course_due_in_next_30_days = await enrichReportRowsWithCommonFields(await qb.getMany());
 
                     return res.status(200).json({
                         message: "Learners course due in next 30 days fetched successfully",
@@ -2546,7 +2564,7 @@ class LearnerController {
                         .distinctOn(["learner_id.learner_id"]);
                     applyOrgFilterOnUserAlias(qb, "user_id");
                     applyCentreUserFilter(qb, "trainer.user_id");
-                    const default_review_overdue = await qb.getMany();
+                    const default_review_overdue = await enrichReportRowsWithCommonFields(await qb.getMany());
                     return res.status(200).json({
                         message: "Default review overdue fetched successfully",
                         status: true,
@@ -2668,7 +2686,7 @@ class LearnerController {
                         .where("DATE(learner_plan.startDate) = CURRENT_DATE");
                     applyOrgFilterOnUserAlias(qb, "learner_user");
                     applyCentreUserFilter(qb, "assessor.user_id");
-                    const session_due_today = await qb.getMany();
+                    const session_due_today = await enrichReportRowsWithCommonFields(await qb.getMany());
                     return res.status(200).json({
                         message: "Session due today fetched successfully",
                         status: true,
@@ -2693,7 +2711,7 @@ class LearnerController {
 
                     applyOrgFilterOnUserAlias(qb, "learner_user");
                     applyCentreUserFilter(qb, "assessor.user_id");
-                    const session_due_in_7_days = await qb.getMany();
+                    const session_due_in_7_days = await enrichReportRowsWithCommonFields(await qb.getMany());
                     return res.status(200).json({
                         message: "Session due in 7 days fetched successfully",
                         status: true,
@@ -2897,10 +2915,60 @@ class LearnerController {
                         };
                     });
 
+                    const enrichedOffTrackLearners = await enrichReportRowsWithCommonFields(
+                        off_track_learners,
+                        (row) => row.learner_id ?? null
+                    );
+
                     return res.status(200).json({
                         message: "Off-track learners fetched successfully",
                         status: true,
-                        data: off_track_learners,
+                        data: enrichedOffTrackLearners,
+                    });
+                }
+                else if (type === "otj_off_track") {
+                    if (hasNoAccess) {
+                        return res.status(200).json({
+                            message: "OTJ off-track learners fetched successfully",
+                            status: true,
+                            data: [],
+                        });
+                    }
+
+                    const qb = learnerRepository
+                        .createQueryBuilder("learner")
+                        .leftJoinAndSelect("learner.user_id", "user_id")
+                        .leftJoinAndSelect("learner.employer_id", "employer")
+                        .leftJoin(UserCourse, "user_course", "user_course.learner_id = learner.learner_id")
+                        .where("user_id.status = :status", { status: "Active" })
+                        .andWhere("user_course.course_status IN (:...statuses)", {
+                            statuses: LICENCE_COUNT_STATUSES,
+                        });
+                    if (req.user) await applyLearnerScope(qb, req.user, "learner", { scopeContext });
+
+                    const activeLearners = await qb.getMany();
+                    const baseRows = activeLearners.map((learner: any) => ({
+                        learner_id: learner.learner_id,
+                        user_id: learner.user_id?.user_id || null,
+                        user_name: learner.user_name,
+                        first_name: learner.first_name,
+                        last_name: learner.last_name,
+                        employer_id: learner.employer_id?.employer_id || null,
+                        employer_name: learner.employer_id?.employer_name || null,
+                    }));
+
+                    const enrichedRows = await enrichReportRowsWithCommonFields(
+                        baseRows,
+                        (row) => row.learner_id ?? null
+                    );
+                    const otjOffTrackLearners = enrichedRows.filter(
+                        (row) => row.actual_otj_differential_to_date < 0
+                    );
+
+                    return res.status(200).json({
+                        message: "OTJ off-track learners fetched successfully",
+                        status: true,
+                        data: otjOffTrackLearners,
                     });
                 }
             }

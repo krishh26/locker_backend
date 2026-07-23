@@ -362,7 +362,7 @@ export class WellbeingResourceController {
     // Learner: Get all active resources with lastOpenedDate for this learner (scoped by learner's organisation)
     public async getAllActiveForLearner(req: CustomRequest, res: Response) {
         try {
-            const learnerId = getAuthUserId(req.user);
+            const learnerId = req.query.learnerId || getAuthUserId(req.user);
             if (learnerId == null) {
                 return res.status(401).json({ message: 'Unauthorized', status: false });
             }
@@ -410,7 +410,7 @@ export class WellbeingResourceController {
     // Learner: Track Resource Open
     public async trackOpen(req: CustomRequest, res: Response) {
         try {
-            const learnerId = getAuthUserId(req.user);
+            const learnerId = req.query.learnerId || getAuthUserId(req.user);
             if (learnerId == null) {
                 return res.status(401).json({ message: 'Unauthorized', status: false });
             }
