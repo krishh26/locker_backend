@@ -427,13 +427,12 @@ console.log(formalReviewRows[0].startdate);
         }
 
         const requiredHours = Number(
-            (learner as any).expected_off_the_job_hours ?? otjSummary?.otjRequired ?? 0
+            otjSummary?.otjRequired ?? (learner as any).expected_off_the_job_hours ?? 0
         );
         const requiredToDate = Number(otjSummary?.requiredToDate ?? 0);
         const recordedHours = Number(otjSummary?.totalLoggedHours ?? 0);
         const differential = roundPercent(recordedHours - requiredToDate);
-        const achievedPercent =
-            requiredHours > 0 ? roundPercent((recordedHours / requiredHours) * 100) : 0;
+        const achievedPercent = requiredToDate > 0 ? roundPercent((recordedHours / requiredToDate) * 100) : 0;
 
         result.set(learnerId, {
             trainer_name: trainerName,

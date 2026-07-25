@@ -463,7 +463,7 @@ class LearnerController {
                     employerIdsArray
                 });
             }
-            
+
             if ((trainer_id && learnerIdsArray.length) || (role && user_id && learnerIdsArray.length) || (course_id && learnerIdsArray.length) || (!status.includes("Show only archived users") && status.length && learnerIdsArray.length)) {
                 qb.andWhere('learner.learner_id IN (:...learnerIdsArray)', { learnerIdsArray })
             }
@@ -727,9 +727,9 @@ class LearnerController {
                 const totalSubUnits = userCourse.course.units?.reduce((count, unit) => {
                     return count + (unit.subUnit?.length || 0);
                 }, 0) || 0;
-                
+
                 const totalUnits = userCourse.course.units?.length || 0;
-                
+
                 return {
                     ...userCourse,
                     totalSubUnits,
@@ -751,9 +751,9 @@ class LearnerController {
             const exclusionMap =
                 organisationIdForCourseExclusion && course_ids.length
                     ? await getOrganisationCourseExclusionMap(
-                          organisationIdForCourseExclusion,
-                          course_ids as number[]
-                      )
+                        organisationIdForCourseExclusion,
+                        course_ids as number[]
+                    )
                     : new Map<number, boolean>();
             courses = courses.map((uc: any) => {
                 const cid = uc.course?.course_id;
@@ -1304,7 +1304,7 @@ class LearnerController {
             }
 
             // Validate that custom amount doesn't exceed the original funding band amount
-             const originalAmount = Number(fundingBand.amount);
+            const originalAmount = Number(fundingBand.amount);
             // if (custom_funding_amount > originalAmount) {
             //     return res.status(400).json({
             //         message: `Custom funding amount cannot exceed the original funding band amount of £${originalAmount} for course ${fundingBand.course.course_name}`,
@@ -1696,7 +1696,7 @@ class LearnerController {
                         !employer_name ||
                         !centre_name ||
                         !funding_body ||
-                        !job_title 
+                        !job_title
                     ) {
                         errors.push({
                             index: i,
@@ -1945,8 +1945,8 @@ class LearnerController {
                 }
             };
 
-            const hasNoAccess = (accessibleOrgIds !== null && accessibleOrgIds.length === 0) || 
-                               (centreAdminUserIds !== null && centreAdminUserIds.length === 0);
+            const hasNoAccess = (accessibleOrgIds !== null && accessibleOrgIds.length === 0) ||
+                (centreAdminUserIds !== null && centreAdminUserIds.length === 0);
 
             if (type) {
                 if (type === "active_learners") {
@@ -2130,26 +2130,26 @@ class LearnerController {
                         const nextVisit = nextVisitByLearner.get(learnerId) || null;
                         // add units to the course
                         const rawCourse: any = mainCourseByLearner.get(learnerId) || null;
-                        
+
                         const sanitizedCourse = rawCourse
                             ? {
-                                  user_course_id: rawCourse.user_course_id,
-                                  course: rawCourse.course
-                                      ? {
-                                            course_id: rawCourse.course.course_id,
-                                            course_name: rawCourse.course.course_name,
-                                            course_code: rawCourse.course.course_code,
-                                        }
-                                      : null,
-                                  start_date: rawCourse.start_date,
-                                  end_date: rawCourse.end_date,
-                                  predicted_grade: rawCourse.predicted_grade,
-                                  final_grade: rawCourse.final_grade,
-                                  course_status: rawCourse.course_status,
-                                  bil_return_date: rawCourse.bil_return_date,
-                                  bil_return_reminder_sent_at: rawCourse.bil_return_reminder_sent_at,
-                                  is_main_course: rawCourse.is_main_course
-                              }
+                                user_course_id: rawCourse.user_course_id,
+                                course: rawCourse.course
+                                    ? {
+                                        course_id: rawCourse.course.course_id,
+                                        course_name: rawCourse.course.course_name,
+                                        course_code: rawCourse.course.course_code,
+                                    }
+                                    : null,
+                                start_date: rawCourse.start_date,
+                                end_date: rawCourse.end_date,
+                                predicted_grade: rawCourse.predicted_grade,
+                                final_grade: rawCourse.final_grade,
+                                course_status: rawCourse.course_status,
+                                bil_return_date: rawCourse.bil_return_date,
+                                bil_return_reminder_sent_at: rawCourse.bil_return_reminder_sent_at,
+                                is_main_course: rawCourse.is_main_course
+                            }
                             : null;
 
                         const employer = l.employer_id;
@@ -2215,10 +2215,10 @@ class LearnerController {
                         .leftJoin("user_course.trainer_id", "trainer")
                         .where("user_course.course_status = 'Training Suspended'")
                         .distinctOn(["learner_id.learner_id"]);
-                    
+
                     applyOrgFilterOnUserAlias(qb, "user_id");
                     applyCentreUserFilter(qb, "trainer.user_id");
-                    
+
                     const suspended_learners = await qb.getMany();
 
                     return res.status(200).json({
@@ -2249,7 +2249,7 @@ class LearnerController {
                     if (req.user) {
                         await applyLearnerScope(qb, req.user, "learner", { scopeContext });
                     }
-                    
+
                     const assignments_without_mapped = await qb.getMany();
                     return res.status(200).json({
                         message: "Assignments without mapped fetched successfully",
@@ -2281,8 +2281,8 @@ class LearnerController {
 
                     if (req.user) {
                         qb.leftJoin(Learner, "learner", "learner.user_id = assignmentUser.user_id")
-                          .leftJoin("learner.organisation", "org")
-                          .leftJoin("learner.centre", "centre");
+                            .leftJoin("learner.organisation", "org")
+                            .leftJoin("learner.centre", "centre");
                         await applyLearnerScope(qb, req.user, "learner", { scopeContext: getScopeContext(req) });
                     }
 
@@ -2373,10 +2373,10 @@ class LearnerController {
                         .leftJoinAndSelect("learner_id.user_id", "user_id")
                         .leftJoin("user_course.trainer_id", "trainer")
                         .where("user_course.end_date < :currentDate", { currentDate: new Date() })
-                    
+
                     applyOrgFilterOnUserAlias(qb, "user_id");
                     applyCentreUserFilter(qb, "trainer.user_id");
-                    
+
                     const learners_over_due = await enrichReportRowsWithCommonFields(await qb.getMany());
 
                     return res.status(200).json({
@@ -2399,10 +2399,10 @@ class LearnerController {
                         .leftJoinAndSelect("learner_plan.learners", "learner")
                         .leftJoinAndSelect("learner.user_id", "user_id")
                         .where("learner_plan.startDate < :currentDate", { currentDate: new Date() });
-                    
+
                     applyOrgFilterOnUserAlias(qb, "user_id");
                     applyCentreLearnerTrainerFilter(qb, "learner");
-                    
+
                     const learner_plan_due = await enrichReportRowsWithCommonFields(await qb.getMany());
 
                     return res.status(200).json({
@@ -2425,10 +2425,10 @@ class LearnerController {
                         .leftJoinAndSelect("learner_plan.learners", "learner")
                         .leftJoinAndSelect("learner.user_id", "user_id")
                         .where("learner_plan.startDate BETWEEN NOW() AND NOW() + INTERVAL '7 days'");
-                    
+
                     applyOrgFilterOnUserAlias(qb, "user_id");
                     applyCentreLearnerTrainerFilter(qb, "learner");
-                    
+
                     const learner_plan_due_in_next_7_days = await qb.getMany();
 
                     return res.status(200).json({
@@ -2452,10 +2452,10 @@ class LearnerController {
                         .leftJoinAndSelect("learner_plan.learners", "learner")
                         .leftJoinAndSelect("learner.user_id", "user_id")
                         .where("DATE(session_learner_action.target_date) = CURRENT_DATE");
-                    
+
                     applyOrgFilterOnUserAlias(qb, "user_id");
                     applyCentreLearnerTrainerFilter(qb, "learner");
-                    
+
                     const session_learner_action_due = await qb.getMany();
 
                     return res.status(200).json({
@@ -2479,10 +2479,10 @@ class LearnerController {
                         .leftJoinAndSelect("learner_plan.learners", "learner")
                         .leftJoinAndSelect("learner.user_id", "user_id")
                         .where("session_learner_action.target_date BETWEEN NOW() AND NOW() + INTERVAL '7 days'");
-                    
+
                     applyOrgFilterOnUserAlias(qb, "user_id");
                     applyCentreLearnerTrainerFilter(qb, "learner");
-                    
+
                     const session_learner_action_due_in_next_7_days = await qb.getMany();
 
                     return res.status(200).json({
@@ -2506,10 +2506,10 @@ class LearnerController {
                         .leftJoinAndSelect("learner_plan.learners", "learner")
                         .leftJoinAndSelect("learner.user_id", "user_id")
                         .where("session_learner_action.target_date < NOW()");
-                    
+
                     applyOrgFilterOnUserAlias(qb, "user_id");
                     applyCentreLearnerTrainerFilter(qb, "learner");
-                    
+
                     const session_learner_action_overdue = await qb.getMany();
 
                     return res.status(200).json({
@@ -2533,10 +2533,10 @@ class LearnerController {
                         .leftJoinAndSelect("learner_id.user_id", "user_id")
                         .leftJoin("user_course.trainer_id", "trainer")
                         .where("user_course.end_date BETWEEN NOW() AND NOW() + INTERVAL '30 days'");
-                    
+
                     applyOrgFilterOnUserAlias(qb, "user_id");
                     applyCentreUserFilter(qb, "trainer.user_id");
-                    
+
                     const learners_course_due_in_next_30_days = await enrichReportRowsWithCommonFields(await qb.getMany());
 
                     return res.status(200).json({
@@ -2782,6 +2782,108 @@ class LearnerController {
                         data: sampling_plan_overdue,
                     });
                 }
+                else if (type === "learners_on_sample_plan") {
+                    if (hasNoAccess) {
+                        return res.status(200).json({
+                            message: "Learners on sample plan fetched successfully",
+                            status: true,
+                            data: [],
+                        });
+                    }
+
+                    const qb = userCourseRepository
+                        .createQueryBuilder("user_course")
+                        .leftJoinAndSelect("user_course.learner_id", "learner")
+                        .leftJoinAndSelect("learner.user_id", "user")
+                        .leftJoinAndSelect("user_course.trainer_id", "trainer")
+                        .where(qb => {
+                            const subQuery = qb
+                                .subQuery()
+                                .select("1")
+                                .from(SamplingPlanDetail, "detail")
+                                .where(`detail."learnerLearnerId" = learner.learner_id`)
+                                .getQuery();
+
+                            return `EXISTS ${subQuery}`;
+                        });
+
+                    if (req.user) {
+                        await applyLearnerScope(qb, req.user, "learner", {
+                            scopeContext,
+                        });
+                    }
+
+                    const rows = await qb.getMany();
+
+                    const data = rows.map((row: any) => ({
+                        learner_id: row.learner_id?.learner_id ?? null,
+                        learner_name: row.learner_id
+                            ? `${row.learner_id.first_name} ${row.learner_id.last_name}`.trim()
+                            : null,
+                        course_name: row.course?.course_name ?? null,
+                        status: row.course_status,
+                        trainer_name: row.trainer_id
+                            ? `${row.trainer_id.first_name} ${row.trainer_id.last_name}`.trim()
+                            : null,
+                    }));
+
+                    return res.status(200).json({
+                        message: "Learners on sample plan fetched successfully",
+                        status: true,
+                        data,
+                    });
+                }
+                else if (type === "learners_not_on_sample_plan") {
+                    if (hasNoAccess) {
+                        return res.status(200).json({
+                            message: "Learners not on sample plan fetched successfully",
+                            status: true,
+                            data: [],
+                        });
+                    }
+
+                    const qb = userCourseRepository
+                        .createQueryBuilder("user_course")
+                        .leftJoinAndSelect("user_course.learner_id", "learner")
+                        .leftJoinAndSelect("learner.user_id", "user")
+                        .leftJoinAndSelect("user_course.trainer_id", "trainer")
+                        .where(qb => {
+                            const subQuery = qb
+                                .subQuery()
+                                .select("1")
+                                .from(SamplingPlanDetail, "detail")
+                                .where(`detail."learnerLearnerId" = learner.learner_id`)
+                                .getQuery();
+
+                            return `NOT EXISTS ${subQuery}`;
+                        });
+
+                    if (req.user) {
+                        await applyLearnerScope(qb, req.user, "learner", {
+                            scopeContext,
+                        });
+                    }
+
+                    const rows = await qb.getMany();
+
+                    const data = rows.map((row: any) => ({
+                        learner_id: row.learner_id?.learner_id ?? null,
+                        learner_name: row.learner_id
+                            ? `${row.learner_id.first_name} ${row.learner_id.last_name}`.trim()
+                            : null,
+                        course_name: row.course?.course_name ?? null,
+                        status: row.course_status,
+                        trainer_name: row.trainer_id
+                            ? `${row.trainer_id.first_name} ${row.trainer_id.last_name}`.trim()
+                            : null,
+                    }));
+
+                    return res.status(200).json({
+                        message: "Learners not on sample plan fetched successfully",
+                        status: true,
+                        data,
+                    });
+                }
                 else if (type === "total_licenses") {
                     const totalLicensesQb = subscriptionRepository
                         .createQueryBuilder("subscription")
@@ -2898,10 +3000,10 @@ class LearnerController {
                             last_name: item.learner.last_name,
                             course: courseData
                                 ? {
-                                      course_id: courseData.course_id,
-                                      course_name: courseData.course_name,
-                                      course_code: courseData.course_code,
-                                  }
+                                    course_id: courseData.course_id,
+                                    course_name: courseData.course_name,
+                                    course_code: courseData.course_code,
+                                }
                                 : null,
                             start_date: item.userCourse.start_date,
                             end_date: item.userCourse.end_date,
@@ -2998,6 +3100,8 @@ class LearnerController {
                         sessionDueIn7Days_count: 0,
                         sampleDueInMonth_count: 0,
                         samplingPlanOverdue_count: 0,
+                        learners_on_sample_plan_count: 0,
+                        learners_not_on_sample_plan_count: 0,
                         gateway_learners_count: 0,
                         off_track_learners_count: 0,
                         off_track_learners: [],
@@ -3306,6 +3410,57 @@ class LearnerController {
                 samplingPlanOverdueQb.andWhere("sp_iqa.user_id IN (:...centreAdminUserIds)", { centreAdminUserIds });
             }
             const samplingPlanOverdueCountRaw = await samplingPlanOverdueQb.select("COUNT(DISTINCT detail.id)", "count").getRawOne();
+            const learnersOnSamplePlanQb = learnerRepository
+                .createQueryBuilder("learner")
+                .where(qb => {
+                    const subQuery = qb
+                        .subQuery()
+                        .select("1")
+                        .from(SamplingPlanDetail, "detail")
+                        .where(`detail."learnerLearnerId" = learner.learner_id`)
+                        .getQuery();
+
+                    return `EXISTS ${subQuery}`;
+                });
+
+            if (req.user) {
+                await applyLearnerScope(
+                    learnersOnSamplePlanQb,
+                    req.user,
+                    "learner",
+                    { scopeContext }
+                );
+            }
+
+            const learnersOnSamplePlanCountRaw = await learnersOnSamplePlanQb
+                .select("COUNT(DISTINCT learner.learner_id)", "count")
+                .getRawOne();
+
+            const learnersNotOnSamplePlanQb = learnerRepository
+                .createQueryBuilder("learner")
+                .where(qb => {
+                    const subQuery = qb
+                        .subQuery()
+                        .select("1")
+                        .from(SamplingPlanDetail, "detail")
+                        .where(`detail."learnerLearnerId" = learner.learner_id`)
+                        .getQuery();
+
+                    return `NOT EXISTS ${subQuery}`;
+                });
+
+            if (req.user) {
+                await applyLearnerScope(
+                    learnersNotOnSamplePlanQb,
+                    req.user,
+                    "learner",
+                    { scopeContext }
+                );
+            }
+
+            const learnersNotOnSamplePlanCountRaw = await learnersNotOnSamplePlanQb
+                .select("COUNT(DISTINCT learner.learner_id)", "count")
+                .getRawOne();
 
             const offTrackLearners = await computeOffTrackLearners({
                 learnerRepository,
@@ -3337,6 +3492,8 @@ class LearnerController {
                 sessionDueIn7Days_count: Number(sessionDueIn7DaysCountRaw?.count || 0),
                 sampleDueInMonth_count: Number(sampleDueInMonthCountRaw?.count || 0),
                 samplingPlanOverdue_count: Number(samplingPlanOverdueCountRaw?.count || 0),
+                learners_on_sample_plan_count: Number(learnersOnSamplePlanCountRaw?.count || 0),
+                learners_not_on_sample_plan_count: Number(learnersNotOnSamplePlanCountRaw?.count || 0),
                 risk_ratings_count: Number(riskRatingCountRaw?.count || 0),
                 gateway_learners_count: Number(gatewayLearnersCountRaw?.count || 0),
                 off_track_learners_count: offTrackLearners.length,
@@ -3566,7 +3723,7 @@ const computeOffTrackLearners = async (deps: {
         durationMetrics: CourseDurationMetrics;
     }> = [];
     for (const userCourse of mainCourses) {
-        
+
         const learnerId = typeof userCourse.learner_id === "object"
             ? (userCourse.learner_id as Learner).learner_id
             : userCourse.learner_id;
