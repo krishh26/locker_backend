@@ -11,6 +11,16 @@ import { TimeLogType } from "./constants";
 import { unitCompletionStatus } from "./unitCompletion";
 import { getOTJSummary } from "./services/otj.service";
 
+export interface GatewayChecklistFields {
+    gateway_checklist_progress: number;
+    date_assessor_signed_off: Date | string | null;
+    assessor_name_signed_off: string | null;
+    date_employer_signed_off: Date | string | null;
+    employer_name_signed_off: string | null;
+    date_learner_signed_off: Date | string | null;
+    date_checklist_signed_off: Date | string | null;
+}
+
 export interface LearnerReportCommonFields {
     trainer_name: string | null;
     overall_green: number;
@@ -20,6 +30,7 @@ export interface LearnerReportCommonFields {
     main_orange: number;
     supplementary_training_status_green: number;
     supplementary_training_status_orange: number;
+    supplementary_training_status: string | null;
     weeks_since_last_review: number | null;
     trainer_comment: string | null;
     last_formal_review: Date | null;
@@ -29,6 +40,25 @@ export interface LearnerReportCommonFields {
     off_the_job_hours_required: number;
     off_the_job_hours_required_to_date: number;
     last_recorded_otj_entry_date: Date | null;
+    employer_name: string | null;
+    evidence_last_uploaded: Date | null;
+    fs_english: string | null;
+    fs_maths: string | null;
+    fSkillsEngStatus: string | null;
+    fSkillsMathsStatus: string | null;
+    last_visit_type: string | null;
+    last_visit_date: Date | null;
+    next_visit_type: string | null;
+    next_visit_date: Date | null;
+    course_name: string | null;
+    course_status: string | null;
+    start_date: Date | null;
+    end_date: Date | null;
+}
+
+export interface SamplingPlanReportFields {
+    course_name: string | null;
+    iqa_name: string | null;
 }
 
 export const emptyLearnerReportFields = (): LearnerReportCommonFields => ({
@@ -40,6 +70,7 @@ export const emptyLearnerReportFields = (): LearnerReportCommonFields => ({
     main_orange: 0,
     supplementary_training_status_green: 0,
     supplementary_training_status_orange: 0,
+    supplementary_training_status: null,
     weeks_since_last_review: null,
     trainer_comment: null,
     last_formal_review: null,
@@ -49,6 +80,20 @@ export const emptyLearnerReportFields = (): LearnerReportCommonFields => ({
     off_the_job_hours_required: 0,
     off_the_job_hours_required_to_date: 0,
     last_recorded_otj_entry_date: null,
+    employer_name: null,
+    evidence_last_uploaded: null,
+    fs_english: null,
+    fs_maths: null,
+    fSkillsEngStatus: null,
+    fSkillsMathsStatus: null,
+    last_visit_type: null,
+    last_visit_date: null,
+    next_visit_type: null,
+    next_visit_date: null,
+    course_name: null,
+    course_status: null,
+    start_date: null,
+    end_date: null,
 });
 
 export const calculateWeeksSinceLastReview = (reviewDate: Date | string | null | undefined): number | null => {
@@ -59,6 +104,47 @@ export const calculateWeeksSinceLastReview = (reviewDate: Date | string | null |
 };
 
 const roundPercent = (value: number) => Number(value.toFixed(2));
+
+const formatUserName = (user: any): string | null => {
+    if (!user) return null;
+    const name = `${user.first_name || ""} ${user.last_name || ""}`.trim();
+    return name || null;
+};
+
+const pickFirstValue = (...values: any[]) => {
+    for (const value of values) {
+        if (value !== undefined && value !== null && value !== "") return value;
+    }
+    return null;
+};
+
+const pickFirstName = (...values: any[]): string | null => {
+    for (const value of values) {
+        if (typeof value === "string" && value.trim()) return value.trim();
+        if (value?.name && String(value.name).trim()) return String(value.name).trim();
+        const formatted = formatUserName(value);
+        if (formatted) return formatted;
+    }
+    return null;
+};
+
+const deriveSkillStatus = (
+    green: string | null | undefined,
+    orange: string | null | undefined
+): string | null => {
+    const greenValue = parseFloat(String(green || "0")) || 0;
+    const orangeValue = parseFloat(String(orange || "0")) || 0;
+    if (greenValue >= 100) return "Completed";
+    if (greenValue > 0 || orangeValue > 0) return "In Progress";
+    if (green || orange) return "Not Started";
+    return null;
+};
+
+const deriveSupplementaryTrainingStatus = (green: number, orange: number): string | null => {
+    if (green >= 100) return "Completed";
+    if (green > 0 || orange > 0) return "In Progress";
+    return "Not Started";
+};
 
 interface UnitCountBreakdown {
     totalUnits: number;
@@ -204,7 +290,67 @@ const computeResourceProgress = (
 };
 
 const getActivityUserId = (activity: any): number | null => {
-    return activity?.learner?.user_id ?? null;
+    const learner = activity?.learner;
+    if (!learner) return null;
+    if (typeof learner.user_id === "number") return learner.user_id;
+    return learner.user_id ?? null;
+};
+
+export const extractGatewayChecklistFields = (courseJson: any): GatewayChecklistFields => {
+    const checklist = Array.isArray(courseJson?.checklist) ? courseJson.checklist : [];
+    const signOffs = courseJson?.sign_offs ?? courseJson?.checklist_sign_offs ?? courseJson?.signOffs ?? {};
+
+    let completed = 0;
+    checklist.forEach((item: any) => {
+        if (item?.completed || item?.checked || item?.achieved || item?.isCompleted) {
+            completed += 1;
+        }
+    });
+
+    const progress = checklist.length > 0 ? roundPercent((completed / checklist.length) * 100) : 0;
+
+    return {
+        gateway_checklist_progress: progress,
+        date_assessor_signed_off: pickFirstValue(
+            signOffs.assessor?.date,
+            signOffs.assessor?.signed_at,
+            signOffs.assessor_signed_off,
+            courseJson?.assessor_signed_off_date,
+            courseJson?.date_assessor_signed_off
+        ),
+        assessor_name_signed_off: pickFirstName(
+            signOffs.assessor?.name,
+            signOffs.assessor_name,
+            courseJson?.assessor_signed_off_name,
+            signOffs.assessor
+        ),
+        date_employer_signed_off: pickFirstValue(
+            signOffs.employer?.date,
+            signOffs.employer?.signed_at,
+            signOffs.employer_signed_off,
+            courseJson?.employer_signed_off_date,
+            courseJson?.date_employer_signed_off
+        ),
+        employer_name_signed_off: pickFirstName(
+            signOffs.employer?.name,
+            signOffs.employer_name,
+            courseJson?.employer_signed_off_name,
+            signOffs.employer
+        ),
+        date_learner_signed_off: pickFirstValue(
+            signOffs.learner?.date,
+            signOffs.learner?.signed_at,
+            signOffs.learner_signed_off,
+            courseJson?.learner_signed_off_date,
+            courseJson?.date_learner_signed_off
+        ),
+        date_checklist_signed_off: pickFirstValue(
+            signOffs.checklist?.date,
+            signOffs.checklist_signed_off,
+            courseJson?.checklist_signed_off_date,
+            courseJson?.date_checklist_signed_off
+        ),
+    };
 };
 
 export const extractLearnerIdFromReportRow = (row: any): number | null => {
@@ -213,8 +359,27 @@ export const extractLearnerIdFromReportRow = (row: any): number | null => {
     if (row.learner_id?.learner_id) return row.learner_id.learner_id;
     if (row.learner?.learner_id) return row.learner.learner_id;
     if (Array.isArray(row.learners) && row.learners[0]?.learner_id) return row.learners[0].learner_id;
+    if (row.learner_plan?.learners?.[0]?.learner_id) return row.learner_plan.learners[0].learner_id;
+    if (row.plan_detail?.learner?.learner_id) return row.plan_detail.learner.learner_id;
     return null;
 };
+
+export const mapSamplingPlanActionRow = <T extends Record<string, any>>(row: T): T & SamplingPlanReportFields => ({
+        ...row,
+        course_name: row.plan_detail?.samplingPlan?.course?.course_name ?? null,
+        iqa_name: formatUserName(row.plan_detail?.samplingPlan?.iqa),
+});
+
+export const mapSamplingPlanDetailRow = <T extends Record<string, any>>(row: T): T & SamplingPlanReportFields => ({
+    ...row,
+    course_name: row.samplingPlan?.course?.course_name ?? null,
+    iqa_name: formatUserName(row.samplingPlan?.iqa),
+});
+
+export const mapGatewayUserCourseRow = <T extends Record<string, any>>(row: T): T & GatewayChecklistFields => ({
+    ...row,
+    ...extractGatewayChecklistFields(row.course),
+});
 
 export const buildLearnerReportFieldsMap = async (
     learnerIds: number[]
@@ -235,17 +400,18 @@ export const buildLearnerReportFieldsMap = async (
     const learners = await learnerRepository
         .createQueryBuilder("learner")
         .leftJoinAndSelect("learner.user_id", "user_id")
+        .leftJoinAndSelect("learner.employer_id", "employer")
         .where("learner.learner_id IN (:...learnerIds)", { learnerIds: uniqueLearnerIds })
         .getMany();
 
     const learnerById = new Map<number, Learner>(learners.map((l): [number, Learner] => [l.learner_id, l]));
-    //console.log("????", learnerById)
     const userIds = learners
         .map((l) => l.user_id?.user_id)
         .filter((id): id is number => typeof id === "number");
-//console.log("????", userIds)
+
     const userCourses = await userCourseRepository
         .createQueryBuilder("uc")
+        .leftJoinAndSelect("uc.learner_id", "learner")
         .leftJoinAndSelect("uc.trainer_id", "trainer")
         .where("uc.learner_id IN (:...learnerIds)", { learnerIds: uniqueLearnerIds })
         .getMany();
@@ -273,7 +439,8 @@ export const buildLearnerReportFieldsMap = async (
             .andWhere("assignment_user.user_id IN (:...userIds)", { userIds })
             .getMany()
         : [];
-        const formalReviewRows = await learnerPlanRepository
+
+    const formalReviewRows = await learnerPlanRepository
         .createQueryBuilder("lp")
         .leftJoin("lp.learners", "learner")
         .select(["learner.learner_id AS learner_id", "lp.startDate AS startDate"])
@@ -281,10 +448,6 @@ export const buildLearnerReportFieldsMap = async (
         .andWhere("lp.type = :type", { type: LearnerPlanType.FormalReview })
         .orderBy("lp.startDate", "DESC")
         .getRawMany();
-        console.log("????", formalReviewRows)
-        console.log(formalReviewRows);
-console.log(formalReviewRows[0].startDate);
-console.log(formalReviewRows[0].startdate);
 
     const lastFormalReviewByLearner = new Map<number, Date>();
     formalReviewRows.forEach((row: any) => {
@@ -297,6 +460,52 @@ console.log(formalReviewRows[0].startdate);
         if (!lastFormalReviewByLearner.has(learnerId)) {
             lastFormalReviewByLearner.set(learnerId, reviewDate);
         }
+    });
+
+    const lastVisitRows = await learnerPlanRepository
+        .createQueryBuilder("lp")
+        .leftJoin("lp.learners", "learner")
+        .select([
+            "learner.learner_id AS learner_id",
+            "lp.type AS type",
+            "lp.startDate AS startDate",
+        ])
+        .where("learner.learner_id IN (:...learnerIds)", { learnerIds: uniqueLearnerIds })
+        .andWhere("lp.startDate <= :now", { now: new Date() })
+        .orderBy("learner.learner_id", "ASC")
+        .addOrderBy("lp.startDate", "DESC")
+        .distinctOn(["learner.learner_id"])
+        .getRawMany();
+
+    const nextVisitRows = await learnerPlanRepository
+        .createQueryBuilder("lp")
+        .leftJoin("lp.learners", "learner")
+        .select([
+            "learner.learner_id AS learner_id",
+            "lp.type AS type",
+            "lp.startDate AS startDate",
+        ])
+        .where("learner.learner_id IN (:...learnerIds)", { learnerIds: uniqueLearnerIds })
+        .andWhere("lp.startDate > :now", { now: new Date() })
+        .orderBy("learner.learner_id", "ASC")
+        .addOrderBy("lp.startDate", "ASC")
+        .distinctOn(["learner.learner_id"])
+        .getRawMany();
+
+    const lastVisitByLearner = new Map<number, { type: string; date: Date }>();
+    lastVisitRows.forEach((row: any) => {
+        lastVisitByLearner.set(Number(row.learner_id), {
+            type: row.type,
+            date: row.startdate,
+        });
+    });
+
+    const nextVisitByLearner = new Map<number, { type: string; date: Date }>();
+    nextVisitRows.forEach((row: any) => {
+        nextVisitByLearner.set(Number(row.learner_id), {
+            type: row.type,
+            date: row.startdate,
+        });
     });
 
     const trainerCommentRows = userIds.length
@@ -320,6 +529,23 @@ console.log(formalReviewRows[0].startdate);
         const userId = Number(row.user_id);
         if (!trainerCommentByUserId.has(userId)) {
             trainerCommentByUserId.set(userId, row.trainer_feedback);
+        }
+    });
+
+    const lastEvidenceRows = userIds.length
+        ? await assignmentRepository
+            .createQueryBuilder("assignment")
+            .leftJoin("assignment.user", "user")
+            .select(["user.user_id AS user_id", "MAX(assignment.created_at) AS last_uploaded_at"])
+            .where("user.user_id IN (:...userIds)", { userIds })
+            .groupBy("user.user_id")
+            .getRawMany()
+        : [];
+
+    const lastEvidenceByUserId = new Map<number, Date>();
+    lastEvidenceRows.forEach((row: any) => {
+        if (row.last_uploaded_at) {
+            lastEvidenceByUserId.set(Number(row.user_id), new Date(row.last_uploaded_at));
         }
     });
 
@@ -359,11 +585,11 @@ console.log(formalReviewRows[0].startdate);
 
     const supplementaryActivities = userIds.length
         ? await supplementaryActivityRepository
-    .createQueryBuilder("activity")
-    .leftJoinAndSelect("activity.resource", "resource")
-    .leftJoinAndSelect("activity.learner", "learner")
-    .where("learner.user_id IN (:...userIds)", { userIds })
-    .getMany()
+            .createQueryBuilder("activity")
+            .leftJoinAndSelect("activity.resource", "resource")
+            .leftJoinAndSelect("activity.learner", "activityLearner")
+            .where("activity.learner_id IN (:...userIds)", { userIds })
+            .getMany()
         : [];
 
     for (const learnerId of uniqueLearnerIds) {
@@ -378,9 +604,11 @@ console.log(formalReviewRows[0].startdate);
             null;
 
         const trainer = mainCourse?.trainer_id as any;
-        const trainerName = trainer
-            ? `${trainer.first_name || ""} ${trainer.last_name || ""}`.trim() || null
-            : null;
+        const trainerName = formatUserName(trainer);
+        const employerName = (learner as any).employer_id?.employer_name ?? null;
+        const lastVisit = lastVisitByLearner.get(learnerId) || null;
+        const nextVisit = nextVisitByLearner.get(learnerId) || null;
+        const mainCourseJson = (mainCourse?.course as any) || null;
 
         const courseBreakdowns = coursesForLearner.map((uc) => {
             const courseId = (uc.course as any)?.course_id;
@@ -421,7 +649,7 @@ console.log(formalReviewRows[0].startdate);
         const lastFormalReview = lastFormalReviewByLearner.get(learnerId) || null;
         let otjSummary: Awaited<ReturnType<typeof getOTJSummary>> | null = null;
         try {
-            otjSummary = await getOTJSummary(learnerId);
+            otjSummary = await getOTJSummary(learnerId, undefined, true);
         } catch {
             otjSummary = null;
         }
@@ -443,6 +671,10 @@ console.log(formalReviewRows[0].startdate);
             main_orange: mainBreakdown.orange,
             supplementary_training_status_green: supplementaryProgress.green,
             supplementary_training_status_orange: supplementaryProgress.orange,
+            supplementary_training_status: deriveSupplementaryTrainingStatus(
+                supplementaryProgress.green,
+                supplementaryProgress.orange
+            ),
             weeks_since_last_review: calculateWeeksSinceLastReview(lastFormalReview),
             trainer_comment: userId ? trainerCommentByUserId.get(userId) || null : null,
             last_formal_review: lastFormalReview,
@@ -452,6 +684,26 @@ console.log(formalReviewRows[0].startdate);
             off_the_job_hours_required: roundPercent(requiredHours),
             off_the_job_hours_required_to_date: roundPercent(requiredToDate),
             last_recorded_otj_entry_date: userId ? lastOtjEntryByUserId.get(userId) || null : null,
+            employer_name: employerName,
+            evidence_last_uploaded: userId ? lastEvidenceByUserId.get(userId) || null : null,
+            fs_english: learner.fs_english_green_progress ?? null,
+            fs_maths: learner.fs_maths_green_progress ?? null,
+            fSkillsEngStatus: deriveSkillStatus(
+                learner.fs_english_green_progress,
+                learner.fs_english_orange_progress
+            ),
+            fSkillsMathsStatus: deriveSkillStatus(
+                learner.fs_maths_green_progress,
+                learner.fs_maths_orange_progress
+            ),
+            last_visit_type: lastVisit?.type || null,
+            last_visit_date: lastVisit?.date || null,
+            next_visit_type: nextVisit?.type || null,
+            next_visit_date: nextVisit?.date || null,
+            course_name: mainCourseJson?.course_name ?? null,
+            course_status: mainCourse?.course_status ?? null,
+            start_date: mainCourse?.start_date ?? null,
+            end_date: mainCourse?.end_date ?? null,
         });
     }
 
@@ -475,6 +727,27 @@ export const enrichReportRowsWithCommonFields = async <T extends Record<string, 
             ...commonFields,
         };
     });
+};
+
+export const enrichSamplingPlanActionRows = async <T extends Record<string, any>>(
+    rows: T[]
+): Promise<Array<T & LearnerReportCommonFields & SamplingPlanReportFields>> => {
+    const mappedRows = rows.map(mapSamplingPlanActionRow);
+    return enrichReportRowsWithCommonFields(mappedRows);
+};
+
+export const enrichSamplingPlanDetailRows = async <T extends Record<string, any>>(
+    rows: T[]
+): Promise<Array<T & LearnerReportCommonFields & SamplingPlanReportFields>> => {
+    const mappedRows = rows.map(mapSamplingPlanDetailRow);
+    return enrichReportRowsWithCommonFields(mappedRows);
+};
+
+export const enrichGatewayLearnerRows = async <T extends Record<string, any>>(
+    rows: T[]
+): Promise<Array<T & LearnerReportCommonFields & GatewayChecklistFields>> => {
+    const mappedRows = rows.map(mapGatewayUserCourseRow);
+    return enrichReportRowsWithCommonFields(mappedRows);
 };
 
 export const resolveLearnerIdByUserId = async (userIds: number[]): Promise<Map<number, number>> => {

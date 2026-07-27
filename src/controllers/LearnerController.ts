@@ -32,6 +32,9 @@ import { RiskRating } from "../entity/RiskRating.entity";
 import { CourseStatus } from "../util/constants";
 import {
     enrichReportRowsWithCommonFields,
+    enrichSamplingPlanActionRows,
+    enrichSamplingPlanDetailRows,
+    enrichGatewayLearnerRows,
     resolveLearnerIdByUserId,
 } from "../util/learnerReportEnrichment";
 
@@ -1935,16 +1938,6 @@ class LearnerController {
                 }
             };
 
-            const applyCentreAssignmentLearnerFilter = (qb: any, learnerUserIdColumn: string) => {
-                if (centreAdminUserIds !== null) {
-                    if (centreAdminUserIds.length === 0) return;
-                    qb.andWhere(
-                        `${learnerUserIdColumn} IN (SELECT l.user_id FROM learner l INNER JOIN user_course uc ON uc.learner_id = l.learner_id WHERE uc.trainer_id IN (:...centreAdminUserIds))`,
-                        { centreAdminUserIds }
-                    );
-                }
-            };
-
             const hasNoAccess = (accessibleOrgIds !== null && accessibleOrgIds.length === 0) ||
                 (centreAdminUserIds !== null && centreAdminUserIds.length === 0);
 
@@ -2429,7 +2422,7 @@ class LearnerController {
                     applyOrgFilterOnUserAlias(qb, "user_id");
                     applyCentreLearnerTrainerFilter(qb, "learner");
 
-                    const learner_plan_due_in_next_7_days = await qb.getMany();
+                    const learner_plan_due_in_next_7_days = await enrichReportRowsWithCommonFields(await qb.getMany());
 
                     return res.status(200).json({
                         message: "Learner plan due in next 7 days fetched successfully",
@@ -2456,7 +2449,7 @@ class LearnerController {
                     applyOrgFilterOnUserAlias(qb, "user_id");
                     applyCentreLearnerTrainerFilter(qb, "learner");
 
-                    const session_learner_action_due = await qb.getMany();
+                    const session_learner_action_due = await enrichReportRowsWithCommonFields(await qb.getMany());
 
                     return res.status(200).json({
                         message: "Session learner action due fetched successfully",
@@ -2483,7 +2476,7 @@ class LearnerController {
                     applyOrgFilterOnUserAlias(qb, "user_id");
                     applyCentreLearnerTrainerFilter(qb, "learner");
 
-                    const session_learner_action_due_in_next_7_days = await qb.getMany();
+                    const session_learner_action_due_in_next_7_days = await enrichReportRowsWithCommonFields(await qb.getMany());
 
                     return res.status(200).json({
                         message: "Session learner action due in next 7 days fetched successfully",
@@ -2510,7 +2503,7 @@ class LearnerController {
                     applyOrgFilterOnUserAlias(qb, "user_id");
                     applyCentreLearnerTrainerFilter(qb, "learner");
 
-                    const session_learner_action_overdue = await qb.getMany();
+                    const session_learner_action_overdue = await enrichReportRowsWithCommonFields(await qb.getMany());
 
                     return res.status(200).json({
                         message: "Session learner action overdue fetched successfully",
@@ -2588,7 +2581,7 @@ class LearnerController {
                         .leftJoinAndSelect("plan_detail.learner", "learner")
                         .leftJoinAndSelect("learner.user_id", "user_id")
                         .leftJoin("sp.course", "course")
-                        .leftJoin("sp.iqa", "sp_iqa")
+                        .leftJoinAndSelect("sp.iqa", "sp_iqa")
                         .where("action.target_date < :now", { now: new Date() });
                     if (accessibleOrgIds !== null && accessibleOrgIds.length > 0) {
                         qb.andWhere("course.organisation_id IN (:...orgIds)", { orgIds: accessibleOrgIds });
@@ -2596,7 +2589,7 @@ class LearnerController {
                     if (centreAdminUserIds !== null && centreAdminUserIds.length > 0) {
                         qb.andWhere("sp_iqa.user_id IN (:...centreAdminUserIds)", { centreAdminUserIds });
                     }
-                    const iqa_actions_overdue = await qb.getMany();
+                    const iqa_actions_overdue = await enrichSamplingPlanActionRows(await qb.getMany());
                     return res.status(200).json({
                         message: "IQA actions overdue fetched successfully",
                         status: true,
@@ -2620,14 +2613,14 @@ class LearnerController {
                         .leftJoinAndSelect("plan_detail.learner", "learner")
                         .leftJoinAndSelect("learner.user_id", "user_id")
                         .leftJoin("sp.course", "course")
-                        .leftJoin("sp.iqa", "sp_iqa");
+                        .leftJoinAndSelect("sp.iqa", "sp_iqa")
                     if (accessibleOrgIds !== null && accessibleOrgIds.length > 0) {
                         qb.andWhere("course.organisation_id IN (:...orgIds)", { orgIds: accessibleOrgIds });
                     }
                     if (centreAdminUserIds !== null && centreAdminUserIds.length > 0) {
                         qb.andWhere("sp_iqa.user_id IN (:...centreAdminUserIds)", { centreAdminUserIds });
                     }
-                    const all_iqa_actions = await qb.getMany();
+                    const all_iqa_actions = await enrichSamplingPlanActionRows(await qb.getMany());
                     return res.status(200).json({
                         message: "All IQA actions fetched successfully",
                         status: true,
@@ -2651,7 +2644,7 @@ class LearnerController {
                         .leftJoinAndSelect("plan_detail.learner", "learner")
                         .leftJoinAndSelect("learner.user_id", "user_id")
                         .leftJoin("sp.course", "course")
-                        .leftJoin("sp.iqa", "sp_iqa")
+                        .leftJoinAndSelect("sp.iqa", "sp_iqa")
                         .where("action.target_date BETWEEN :now AND :nowPlus30", {
                             now: new Date(),
                             nowPlus30: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
@@ -2662,7 +2655,7 @@ class LearnerController {
                     if (centreAdminUserIds !== null && centreAdminUserIds.length > 0) {
                         qb.andWhere("sp_iqa.user_id IN (:...centreAdminUserIds)", { centreAdminUserIds });
                     }
-                    const iqa_actions_due_in_30_days = await qb.getMany();
+                    const iqa_actions_due_in_30_days = await enrichSamplingPlanActionRows(await qb.getMany());
                     return res.status(200).json({
                         message: "IQA actions due in 30 days fetched successfully",
                         status: true,
@@ -2734,7 +2727,7 @@ class LearnerController {
                         .leftJoinAndSelect("detail.learner", "learner")
                         .leftJoinAndSelect("learner.user_id", "user_id")
                         .leftJoin("sp.course", "course")
-                        .leftJoin("sp.iqa", "sp_iqa")
+                        .leftJoinAndSelect("sp.iqa", "sp_iqa")
                         .where("detail.plannedDate IS NOT NULL")
                         .andWhere("EXTRACT(MONTH FROM detail.plannedDate) = EXTRACT(MONTH FROM CURRENT_DATE)")
                         .andWhere("EXTRACT(YEAR FROM detail.plannedDate) = EXTRACT(YEAR FROM CURRENT_DATE)");
@@ -2744,7 +2737,7 @@ class LearnerController {
                     if (centreAdminUserIds !== null && centreAdminUserIds.length > 0) {
                         qb.andWhere("sp_iqa.user_id IN (:...centreAdminUserIds)", { centreAdminUserIds });
                     }
-                    const sample_due_in_month = await qb.getMany();
+                    const sample_due_in_month = await enrichSamplingPlanDetailRows(await qb.getMany());
                     return res.status(200).json({
                         message: "Sample due in this month fetched successfully",
                         status: true,
@@ -2767,7 +2760,7 @@ class LearnerController {
                         .leftJoinAndSelect("detail.learner", "learner")
                         .leftJoinAndSelect("learner.user_id", "user_id")
                         .leftJoin("sp.course", "course")
-                        .leftJoin("sp.iqa", "sp_iqa")
+                        .leftJoinAndSelect("sp.iqa", "sp_iqa")
                         .where("detail.plannedDate < :now", { now: new Date() });
                     if (accessibleOrgIds !== null && accessibleOrgIds.length > 0) {
                         qb.andWhere("course.organisation_id IN (:...orgIds)", { orgIds: accessibleOrgIds });
@@ -2775,7 +2768,7 @@ class LearnerController {
                     if (centreAdminUserIds !== null && centreAdminUserIds.length > 0) {
                         qb.andWhere("sp_iqa.user_id IN (:...centreAdminUserIds)", { centreAdminUserIds });
                     }
-                    const sampling_plan_overdue = await qb.getMany();
+                    const sampling_plan_overdue = await enrichSamplingPlanDetailRows(await qb.getMany());
                     return res.status(200).json({
                         message: "Sampling plan overdues fetched successfully",
                         status: true,
@@ -2962,7 +2955,7 @@ class LearnerController {
                     applyOrgFilterOnUserAlias(qb, "user_id");
                     applyCentreUserFilter(qb, "trainer.user_id");
 
-                    const gateway_learners = await qb.getMany();
+                    const gateway_learners = await enrichGatewayLearnerRows(await qb.getMany());
 
                     return res.status(200).json({
                         message: "Gateway learners fetched successfully",
