@@ -37,6 +37,9 @@ export class Plan {
     @OneToMany(() => FeaturePlan, featurePlan => featurePlan.plan)
     featurePlans: FeaturePlan[];
 
+    @Column({ type: 'varchar', length: 10, nullable: true, default: 'GBP' })
+    currency: string | null;
+    
     @DeleteDateColumn({ type: 'timestamp', nullable: true })
     deleted_at: Date;
 

@@ -52,6 +52,7 @@ class SubscriptionController {
                 name,
                 description: description || null,
                 price: price || 0,
+                currency: currency || 'USD',
                 billing_period: billingCycle || 'monthly',
                 status: PlanStatus.Active
             });
@@ -135,7 +136,7 @@ class SubscriptionController {
                     code: plan.id.toString(),
                     description: plan.description,
                     price: plan.price,
-                    currency: 'USD',
+                    currency: plan.currency,
                     billingCycle: plan.billing_period,
                     features,
                     isActive: plan.status === PlanStatus.Active,
@@ -195,7 +196,7 @@ class SubscriptionController {
                     code: plan.id.toString(),
                     description: plan.description,
                     price: plan.price,
-                    currency: 'USD',
+                    currency: plan.currency,
                     billingCycle: plan.billing_period,
                     features,
                     isActive: plan.status === PlanStatus.Active,
@@ -224,7 +225,7 @@ class SubscriptionController {
             }
 
             const planId = parseInt(req.params.id);
-            const { name, description, price, userLimit, centreLimit, organisationLimit, features } = req.body;
+            const { name, description, price, currency, billingCycle, userLimit, centreLimit, organisationLimit, features } = req.body;
             const planRepository = AppDataSource.getRepository(Plan);
 
             const plan = await planRepository.findOne({
@@ -241,6 +242,8 @@ class SubscriptionController {
             if (name !== undefined) plan.name = name;
             if (description !== undefined) plan.description = description;
             if (price !== undefined) plan.price = price;
+            if (currency !== undefined) plan.currency = currency;
+            if (billingCycle !== undefined) plan.billing_period = billingCycle;
 
             await planRepository.save(plan);
 
@@ -277,7 +280,7 @@ class SubscriptionController {
                     code: plan.id.toString(),
                     description: plan.description,
                     price: plan.price,
-                    currency: 'USD',
+                    currency: plan.currency,
                     billingCycle: plan.billing_period,
                     userLimit,
                     centreLimit,
