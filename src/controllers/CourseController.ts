@@ -38,7 +38,7 @@ const enhanceCourseData = (course: any) => {
         duration_value: course.duration_value || '',
         two_page_standard_link: course.two_page_standard_link || '',
         assessment_plan_link: course.assessment_plan_link || '',
-        active: course.active || true,
+        active: course.active ?? true,
         included_in_off_the_job: course.included_in_off_the_job || false,
         assigned_gateway_id: course.assigned_gateway_id || null,
         assigned_gateway_name: course.assigned_gateway_name || '',
@@ -405,26 +405,46 @@ class CourseController {
                 });
             }
 
-            if (req.user && courseToDelete.organisation_id != null && !(await canAccessOrganisation(req.user, courseToDelete.organisation_id, getScopeContext(req)))) {
-                return res.status(403).json({ message: 'You do not have access to delete this course', status: false });
+            // Organisation access check
+            if (
+                req.user &&
+                courseToDelete.organisation_id != null &&
+                !(await canAccessOrganisation(
+                    req.user,
+                    courseToDelete.organisation_id,
+                    getScopeContext(req)
+                ))
+            ) {
+                return res.status(403).json({
+                    message: 'You do not have access to delete this course',
+                    status: false,
+                });
             }
+
+            // Global course can only be deleted by Master Admin
             if (req.user && courseToDelete.organisation_id == null) {
                 const { resolveUserRole } = await import('../util/organisationFilter');
                 const { UserRole } = await import('../util/constants');
+
                 if (resolveUserRole(req.user) !== UserRole.MasterAdmin) {
-                    return res.status(403).json({ message: 'You do not have access to delete this course', status: false });
+                    return res.status(403).json({
+                        message: 'You do not have access to delete this course',
+                        status: false,
+                    });
                 }
             }
 
-            await courseRepository.remove(courseToDelete);
+            // Soft delete
+            courseToDelete.active = false;
+            await courseRepository.save(courseToDelete);
 
-            res.status(200).json({
+            return res.status(200).json({
                 message: "Course deleted successfully",
                 status: true,
             });
 
         } catch (error) {
-            res.status(500).json({
+            return res.status(500).json({
                 message: "Internal Server Error",
                 error: error.message,
                 status: false,
