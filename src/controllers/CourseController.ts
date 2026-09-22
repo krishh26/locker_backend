@@ -808,6 +808,14 @@ class CourseController {
                 qb.andWhere("(course.course_name ILIKE :keyword)", { keyword: `%${req.query.keyword}%` });
             }
 
+            if (req.query.status !== undefined) {
+                const status = String(req.query.status).toLowerCase() === 'true';
+
+                qb.andWhere("course.active = :status", {
+                    status,
+                });
+            }
+
             if (req.query.core_type) {
                 qb.andWhere("course.course_core_type = :core_type", { core_type: req.query.core_type });
             }
