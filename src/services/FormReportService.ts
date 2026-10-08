@@ -135,10 +135,53 @@ function dedupeFields(fields: string[]): string[] {
     return out;
 }
 
+type TableCellConfig = { type?: string; text?: string };
+
+type TableFieldConfig = {
+    columns?: { id: string; header?: string }[];
+    rows?: { id: string; cells?: Record<string, TableCellConfig> }[];
+};
+
 type NormalizedField = {
     id: string;
     label: string;
+    table?: TableFieldConfig;
 };
+
+/**
+ * Turns a form builder table answer (rowId -> columnId -> value) into one readable cell,
+ * e.g. "Week 1 - Hours: 7; Week 1 - Signed off: Yes". Rows are labelled by their first fixed-text cell.
+ */
+function formatTableAnswer(value: unknown, table: TableFieldConfig): string {
+    let answer: Record<string, Record<string, string>> = {};
+    if (typeof value === 'string' && value) {
+        try {
+            answer = JSON.parse(value);
+        } catch {
+            return value;
+        }
+    } else if (value && typeof value === 'object') {
+        answer = value as Record<string, Record<string, string>>;
+    }
+
+    const columns = table.columns ?? [];
+    const parts: string[] = [];
+    (table.rows ?? []).forEach((row, rowIndex) => {
+        const cells = row.cells ?? {};
+        const labelColumn = columns.find((c) => cells[c.id]?.type === 'static' && cells[c.id]?.text);
+        const rowLabel = labelColumn ? String(cells[labelColumn.id].text) : `Row ${rowIndex + 1}`;
+        for (const column of columns) {
+            const type = cells[column.id]?.type;
+            if (!type || type === 'static') continue;
+            const raw = answer?.[row.id]?.[column.id] ?? '';
+            const display = type === 'checkbox' ? (raw === 'true' ? 'Yes' : 'No') : raw;
+            if (!display) continue;
+            const header = column.header ? ` - ${column.header}` : '';
+            parts.push(`${rowLabel}${header}: ${display}`);
+        }
+    });
+    return parts.join('; ');
+}
 
 function normalizeTemplateField(node: unknown): NormalizedField | null {
     if (node == null || typeof node !== 'object' || Array.isArray(node)) return null;
@@ -151,13 +194,23 @@ function normalizeTemplateField(node: unknown): NormalizedField | null {
     return { id, label: label || id };
 }
 
+// Form builder field types that only display content and never hold an answer.
+const DISPLAY_ONLY_FIELD_TYPES = new Set(['richtext']);
+
 function collectTemplateFields(node: unknown, out: NormalizedField[] = []): NormalizedField[] {
     if (node == null || typeof node !== 'object') return out;
     if (Array.isArray(node)) {
         for (const item of node) collectTemplateFields(item, out);
         return out;
     }
+    const nodeType = String((node as Record<string, unknown>).type ?? '');
+    if (DISPLAY_ONLY_FIELD_TYPES.has(nodeType)) return out;
     const f = normalizeTemplateField(node);
+    // A table is one answer; its rows/columns also carry ids, so don't treat them as fields.
+    if (nodeType === 'table') {
+        if (f) out.push({ ...f, table: (node as Record<string, unknown>).table as TableFieldConfig });
+        return out;
+    }
     if (f) out.push(f);
     for (const v of Object.values(node as Record<string, unknown>)) {
         collectTemplateFields(v, out);
@@ -364,9 +417,9 @@ export class FormReportService {
                 return { source: 'standard' as const, key: std.key, header: std.label, getValue: std.getValue };
             }
             const byId = maps.byId.get(f);
-            if (byId) return { source: 'custom' as const, key: byId.id, header: byId.label };
+            if (byId) return { source: 'custom' as const, key: byId.id, header: byId.label, table: byId.table };
             const byLabel = maps.byLabelLower.get(f.toLowerCase());
-            if (byLabel) return { source: 'custom' as const, key: byLabel.id, header: byLabel.label };
+            if (byLabel) return { source: 'custom' as const, key: byLabel.id, header: byLabel.label, table: byLabel.table };
             const fallbackLabel = findLabelInStructure(formStructure, f) ?? f;
             return { source: 'custom' as const, key: f, header: fallbackLabel };
         });
@@ -409,6 +462,7 @@ export class FormReportService {
                     }
                     // Prefer template id key, but fall back to label key for older stored payloads.
                     const direct = getNestedValue(rowData, f.key);
+                    if (direct !== undefined && f.table) return formatTableAnswer(direct, f.table);
                     if (direct !== undefined) return formatCellValue(direct);
                     const byHeader = getNestedValue(rowData, f.header);
                     return formatCellValue(byHeader);
