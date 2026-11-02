@@ -541,10 +541,12 @@ class LearnerController {
             const learner: any = await learnerRepository
                 .createQueryBuilder('learner')
                 .leftJoin('learner.user_id', 'user')
+                .leftJoin('user.line_manager', 'line_manager')
                 .leftJoinAndSelect('learner.employer_id', 'employer')
                 .leftJoinAndSelect('learner.funding_band', 'funding_band')
                 .leftJoinAndSelect('funding_band.course', 'funding_course')
                 .addSelect(['user.user_id', 'user.user_name', 'user.avatar', 'user.email'])
+                .addSelect(['line_manager.user_id', 'line_manager.first_name', 'line_manager.last_name', 'line_manager.email', 'line_manager.mobile'])
                 .where('learner.learner_id = :learner_id', { learner_id })
                 .getOne();
 
@@ -900,7 +902,12 @@ class LearnerController {
             }
 
             // Get line manager information
-            const line_manager_name = learner.line_manager_name || null;
+            const lineManager = learner.user_id?.line_manager;
+            const line_manager_name = lineManager
+                ? `${lineManager.first_name || ''} ${lineManager.last_name || ''}`.trim() || null
+                : null;
+            const line_manager_email = lineManager?.email || null;
+            const line_manager_mobile = lineManager?.mobile || null;
             const learner_forename = learner.first_name;
             const learner_surname = learner.last_name;
 
@@ -992,6 +999,8 @@ class LearnerController {
                     next_session_date_key: next_session_date_key,
                     planned_review_date: planned_review_date,
                     line_manager_name: line_manager_name,
+                    line_manager_email: line_manager_email,
+                    line_manager_mobile: line_manager_mobile,
                     learner_forename: learner_forename,
                     learner_surname: learner_surname,
                     list_assessors: list_assessors,
