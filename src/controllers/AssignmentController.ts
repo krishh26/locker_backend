@@ -14,6 +14,21 @@ import { AssignmentReview } from "../entity/AssignmentReview.entity";
 import { AssessmentMethod, AssessmentStatus } from "../util/constants";
 import { applyLearnerScope, canAccessOrganisation, canAccessCentre, getScopeContext, canEmployerAccessLearnerUser, employerCanAccessCourseForLearner } from "../util/organisationFilter";
 class AssignmentController {
+    /** Trainer notes. Learners must not read or overwrite them. */
+    private static requesterCanSeeImprovement(req: CustomRequest): boolean {
+        const roles: string[] = req.user?.roles || (req.user?.role ? [req.user.role] : []);
+        return roles.some((role) =>
+            [UserRole.Trainer, UserRole.Admin, UserRole.IQA, UserRole.MasterAdmin].includes(role as UserRole)
+        );
+    }
+
+    private static omitImprovement<T extends Record<string, unknown>>(req: CustomRequest, row: T): T {
+        if (AssignmentController.requesterCanSeeImprovement(req)) return row;
+        const copy = { ...row };
+        delete copy.points_for_improvement;
+        return copy;
+    }
+
     /**
      * Check if user is authorized to access an assignment
      * Users can access assignments if:
@@ -233,7 +248,9 @@ class AssignmentController {
                 declaration,
                 evidence_time_log: evidence_time_log || false,
                 learner_comments,
-                points_for_improvement,
+                points_for_improvement: AssignmentController.requesterCanSeeImprovement(req)
+                    ? points_for_improvement
+                    : undefined,
                 assessment_method: AssignmentController.parseAssessmentMethod(assessment_method),
                 session,
                 grade,
@@ -246,7 +263,7 @@ class AssignmentController {
             res.status(200).json({
                 message: "Assignment created successfully",
                 status: true,
-                data: savedAssignment,
+                data: AssignmentController.omitImprovement(req, savedAssignment as any),
             });
 
         } catch (error) {
@@ -347,8 +364,10 @@ class AssignmentController {
                 external_feedback ?? assignment.external_feedback;
             assignment.learner_comments =
                 learner_comments ?? assignment.learner_comments;
-            assignment.points_for_improvement =
-                points_for_improvement ?? assignment.points_for_improvement;
+            if (AssignmentController.requesterCanSeeImprovement(req)) {
+                assignment.points_for_improvement =
+                    points_for_improvement ?? assignment.points_for_improvement;
+            }
             if (assessment_method !== undefined) {
                 assignment.assessment_method =
                     AssignmentController.parseAssessmentMethod(assessment_method);
@@ -362,7 +381,7 @@ class AssignmentController {
             return res.status(200).json({
                 message: "Assignment updated successfully",
                 status: true,
-                data: updatedAssignment,
+                data: AssignmentController.omitImprovement(req, updatedAssignment as any),
             });
         } catch (error: any) {
             return res.status(500).json({
@@ -556,10 +575,12 @@ class AssignmentController {
                 mappingByAssignment.get(aid)!.push(m);
             });
 
-            const result = assignments.map(a => ({
-                ...a,
-                mappings: mappingByAssignment.get(a.assignment_id) || [],
-            }));
+            const result = assignments.map(a =>
+                AssignmentController.omitImprovement(req, {
+                    ...a,
+                    mappings: mappingByAssignment.get(a.assignment_id) || [],
+                } as any)
+            );
 
             /* ================= RESPONSE ================= */
             return res.status(200).json({
@@ -698,6 +719,53 @@ class AssignmentController {
             if (!rolesToProcess.length) {
                 return res.status(400).json({
                     message: "role or roles[] is required",
+                    status: false,
+                });
+            }
+
+            const signatureRoles = ["Learner", "Trainer", "Employer", "IQA"];
+            if (rolesToProcess.some((r) => !signatureRoles.includes(r))) {
+                return res.status(400).json({
+                    message: "Invalid signature role",
+                    status: false,
+                });
+            }
+
+            const assignmentRepo = AppDataSource.getRepository(Assignment);
+            const assignment = await assignmentRepo.findOne({
+                where: { assignment_id: assignmentId },
+                relations: ["user"],
+            });
+            if (!assignment) {
+                return res.status(404).json({
+                    message: "Assignment not found",
+                    status: false,
+                });
+            }
+
+            const callerRoles: string[] = req.user.roles || [req.user.role];
+            const canAccess = await AssignmentController.isUserAuthorizedForAssignment(
+                req.user.user_id,
+                callerRoles,
+                assignment
+            );
+            if (!canAccess) {
+                return res.status(403).json({
+                    message: "You are not authorized to request signatures for this assignment",
+                    status: false,
+                });
+            }
+
+            // The evidence form lets a trainer request any signature row.
+            // A learner can request only their own Learner row. No tighter staff matrix exists.
+            const canRequestStaffSignatures = callerRoles.some((role) =>
+                [UserRole.Trainer, UserRole.Admin, UserRole.MasterAdmin].includes(role as UserRole)
+            );
+            const requestsStaffRole = rolesToProcess.some((r) => r !== "Learner");
+            const ownsAssignment = assignment.user?.user_id === req.user.user_id;
+            if (!canRequestStaffSignatures && (requestsStaffRole || !ownsAssignment)) {
+                return res.status(403).json({
+                    message: "Not authorized to request this signature role",
                     status: false,
                 });
             }
@@ -1069,7 +1137,9 @@ class AssignmentController {
                     trainer_feedback: assignment.trainer_feedback,
                     external_feedback: assignment.external_feedback,
                     learner_comments: assignment.learner_comments,
-                    points_for_improvement: assignment.points_for_improvement,
+                    ...(AssignmentController.requesterCanSeeImprovement(req)
+                        ? { points_for_improvement: assignment.points_for_improvement }
+                        : {}),
                     assessment_method: assignment.assessment_method,
                     session: assignment.session,
                     grade: assignment.grade,
@@ -1149,7 +1219,7 @@ class AssignmentController {
             return res.status(200).json({
                 message: "File reuploaded successfully",
                 status: true,
-                data: updated,
+                data: AssignmentController.omitImprovement(req, updated as any),
             });
         } catch (error: any) {
             return res.status(500).json({
