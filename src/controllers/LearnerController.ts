@@ -3465,6 +3465,10 @@ class LearnerController {
                 applyOrgFilterOnUserAlias,
                 applyCentreUserFilter,
             });
+            // computeOffTrackLearners returns one row per off-track course; count distinct learners
+            const offTrackLearnersCount = new Set(
+                offTrackLearners.map((item) => item.learner.learner_id)
+            ).size;
 
             const data = {
                 active_learners_count: Number(activeLearnersCountRaw?.count || 0),
@@ -3489,7 +3493,7 @@ class LearnerController {
                 learners_not_on_sample_plan_count: Number(learnersNotOnSamplePlanCountRaw?.count || 0),
                 risk_ratings_count: Number(riskRatingCountRaw?.count || 0),
                 gateway_learners_count: Number(gatewayLearnersCountRaw?.count || 0),
-                off_track_learners_count: offTrackLearners.length,
+                off_track_learners_count: offTrackLearnersCount,
                 totalCourses: totalCourses,
                 totalLicenses: totalLicenses,
                 totalLicenseRemaining: totalLicenses - totalLicensesUsed,
